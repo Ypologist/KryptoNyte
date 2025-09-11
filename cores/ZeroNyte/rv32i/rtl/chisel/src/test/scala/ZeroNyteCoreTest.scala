@@ -1,8 +1,9 @@
-package ZeroNyteCore
+package ZeroNyte
 
 import chisel3._
 import chisel3.simulator.EphemeralSimulator._
 import org.scalatest.flatspec.AnyFlatSpec
+import ZeroNyte.ZeroNyteCore
 
 class ZeroNyteCoreTest extends AnyFlatSpec {
 

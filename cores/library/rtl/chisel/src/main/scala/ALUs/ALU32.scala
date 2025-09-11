@@ -19,7 +19,6 @@ object ALU32 {
     val SRA  = "b01011".U
     val SLT  = "b00100".U  
     val SLTU = "b00110".U
-
   }
 }
 
