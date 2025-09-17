@@ -26,7 +26,7 @@ lazy val library = (project in file("library/rtl/chisel"))
     Compile / run / fork := true,
     Compile / run / javaOptions ++= Seq(
       "-Xmx4G",
-      "-Dchisel.firtool=true",
+      "-Dchisel.firtool.path=/usr/local/bin/firtool",
       "-Dorg.slf4j.simpleLogger.defaultLogLevel=WARN",
       "-Dorg.slf4j.simpleLogger.showDateTime=true",
       "-Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd HH:mm:ss"
@@ -56,7 +56,7 @@ lazy val zeroNyte = (project in file("ZeroNyte/rv32i/rtl/chisel"))
     Compile / run / fork := true,
     Compile / run / javaOptions ++= Seq(
       "-Xmx4G",
-      "-Dchisel.firtool=true",
+      "-Dchisel.firtool.path=/usr/local/bin/firtool",
       "-Dorg.slf4j.simpleLogger.defaultLogLevel=WARN",
       "-Dorg.slf4j.simpleLogger.showDateTime=true",
       "-Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd HH:mm:ss"
