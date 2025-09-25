@@ -3,12 +3,12 @@ package ZeroNyte
 import chisel3._
 import chisel3.simulator.EphemeralSimulator._
 import org.scalatest.flatspec.AnyFlatSpec
-import ZeroNyte.ZeroNyteCore
+import ZeroNyte.ZeroNyteRV32ICore
 
-class ZeroNyteCoreTest extends AnyFlatSpec {
+class ZeroNyteRV32ICoreTest extends AnyFlatSpec {
 
   "ZeroNyteCore" should "fetch and execute instructions correctly" in {
-    simulate(new ZeroNyteCore) { dut =>
+    simulate(new ZeroNyteRV32ICore) { dut =>
       val printDebugInfo = true
       var cycle = 0 // cycle counter
 

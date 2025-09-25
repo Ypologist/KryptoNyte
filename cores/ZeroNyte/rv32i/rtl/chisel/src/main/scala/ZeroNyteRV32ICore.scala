@@ -6,7 +6,7 @@ import Decoders.RV32IDecode
 import ALUs.ALU32
 
 
-class ZeroNyteCore extends Module {
+class ZeroNyteRV32ICore extends Module {
   val io = IO(new Bundle {
     val pc_out    = Output(UInt(32.W))
     val instr_out = Output(UInt(32.W))
@@ -23,7 +23,8 @@ class ZeroNyteCore extends Module {
     0x00100093.U(32.W), // ADDI
     0x00208133.U(32.W)  // ADD
   )
-  val instr = initInstrs(pc >> 2)
+  //val instr = initInstrs(pc >> 2)
+  val instr = initInstrs(pc(log2Ceil(initInstrs.length) + 1, 2))
   io.instr_out := instr
 
   // ---------- Register File ----------
