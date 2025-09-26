@@ -27,7 +27,7 @@ case class RTLGeneratorConfig(
   coreVariant: String = "rv32i",
   
   // Output directories (can be absolute or relative paths)
-  outputRoot: String = "generators/generated",
+  outputRoot: String = "generated",
   firrtlDir: String = "firrtl",
   systemVerilogDir: String = "systemverilog_hierarchical",
   verilogDir: String = "verilog_hierarchical",
