@@ -62,6 +62,51 @@ lazy val zeroNyte = (project in file("ZeroNyte/rv32i/rtl/chisel"))
     commonSettings 
   )
 
+// ----------------- Generators Project -----------------
+// New project for the flexible RTL generation and physical design scripts
+lazy val generators = (project in file("generators"))
+  .dependsOn(library, zeroNyte)
+  .settings(
+    name := "Generators",
+    commonSettings,
+    
+    // Additional dependencies for RTL generation and physical design
+    libraryDependencies ++= Seq(
+      "org.scala-lang.modules" %% "scala-sys-process" % "1.0.0",
+      "com.typesafe" % "config" % "1.4.2"
+    ),
+    
+    // Custom tasks for convenience
+    TaskKey[Unit]("generateRTL") := {
+      (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL").value
+    },
+    
+    TaskKey[Unit]("generatePhysical") := {
+      (Compile / runMain).toTask(" generators.GeneratePhysicalDesign").value
+    },
+    
+    TaskKey[Unit]("generateComplete") := {
+      (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL").value
+      (Compile / runMain).toTask(" generators.GeneratePhysicalDesign").value
+    }
+  )
+
 // ----------------- Root Project -----------------
 lazy val root = (project in file("."))
-  .aggregate(library, zeroNyte)
+  .aggregate(library, zeroNyte, generators)
+  .settings(
+    name := "KryptoNyte",
+    
+    // Custom command aliases for easy access
+    addCommandAlias("genZeroNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family ZeroNyte"),
+    addCommandAlias("genPipeNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family PipeNyte"),
+    addCommandAlias("genTetraNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family TetraNyte"),
+    addCommandAlias("genOctoNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family OctoNyte"),
+    
+    addCommandAlias("physicalZeroNyte", "generators/runMain generators.GeneratePhysicalDesign --module-name ZeroNyteRV32ICore"),
+    addCommandAlias("physicalALU32", "generators/runMain generators.GeneratePhysicalDesign --module-name ALU32"),
+    
+    // Complete flow aliases
+    addCommandAlias("completeZeroNyte", "; genZeroNyte ; physicalZeroNyte"),
+    addCommandAlias("completeALU32", "; generators/runMain generators.GenerateHierarchicalRTL --core-family ZeroNyte ; physicalALU32")
+  )
