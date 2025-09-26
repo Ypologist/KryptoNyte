@@ -13,22 +13,20 @@ All processor cores are implemented in Chisel and generate Verilog for synthesis
 
 ## Github Codespace
 
-Create a normal github codespace. By default, the standard RTL design tools are included.
+Create a normal github codespace. By default, the base RTL tools are included.
 
-## Options
-
-1. RISCV Compiler Toolchain: .devcontainer/install_riscv_compiler_tools.sh
-2. Conformance Tests: .devcontainer/install_uv_python_and_test_enf.sh
-   1. Installs uv
-   2. Installs spike and pk
-   3. (TBD) installs the conformance tests
 
 ## Ubuntu 24.04
 
+Run the following shell scripts from the ROOT respository directory. You can pick and choose.
+
+For example, if you don't need to do physical design, don't run the last script.
+
 1. Base RTL Tools: .devcontainer/install_base_rtl_tools.sh --with-sudo
 2. RISCV Compiler Toolchain: .devcontainer/install_riscv_compiler_tools.sh --with-sudo
-3. Conformance Tests: .devcontainer/install_uv_python_and_test_enf.sh --with-sudo
-
+3. Spike Simulator: .devcontainer/install_uv_python_and_spike_simulator.sh --with-sudo
+4. Conformance Tests: .devcontainer/install_riscv_conformance_tests.sh --with-sudo
+5. Physical Design and RTL generation: .devcontainer/install_skywater_pdk.sh --with-sudo
 
 
 # KryptoNyte Directory Tree
