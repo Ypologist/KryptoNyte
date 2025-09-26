@@ -16,8 +16,7 @@ import scala.util.{Try, Success, Failure}
 
 // Import KryptoNyte modules
 import ALUs.ALU32
-// Try to import ZeroNyteRV32ICore - it should be available since generators depends on zeroNyte
-import _root_.ZeroNyteRV32ICore
+// ZeroNyteRV32ICore will be imported when the zeroNyte project is compiled first
 // Note: RV32IDecode is an object (not a Module class), so it's not imported for RTL generation
 
 // Configuration case class for flexible path management

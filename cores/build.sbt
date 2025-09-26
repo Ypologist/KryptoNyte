@@ -77,16 +77,22 @@ lazy val generators = (project in file("generators"))
       "com.typesafe" % "config" % "1.4.2"
     ),
     
-    // Custom tasks for convenience
+    // Custom tasks for convenience - ensure dependencies are compiled first
     TaskKey[Unit]("generateRTL") := {
+      (library / Compile / compile).value
+      (zeroNyte / Compile / compile).value
       (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL").value
     },
     
     TaskKey[Unit]("generatePhysical") := {
+      (library / Compile / compile).value
+      (zeroNyte / Compile / compile).value
       (Compile / runMain).toTask(" generators.GeneratePhysicalDesign").value
     },
     
     TaskKey[Unit]("generateComplete") := {
+      (library / Compile / compile).value
+      (zeroNyte / Compile / compile).value
       (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL").value
       (Compile / runMain).toTask(" generators.GeneratePhysicalDesign").value
     }
