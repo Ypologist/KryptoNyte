@@ -14,6 +14,11 @@ import java.io.PrintStream
 import java.io.OutputStream
 import scala.util.{Try, Success, Failure}
 
+// Import KryptoNyte modules
+import ALUs.ALU32
+import Decoders.RV32IDecode
+// Note: ZeroNyteRV32ICore doesn't have a package declaration, so it's imported directly
+
 // Configuration case class for flexible path management
 case class RTLGeneratorConfig(
   // Core family and variant
@@ -258,19 +263,10 @@ Environment Variables:
   def getZeroNyteModules(variant: String): Seq[ModuleSpec] = {
     variant match {
       case "rv32i" => Seq(
-        // Import the actual modules from the KryptoNyte project structure
-        // Note: You'll need to add these imports at the top of the file when ready:
-        // import ZeroNyteRV32ICore (from ZeroNyte project)
-        // import ALUs.ALU32 (from library project)  
-        // import Decoders.RV32IDecode (from library project)
-        
-        // For now, using placeholder - uncomment and update imports when ready:
-        // ModuleSpec(() => new ZeroNyteRV32ICore, "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i"),
-        // ModuleSpec(() => new ALUs.ALU32, "ALU32", "32-bit ALU", "ZeroNyte", "rv32i"),
-        // ModuleSpec(() => new Decoders.RV32IDecode, "RV32IDecode", "RV32I instruction decoder", "ZeroNyte", "rv32i")
-        
-        // Placeholder for testing - replace with actual modules
-        ModuleSpec(() => new chisel3.Module { val io = chisel3.IO(new chisel3.Bundle {}) }, "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i")
+        // Use the actual KryptoNyte modules
+        ModuleSpec(() => new ZeroNyteRV32ICore, "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i"),
+        ModuleSpec(() => new ALU32, "ALU32", "32-bit ALU", "ZeroNyte", "rv32i"),
+        ModuleSpec(() => new RV32IDecode, "RV32IDecode", "RV32I instruction decoder", "ZeroNyte", "rv32i")
       )
       case _ => Seq.empty
     }
