@@ -17,20 +17,7 @@ import scala.util.{Try, Success, Failure}
 // Import KryptoNyte modules
 import ALUs.ALU32
 
-// Explicit import for ZeroNyteRV32ICore
-// Since ZeroNyteRV32ICore has no package declaration, we import it directly
-class ZeroNyteRV32ICore extends chisel3.Module {
-  val io = chisel3.IO(new chisel3.Bundle {
-    val pc_out    = chisel3.Output(chisel3.UInt(32.W))
-    val instr_out = chisel3.Output(chisel3.UInt(32.W))
-    val result    = chisel3.Output(chisel3.UInt(32.W))
-  })
-  // Placeholder implementation - this will be replaced by the actual module
-  io.pc_out := 0.U
-  io.instr_out := 0.U
-  io.result := 0.U
-}
-
+// For now, only generate ALU32 until we solve the ZeroNyteRV32ICore import issue
 // Note: RV32IDecode is an object (not a Module class), so it's not imported for RTL generation
 
 // Configuration case class for flexible path management
@@ -277,9 +264,9 @@ Environment Variables:
   def getZeroNyteModules(variant: String): Seq[ModuleSpec] = {
     variant match {
       case "rv32i" => Seq(
-        // Use the actual KryptoNyte modules (only classes that extend Module)
-        ModuleSpec(() => new ZeroNyteRV32ICore, "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i"),
+        // Use only ALU32 for now until we solve the ZeroNyteRV32ICore import issue
         ModuleSpec(() => new ALU32, "ALU32", "32-bit ALU", "ZeroNyte", "rv32i")
+        // TODO: Add ZeroNyteRV32ICore once import issue is resolved
         // Note: RV32IDecode is an object, not a Module class, so it can't be instantiated
       )
       case _ => Seq.empty
