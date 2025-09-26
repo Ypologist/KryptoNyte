@@ -71,8 +71,9 @@ lazy val generators = (project in file("generators"))
     commonSettings,
     
     // Additional dependencies for RTL generation and physical design
+    // Note: scala-sys-process is part of Scala standard library since 2.13
+    // No need to add it as external dependency
     libraryDependencies ++= Seq(
-      "org.scala-lang.modules" %% "scala-sys-process" % "1.0.0",
       "com.typesafe" % "config" % "1.4.2"
     ),
     
