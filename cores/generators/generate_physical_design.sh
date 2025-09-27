@@ -3,9 +3,19 @@
 # KryptoNyte Physical Design Flow with OpenLane2
 # Simple shell script to run complete RTL-to-GDSII flow using OpenLane2
 # Place in: KryptoNyte/cores/generators/
-# Run from: KryptoNyte/cores/ with ./generators/generate_physical_design.sh
+# Can be run from anywhere, but works best from KryptoNyte/cores/
 
 set -e  # Exit on any error
+
+# Detect script location and set working directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CORES_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Change to cores directory if not already there
+if [ "$(basename "$(pwd)")" != "cores" ]; then
+    echo "Changing to cores directory: $CORES_DIR"
+    cd "$CORES_DIR"
+fi
 
 # Color codes for output
 RED='\033[0;31m'
@@ -354,12 +364,15 @@ run_openlane2_flow() {
     # Change to OpenLane2 directory and run
     cd "$OPENLANE2_PATH"
     
+    # OpenLane2 expects the config file as an argument
+    local config_file="$design_dir/config.json"
+    
     if [ "$VERBOSE" = true ]; then
         # Show output in real-time and save to log
-        nix-shell --run "openlane --design-dir $design_dir" 2>&1 | tee "$log_file"
+        nix-shell --run "openlane $config_file" 2>&1 | tee "$log_file"
     else
         # Only save to log file
-        nix-shell --run "openlane --design-dir $design_dir" > "$log_file" 2>&1
+        nix-shell --run "openlane $config_file" > "$log_file" 2>&1
     fi
     
     local exit_code=${PIPESTATUS[0]}
