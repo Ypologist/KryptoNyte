@@ -144,6 +144,142 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Function to get version of a command
+get_command_version() {
+    local cmd="$1"
+    local version_flag="${2:---version}"
+    
+    if command_exists "$cmd"; then
+        "$cmd" "$version_flag" 2>/dev/null | head -1 || echo "Unknown version"
+    else
+        echo "Not installed"
+    fi
+}
+
+# Function to check if SkyWater PDK is installed
+check_skywater_pdk() {
+    local skywater_dir="$INSTALL_DIR/skywater-pdk"
+    
+    if [ -d "$skywater_dir" ] && [ -d "$skywater_dir/libraries" ]; then
+        print_step "Found existing SkyWater PDK installation at: $skywater_dir"
+        
+        # Try to get version information
+        if [ -d "$skywater_dir/.git" ]; then
+            cd "$skywater_dir"
+            local current_branch=$(git branch --show-current 2>/dev/null || echo "unknown")
+            local last_commit=$(git log -1 --format="%h %s" 2>/dev/null || echo "unknown")
+            print_step "Current version: branch '$current_branch', commit: $last_commit"
+        fi
+        return 0
+    else
+        print_step "SkyWater PDK not found at: $skywater_dir"
+        return 1
+    fi
+}
+
+# Function to check if Magic VLSI is installed
+check_magic() {
+    local magic_path="$INSTALL_DIR/magic-install/bin/magic"
+    
+    if [ -f "$magic_path" ] && [ -x "$magic_path" ]; then
+        print_step "Found existing Magic VLSI installation at: $magic_path"
+        local version=$(get_command_version "$magic_path" "-noconsole -dnull -rcfile /dev/null")
+        print_step "Current version: $version"
+        return 0
+    elif command_exists magic; then
+        print_step "Found Magic VLSI in system PATH"
+        local version=$(get_command_version "magic" "-noconsole -dnull -rcfile /dev/null")
+        print_step "Current version: $version"
+        return 0
+    else
+        print_step "Magic VLSI not found"
+        return 1
+    fi
+}
+
+# Function to check if Open PDK is installed
+check_open_pdk() {
+    local open_pdk_dir="$INSTALL_DIR/open_pdks"
+    local pdk_install_dir="$INSTALL_DIR/pdks"
+    
+    if [ -d "$open_pdk_dir" ] && [ -d "$pdk_install_dir" ]; then
+        print_step "Found existing Open PDK installation"
+        print_step "Source: $open_pdk_dir"
+        print_step "PDKs: $pdk_install_dir"
+        
+        # Check for Sky130 PDK variants
+        local sky130_variants=$(find "$pdk_install_dir" -name "sky130*" -type d 2>/dev/null | wc -l)
+        if [ "$sky130_variants" -gt 0 ]; then
+            print_step "Found $sky130_variants Sky130 PDK variants"
+        fi
+        
+        # Try to get version information
+        if [ -d "$open_pdk_dir/.git" ]; then
+            cd "$open_pdk_dir"
+            local current_branch=$(git branch --show-current 2>/dev/null || echo "unknown")
+            local last_commit=$(git log -1 --format="%h %s" 2>/dev/null || echo "unknown")
+            print_step "Current version: branch '$current_branch', commit: $last_commit"
+        fi
+        return 0
+    else
+        print_step "Open PDK not found"
+        return 1
+    fi
+}
+
+# Function to check if OpenROAD is installed
+check_openroad() {
+    if command_exists openroad; then
+        print_step "Found existing OpenROAD installation"
+        local version=$(get_command_version "openroad" "-version")
+        print_step "Current version: $version"
+        local install_path=$(which openroad)
+        print_step "Installation path: $install_path"
+        return 0
+    else
+        print_step "OpenROAD not found"
+        return 1
+    fi
+}
+
+# Function to prompt user for upgrade decision
+prompt_upgrade() {
+    local tool_name="$1"
+    local current_info="$2"
+    
+    echo -e "\n${YELLOW}$tool_name is already installed.${NC}"
+    if [ -n "$current_info" ]; then
+        echo -e "${CYAN}Current installation: $current_info${NC}"
+    fi
+    
+    echo -e "${CYAN}Options:${NC}"
+    echo -e "  ${WHITE}1)${NC} Keep existing installation"
+    echo -e "  ${WHITE}2)${NC} Upgrade/reinstall"
+    echo -e "  ${WHITE}3)${NC} Skip this tool"
+    
+    while true; do
+        echo -n "Please choose (1/2/3): "
+        read -r choice
+        case "$choice" in
+            1)
+                print_success "Keeping existing $tool_name installation"
+                return 0  # Keep existing
+                ;;
+            2)
+                print_step "Will upgrade/reinstall $tool_name"
+                return 1  # Upgrade/reinstall
+                ;;
+            3)
+                print_warning "Skipping $tool_name installation"
+                return 2  # Skip
+                ;;
+            *)
+                echo -e "${RED}Invalid choice. Please enter 1, 2, or 3.${NC}"
+                ;;
+        esac
+    done
+}
+
 # Function to check system requirements
 check_requirements() {
     print_step "Checking system requirements"
@@ -278,44 +414,41 @@ install_skywater_pdk() {
     
     local skywater_dir="$INSTALL_DIR/skywater-pdk"
     
-    print_step "Checking SkyWater PDK repository"
-    if [ -d "$skywater_dir" ]; then
-        print_warning "SkyWater PDK directory already exists: $skywater_dir"
-        echo -n "Do you want to overwrite it? (y/N): "
-        read -r response
-        case "$response" in
-            [yY]|[yY][eE][sS])
-                print_step "Removing existing SkyWater PDK directory"
-                rm -rf "$skywater_dir"
-                print_step "Cloning fresh SkyWater PDK repository"
-                if git clone --depth 1 --branch "$SKYWATER_VERSION" \
-                    https://github.com/google/skywater-pdk.git "$skywater_dir"; then
-                    SKYWATER_PDK_INSTALLED=true
-                else
-                    print_error "Failed to clone SkyWater PDK repository"
-                    return 1
-                fi
-                ;;
-            *)
-                print_warning "Skipping SkyWater PDK installation - using existing directory"
-                print_step "Attempting to update existing repository"
-                cd "$skywater_dir"
-                git fetch origin 2>/dev/null || print_warning "Could not fetch updates"
-                git checkout "$SKYWATER_VERSION" 2>/dev/null || print_warning "Could not checkout $SKYWATER_VERSION"
-                git pull origin "$SKYWATER_VERSION" 2>/dev/null || print_warning "Could not pull latest changes"
-                # Mark as installed since we're using existing directory
+    # Check if SkyWater PDK is already installed
+    if check_skywater_pdk; then
+        local current_info="$skywater_dir"
+        if [ -d "$skywater_dir/.git" ]; then
+            cd "$skywater_dir"
+            local current_branch=$(git branch --show-current 2>/dev/null || echo "unknown")
+            current_info="$current_info (branch: $current_branch)"
+        fi
+        
+        prompt_upgrade "SkyWater PDK" "$current_info"
+        local upgrade_choice=$?
+        
+        case $upgrade_choice in
+            0)  # Keep existing
                 SKYWATER_PDK_INSTALLED=true
+                return 0
+                ;;
+            1)  # Upgrade/reinstall
+                print_step "Removing existing SkyWater PDK directory for fresh installation"
+                rm -rf "$skywater_dir"
+                ;;
+            2)  # Skip
+                return 0
                 ;;
         esac
+    fi
+    
+    # Install SkyWater PDK
+    print_step "Cloning SkyWater PDK repository"
+    if git clone --depth 1 --branch "$SKYWATER_VERSION" \
+        https://github.com/google/skywater-pdk.git "$skywater_dir"; then
+        SKYWATER_PDK_INSTALLED=true
     else
-        print_step "Cloning SkyWater PDK repository"
-        if git clone --depth 1 --branch "$SKYWATER_VERSION" \
-            https://github.com/google/skywater-pdk.git "$skywater_dir"; then
-            SKYWATER_PDK_INSTALLED=true
-        else
-            print_error "Failed to clone SkyWater PDK repository"
-            return 1
-        fi
+        print_error "Failed to clone SkyWater PDK repository"
+        return 1
     fi
     
     cd "$skywater_dir"
@@ -347,22 +480,42 @@ install_open_pdk() {
     print_banner "Installing Open PDK" "$PURPLE"
     
     local open_pdk_dir="$INSTALL_DIR/open_pdks"
+    local pdk_install_dir="$INSTALL_DIR/pdks"
+    
+    # Check if Open PDK is already installed
+    if check_open_pdk; then
+        local current_info="$open_pdk_dir"
+        if [ -d "$open_pdk_dir/.git" ]; then
+            cd "$open_pdk_dir"
+            local current_branch=$(git branch --show-current 2>/dev/null || echo "unknown")
+            current_info="$current_info (branch: $current_branch)"
+        fi
+        
+        prompt_upgrade "Open PDK" "$current_info"
+        local upgrade_choice=$?
+        
+        case $upgrade_choice in
+            0)  # Keep existing
+                OPEN_PDK_INSTALLED=true
+                return 0
+                ;;
+            1)  # Upgrade/reinstall
+                print_step "Removing existing Open PDK installation for fresh build"
+                rm -rf "$open_pdk_dir" "$pdk_install_dir"
+                ;;
+            2)  # Skip
+                return 0
+                ;;
+        esac
+    fi
     
     print_step "Cloning Open PDK repository"
-    if [ -d "$open_pdk_dir" ]; then
-        print_step "Updating existing Open PDK repository"
-        cd "$open_pdk_dir"
-        git fetch origin
-        git checkout "$OPEN_PDK_VERSION"
-        git pull origin "$OPEN_PDK_VERSION"
-    else
-        # Try to clone with the specified branch, fallback to master if main doesn't exist
-        if ! git clone --depth 1 --branch "$OPEN_PDK_VERSION" \
-            https://github.com/RTimothyEdwards/open_pdks.git "$open_pdk_dir"; then
-            print_warning "Failed to clone with branch $OPEN_PDK_VERSION, trying master"
-            git clone --depth 1 --branch master \
-                https://github.com/RTimothyEdwards/open_pdks.git "$open_pdk_dir"
-        fi
+    # Try to clone with the specified branch, fallback to master if main doesn't exist
+    if ! git clone --depth 1 --branch "$OPEN_PDK_VERSION" \
+        https://github.com/RTimothyEdwards/open_pdks.git "$open_pdk_dir"; then
+        print_warning "Failed to clone with branch $OPEN_PDK_VERSION, trying master"
+        git clone --depth 1 --branch master \
+            https://github.com/RTimothyEdwards/open_pdks.git "$open_pdk_dir"
     fi
     
     cd "$open_pdk_dir"
@@ -380,7 +533,7 @@ install_open_pdk() {
     ./configure --enable-sky130-pdk="$INSTALL_DIR/skywater-pdk" \
                 --enable-alpha-sky130 \
                 --with-magic="$INSTALL_DIR/magic-install/bin/magic" \
-                --prefix="$INSTALL_DIR/pdks"
+                --prefix="$pdk_install_dir"
     
     print_step "Building Open PDK (this may take a while...)"
     make -j$(nproc)
@@ -401,6 +554,34 @@ install_magic() {
     print_banner "Installing Magic VLSI Layout Tool" "$YELLOW"
     
     local magic_dir="$INSTALL_DIR/magic"
+    local magic_install_dir="$INSTALL_DIR/magic-install"
+    
+    # Check if Magic is already installed
+    if check_magic; then
+        local current_info=""
+        if [ -f "$magic_install_dir/bin/magic" ]; then
+            current_info="$magic_install_dir/bin/magic"
+        elif command_exists magic; then
+            current_info="$(which magic) (system installation)"
+        fi
+        
+        prompt_upgrade "Magic VLSI Layout Tool" "$current_info"
+        local upgrade_choice=$?
+        
+        case $upgrade_choice in
+            0)  # Keep existing
+                MAGIC_INSTALLED=true
+                return 0
+                ;;
+            1)  # Upgrade/reinstall
+                print_step "Removing existing Magic installation for fresh build"
+                rm -rf "$magic_dir" "$magic_install_dir"
+                ;;
+            2)  # Skip
+                return 0
+                ;;
+        esac
+    fi
     
     print_step "Installing Magic dependencies"
     local magic_deps=(
@@ -418,19 +599,12 @@ install_magic() {
     fi
     
     print_step "Cloning Magic repository"
-    if [ -d "$magic_dir" ]; then
-        print_step "Updating existing Magic repository"
-        cd "$magic_dir"
-        git fetch origin
-        git pull origin master
-    else
-        git clone https://github.com/RTimothyEdwards/magic.git "$magic_dir"
-    fi
+    git clone https://github.com/RTimothyEdwards/magic.git "$magic_dir"
     
     cd "$magic_dir"
     
     print_step "Configuring Magic"
-    ./configure --prefix="$INSTALL_DIR/magic-install"
+    ./configure --prefix="$magic_install_dir"
     
     print_step "Building Magic"
     make -j$(nproc)
@@ -629,11 +803,11 @@ verify_installation() {
         fi
         
         echo -e "\n${CYAN}📋 Component Status Summary:${NC}"
-        echo -e "  📦 SkyWater PDK Source: ${GREEN}✅ Installed${NC}"
-        echo -e "  🔧 Magic VLSI Tool: ${GREEN}✅ Installed${NC}"
-        echo -e "  ⚙️  Open PDK Processing: ${GREEN}✅ Completed${NC}"
-        echo -e "  🏗️  OpenROAD Physical Design: ${GREEN}✅ Installed${NC}"
-        echo -e "  🌍 Environment Setup: ${GREEN}✅ Configured${NC}"
+        [ "$SKYWATER_PDK_INSTALLED" = true ] && echo -e "  📦 SkyWater PDK Source: ${GREEN}✅ Installed${NC}" || echo -e "  📦 SkyWater PDK Source: ${RED}❌ Failed${NC}"
+        [ "$MAGIC_INSTALLED" = true ] && echo -e "  🔧 Magic VLSI Tool: ${GREEN}✅ Installed${NC}" || echo -e "  🔧 Magic VLSI Tool: ${RED}❌ Failed${NC}"
+        [ "$OPEN_PDK_INSTALLED" = true ] && echo -e "  ⚙️  Open PDK Processing: ${GREEN}✅ Completed${NC}" || echo -e "  ⚙️  Open PDK Processing: ${RED}❌ Failed${NC}"
+        [ "$OPENROAD_INSTALLED" = true ] && echo -e "  🏗️  OpenROAD Physical Design: ${GREEN}✅ Installed${NC}" || echo -e "  🏗️  OpenROAD Physical Design: ${YELLOW}⚠️  Not Available${NC}"
+        [ "$ENVIRONMENT_SETUP" = true ] && echo -e "  🌍 Environment Setup: ${GREEN}✅ Configured${NC}" || echo -e "  🌍 Environment Setup: ${YELLOW}⚠️  Incomplete${NC}"
         
         echo -e "\n${CYAN}📁 Installation Locations:${NC}"
         echo -e "  📂 Installation Root: ${WHITE}$INSTALL_DIR${NC}"
@@ -680,6 +854,33 @@ verify_installation() {
 # Install OpenROAD for physical design flow
 install_openroad() {
     print_banner "Installing OpenROAD" "$PURPLE"
+    
+    # Check if OpenROAD is already installed
+    if check_openroad; then
+        local current_info=""
+        if command_exists openroad; then
+            local version=$(get_command_version "openroad" "-version")
+            local install_path=$(which openroad)
+            current_info="$install_path ($version)"
+        fi
+        
+        prompt_upgrade "OpenROAD" "$current_info"
+        local upgrade_choice=$?
+        
+        case $upgrade_choice in
+            0)  # Keep existing
+                OPENROAD_INSTALLED=true
+                return 0
+                ;;
+            1)  # Upgrade/reinstall
+                print_step "Will attempt to upgrade/reinstall OpenROAD"
+                # Note: We don't remove system-installed OpenROAD, just install over it
+                ;;
+            2)  # Skip
+                return 0
+                ;;
+        esac
+    fi
     
     # Install jq if needed for JSON parsing
     if ! command_exists jq; then
@@ -785,6 +986,34 @@ main() {
     echo -e "  SkyWater Version: ${WHITE}$SKYWATER_VERSION${NC}"
     echo -e "  Open PDK Version: ${WHITE}$OPEN_PDK_VERSION${NC}"
     echo -e "  Use Sudo: ${WHITE}$USE_SUDO${NC}"
+    
+    # Quick tool detection summary
+    print_banner "Checking Existing Tools" "$CYAN"
+    echo -e "${CYAN}Tool Detection Summary:${NC}"
+    
+    if check_skywater_pdk >/dev/null 2>&1; then
+        echo -e "  📦 SkyWater PDK: ${GREEN}Found${NC}"
+    else
+        echo -e "  📦 SkyWater PDK: ${RED}Not Found${NC}"
+    fi
+    
+    if check_magic >/dev/null 2>&1; then
+        echo -e "  🔧 Magic VLSI: ${GREEN}Found${NC}"
+    else
+        echo -e "  🔧 Magic VLSI: ${RED}Not Found${NC}"
+    fi
+    
+    if check_open_pdk >/dev/null 2>&1; then
+        echo -e "  ⚙️  Open PDK: ${GREEN}Found${NC}"
+    else
+        echo -e "  ⚙️  Open PDK: ${RED}Not Found${NC}"
+    fi
+    
+    if check_openroad >/dev/null 2>&1; then
+        echo -e "  🏗️  OpenROAD: ${GREEN}Found${NC}"
+    else
+        echo -e "  🏗️  OpenROAD: ${RED}Not Found${NC}"
+    fi
     
     # Confirm installation
     if [ "$VERBOSE" = true ]; then
