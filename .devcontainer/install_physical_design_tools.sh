@@ -244,8 +244,8 @@ create_install_dir() {
         read -p "Do you want to continue and potentially overwrite existing files? (y/N): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_error "Installation cancelled by user"
-            exit 1
+            print_warning "Installation cancelled by user - some tools may not be installed"
+            return 1
         fi
     fi
     
@@ -288,8 +288,13 @@ install_skywater_pdk() {
                 print_step "Removing existing SkyWater PDK directory"
                 rm -rf "$skywater_dir"
                 print_step "Cloning fresh SkyWater PDK repository"
-                git clone --depth 1 --branch "$SKYWATER_VERSION" \
-                    https://github.com/google/skywater-pdk.git "$skywater_dir"
+                if git clone --depth 1 --branch "$SKYWATER_VERSION" \
+                    https://github.com/google/skywater-pdk.git "$skywater_dir"; then
+                    SKYWATER_PDK_INSTALLED=true
+                else
+                    print_error "Failed to clone SkyWater PDK repository"
+                    return 1
+                fi
                 ;;
             *)
                 print_warning "Skipping SkyWater PDK installation - using existing directory"
@@ -298,12 +303,19 @@ install_skywater_pdk() {
                 git fetch origin 2>/dev/null || print_warning "Could not fetch updates"
                 git checkout "$SKYWATER_VERSION" 2>/dev/null || print_warning "Could not checkout $SKYWATER_VERSION"
                 git pull origin "$SKYWATER_VERSION" 2>/dev/null || print_warning "Could not pull latest changes"
+                # Mark as installed since we're using existing directory
+                SKYWATER_PDK_INSTALLED=true
                 ;;
         esac
     else
         print_step "Cloning SkyWater PDK repository"
-        git clone --depth 1 --branch "$SKYWATER_VERSION" \
-            https://github.com/google/skywater-pdk.git "$skywater_dir"
+        if git clone --depth 1 --branch "$SKYWATER_VERSION" \
+            https://github.com/google/skywater-pdk.git "$skywater_dir"; then
+            SKYWATER_PDK_INSTALLED=true
+        else
+            print_error "Failed to clone SkyWater PDK repository"
+            return 1
+        fi
     fi
     
     cd "$skywater_dir"
@@ -327,9 +339,7 @@ install_skywater_pdk() {
         git submodule update --init libraries/sky130_fd_sc_hs/latest --depth 1 || true
     }
     
-    # Mark as successfully installed
-    SKYWATER_PDK_INSTALLED=true
-    print_success "SkyWater PDK installed"
+    print_success "SkyWater PDK installation process completed"
 }
 
 # Function to install Open PDK
@@ -568,6 +578,27 @@ verify_installation() {
         ((errors++))
     fi
     
+    # Check OpenROAD installation status
+    if [ "$OPENROAD_INSTALLED" = true ]; then
+        print_success "OpenROAD installation completed successfully"
+        
+        # Optional: Test OpenROAD executable if it exists
+        if command -v openroad >/dev/null 2>&1; then
+            if openroad -version >/dev/null 2>&1; then
+                print_success "OpenROAD executable verified and working"
+            else
+                print_warning "OpenROAD installed but version check failed"
+                ((warnings++))
+            fi
+        else
+            print_warning "OpenROAD marked as installed but not found in PATH"
+            ((warnings++))
+        fi
+    else
+        print_warning "OpenROAD installation failed - physical design flow will be limited"
+        ((warnings++))
+    fi
+    
     # Check environment setup status
     if [ "$ENVIRONMENT_SETUP" = true ]; then
         print_success "Environment configuration completed successfully"
@@ -648,63 +679,100 @@ verify_installation() {
 
 # Install OpenROAD for physical design flow
 install_openroad() {
-    print_header "Installing OpenROAD"
+    print_banner "Installing OpenROAD" "$PURPLE"
+    
+    # Install jq if needed for JSON parsing
+    if ! command_exists jq; then
+        print_step "Installing jq for JSON parsing"
+        if [ "$USE_SUDO" = true ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y jq
+        else
+            print_warning "jq not available and cannot install without sudo"
+            print_step "Attempting alternative OpenROAD installation method"
+        fi
+    fi
     
     # OpenROAD is available as a pre-built binary from GitHub releases
     print_step "Fetching OpenROAD release information"
     
     # Get the latest OpenROAD release URL
-    OPENROAD_URL=$(curl -s https://api.github.com/repos/The-OpenROAD-Project/OpenROAD/releases/latest | \
-        jq -r '.assets[] | select(.name | contains("ubuntu22")) | select(.name | contains("amd64")) | .browser_download_url')
+    if command_exists jq; then
+        OPENROAD_URL=$(curl -s https://api.github.com/repos/The-OpenROAD-Project/OpenROAD/releases/latest | \
+            jq -r '.assets[] | select(.name | contains("ubuntu22")) | select(.name | contains("amd64")) | .browser_download_url')
+    else
+        OPENROAD_URL=""
+    fi
     
     if [ -z "$OPENROAD_URL" ] || [ "$OPENROAD_URL" = "null" ]; then
         print_warning "Failed to fetch OpenROAD release information, trying alternative installation"
         
         # Alternative: Install from OpenROAD PPA
-        print_step "Adding OpenROAD PPA"
-        if run_cmd add-apt-repository -y ppa:openroad/ppa; then
-            run_cmd apt-get update -qq
-            print_step "Installing OpenROAD from PPA"
-            if run_cmd apt-get install -y openroad; then
-                print_success "OpenROAD installed from PPA"
-                OPENROAD_INSTALLED=true
-            else
-                print_warning "OpenROAD installation failed - physical design flow will be limited"
-            fi
-        else
-            print_warning "Could not add OpenROAD PPA - physical design flow will be limited"
-        fi
-    else
-        print_step "Downloading OpenROAD"
-        if ! wget "$OPENROAD_URL" -O /tmp/openroad.deb; then
-            print_error "Failed to download OpenROAD"
-            print_warning "Physical design flow will be limited without OpenROAD"
-        else
-            print_step "Installing OpenROAD"
-            if run_cmd dpkg -i /tmp/openroad.deb; then
-                print_success "OpenROAD installed"
-                OPENROAD_INSTALLED=true
-            else
-                print_step "Fixing dependencies"
-                run_cmd apt-get install -f -y
-                if run_cmd dpkg -i /tmp/openroad.deb; then
-                    print_success "OpenROAD installed"
+        if [ "$USE_SUDO" = true ]; then
+            print_step "Adding OpenROAD PPA"
+            if sudo add-apt-repository -y ppa:openroad/ppa 2>/dev/null; then
+                sudo apt-get update -qq
+                print_step "Installing OpenROAD from PPA"
+                if sudo apt-get install -y openroad; then
+                    print_success "OpenROAD installed from PPA"
                     OPENROAD_INSTALLED=true
                 else
                     print_warning "OpenROAD installation failed - physical design flow will be limited"
                 fi
+            else
+                print_warning "Could not add OpenROAD PPA - trying direct installation"
+                # Try installing from Ubuntu repositories as fallback
+                if sudo apt-get install -y openroad 2>/dev/null; then
+                    print_success "OpenROAD installed from Ubuntu repositories"
+                    OPENROAD_INSTALLED=true
+                else
+                    print_warning "OpenROAD not available - physical design flow will be limited"
+                fi
+            fi
+        else
+            print_warning "Cannot install OpenROAD without sudo - physical design flow will be limited"
+        fi
+    else
+        print_step "Downloading OpenROAD"
+        if wget "$OPENROAD_URL" -O /tmp/openroad.deb 2>/dev/null; then
+            print_step "Installing OpenROAD from downloaded package"
+            if [ "$USE_SUDO" = true ]; then
+                if sudo dpkg -i /tmp/openroad.deb 2>/dev/null; then
+                    print_success "OpenROAD installed"
+                    OPENROAD_INSTALLED=true
+                else
+                    print_step "Fixing dependencies and retrying installation"
+                    sudo apt-get install -f -y
+                    if sudo dpkg -i /tmp/openroad.deb; then
+                        print_success "OpenROAD installed after dependency fix"
+                        OPENROAD_INSTALLED=true
+                    else
+                        print_warning "OpenROAD installation failed - physical design flow will be limited"
+                    fi
+                fi
+            else
+                print_warning "Cannot install OpenROAD package without sudo"
             fi
             rm -f /tmp/openroad.deb
+        else
+            print_error "Failed to download OpenROAD"
+            print_warning "Physical design flow will be limited without OpenROAD"
         fi
     fi
     
     # Verify OpenROAD installation
     if command -v openroad >/dev/null 2>&1; then
         print_step "Verifying OpenROAD installation"
-        openroad -version 2>/dev/null || echo "OpenROAD installed (version check failed)"
+        if openroad -version 2>/dev/null; then
+            print_success "OpenROAD verification successful"
+        else
+            print_warning "OpenROAD installed but version check failed"
+        fi
         OPENROAD_INSTALLED=true
+        return 0
     else
         print_warning "OpenROAD not found in PATH after installation"
+        return 1
     fi
 }
 
@@ -730,11 +798,18 @@ main() {
     fi
     
     check_requirements
-    create_install_dir
-    install_skywater_pdk
-    install_magic          # Install Magic FIRST - Open PDK needs it
-    install_open_pdk       # Install Open PDK AFTER Magic is available
-    install_openroad       # Install OpenROAD for physical design flow
+    
+    # Try to create installation directory, but continue if user declines
+    if ! create_install_dir; then
+        print_warning "Installation directory setup skipped - some installations may fail"
+    fi
+    
+    # Install components - each function handles its own error conditions
+    install_skywater_pdk || print_warning "SkyWater PDK installation failed or skipped"
+    install_magic || print_warning "Magic VLSI installation failed or skipped"
+    install_open_pdk || print_warning "Open PDK installation failed or skipped"
+    install_openroad || print_warning "OpenROAD installation failed or skipped"
+    
     setup_environment
     verify_installation
     
