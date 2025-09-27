@@ -19,7 +19,7 @@ import ALUs.ALU32
 
 // Explicit import for ZeroNyteRV32ICore
 // Since it has no package, we try importing it directly
-import ZeroNyteRV32ICore
+import ZeroNyte.ZeroNyteRV32ICore
 
 // Note: RV32IDecode is an object (not a Module class), so it's not imported for RTL generation
 
