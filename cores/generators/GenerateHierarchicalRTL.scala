@@ -50,7 +50,7 @@ case class RTLGeneratorConfig(
   preserveAggregates: Boolean = true,
   preserveValues: Boolean = true,
   disableRandomization: Boolean = true,
-  optimizeForASIC: Boolean = false,
+  optimizeForASIC: Boolean = true,  // Default to ASIC synthesis optimization
   generateAnnotations: Boolean = true,
   
   // Cleanup options
