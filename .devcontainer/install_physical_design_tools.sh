@@ -961,16 +961,39 @@ install_nix() {
     
     if eval "$nix_install_cmd"; then
         print_success "Nix installed successfully"
-        NIX_INSTALLED=true
         
-        # Source Nix environment for current session
+        # Try multiple methods to source Nix environment
+        print_step "Setting up Nix environment for current session"
+        
+        # Method 1: Source from profile.d
         if [ -f "$HOME/.nix-profile/etc/profile.d/nix.sh" ]; then
+            print_step "Sourcing Nix from ~/.nix-profile/etc/profile.d/nix.sh"
             source "$HOME/.nix-profile/etc/profile.d/nix.sh"
         fi
         
-        print_step "Nix installation completed"
-        print_warning "You may need to restart your terminal or source the Nix environment"
-        print_step "To source Nix in current session: source ~/.nix-profile/etc/profile.d/nix.sh"
+        # Method 2: Source from /nix/var/nix/profiles/default
+        if [ -f "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh" ]; then
+            print_step "Sourcing Nix daemon from /nix/var/nix/profiles/default"
+            source "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh"
+        fi
+        
+        # Method 3: Add Nix to PATH manually if found
+        if [ -d "/nix/var/nix/profiles/default/bin" ] && [[ ":$PATH:" != *":/nix/var/nix/profiles/default/bin:"* ]]; then
+            print_step "Adding Nix to PATH manually"
+            export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+        fi
+        
+        # Verify Nix is now available
+        if command -v nix >/dev/null 2>&1; then
+            local nix_version=$(nix --version 2>/dev/null | head -1 || echo "unknown")
+            print_success "Nix is now available in PATH: $nix_version"
+            NIX_INSTALLED=true
+        else
+            print_warning "Nix installed but not found in PATH"
+            print_step "Nix may require a new shell session to be available"
+            print_step "To manually source: source ~/.nix-profile/etc/profile.d/nix.sh"
+            NIX_INSTALLED=true  # Mark as installed even if not in current PATH
+        fi
         
     else
         print_error "Nix installation failed"
@@ -1013,11 +1036,34 @@ install_openlane2() {
         esac
     fi
     
-    # Ensure Nix is available
+    # Ensure Nix is available - try to source it if not found
     if ! command_exists nix; then
-        print_error "Nix is required for OpenLane2 but is not installed"
-        print_step "Please install Nix first or run this script with Nix installation enabled"
-        return 1
+        print_step "Nix not found in PATH, attempting to source Nix environment"
+        
+        # Try to source Nix environment
+        if [ -f "$HOME/.nix-profile/etc/profile.d/nix.sh" ]; then
+            print_step "Sourcing Nix from ~/.nix-profile/etc/profile.d/nix.sh"
+            source "$HOME/.nix-profile/etc/profile.d/nix.sh"
+        elif [ -f "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh" ]; then
+            print_step "Sourcing Nix daemon from /nix/var/nix/profiles/default"
+            source "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh"
+        fi
+        
+        # Add Nix to PATH if directory exists
+        if [ -d "/nix/var/nix/profiles/default/bin" ]; then
+            export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+        fi
+        
+        # Check again after sourcing
+        if ! command_exists nix; then
+            print_error "Nix is required for OpenLane2 but is not available"
+            print_step "Nix may have been installed but requires a new shell session"
+            print_step "Please restart your terminal and run the script again"
+            print_step "Or manually source: source ~/.nix-profile/etc/profile.d/nix.sh"
+            return 1
+        else
+            print_success "Nix is now available after sourcing environment"
+        fi
     fi
     
     # Install git if needed
