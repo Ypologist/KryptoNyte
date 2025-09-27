@@ -288,8 +288,14 @@ Environment Variables:
   }
   
   def validateConfiguration(config: PhysicalDesignConfig): Unit = {
-    // Check input RTL file exists
-    val inputRTLFile = new File(s"${config.inputRTLPath}/${config.moduleName}.v")
+    // Check input RTL file exists - ensure proper path resolution
+    val inputRTLPath = if (config.inputRTLPath.startsWith("/")) {
+      config.inputRTLPath  // Absolute path
+    } else {
+      // Relative path - resolve from current working directory
+      new File(".").getCanonicalPath + "/" + config.inputRTLPath
+    }
+    val inputRTLFile = new File(s"${inputRTLPath}/${config.moduleName}.v")
     if (!inputRTLFile.exists()) {
       throw new RuntimeException(s"Input RTL file not found: ${inputRTLFile.getAbsolutePath}")
     }
