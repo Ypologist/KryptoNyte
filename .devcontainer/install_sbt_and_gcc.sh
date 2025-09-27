@@ -152,12 +152,35 @@ check_gcc14() {
 
 # Function to check if SDKMAN and tools are installed
 check_sdkman_tools() {
+    local sdkman_init=""
+    
+    # Check for SDKMAN in multiple possible locations
     if [ -f "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
-        print_step "Found SDKMAN installation"
+        sdkman_init="$HOME/.sdkman/bin/sdkman-init.sh"
+    elif [ -f "$HOME/.sdkman/libexec/sdkman-init.sh" ]; then
+        sdkman_init="$HOME/.sdkman/libexec/sdkman-init.sh"
+    elif [ -d "$HOME/.sdkman" ]; then
+        # SDKMAN directory exists, try to find init script
+        sdkman_init=$(find "$HOME/.sdkman" -name "sdkman-init.sh" 2>/dev/null | head -1)
+    fi
+    
+    # Also check if sdk command is available (might be in PATH)
+    if [ -z "$sdkman_init" ] && command -v sdk >/dev/null 2>&1; then
+        print_step "Found SDKMAN via sdk command in PATH"
+        # Try to find SDKMAN_DIR from environment or common locations
+        if [ -n "$SDKMAN_DIR" ] && [ -f "$SDKMAN_DIR/bin/sdkman-init.sh" ]; then
+            sdkman_init="$SDKMAN_DIR/bin/sdkman-init.sh"
+        elif [ -n "$SDKMAN_DIR" ] && [ -f "$SDKMAN_DIR/libexec/sdkman-init.sh" ]; then
+            sdkman_init="$SDKMAN_DIR/libexec/sdkman-init.sh"
+        fi
+    fi
+    
+    if [ -n "$sdkman_init" ] && [ -f "$sdkman_init" ]; then
+        print_step "Found SDKMAN installation at: $sdkman_init"
         
         # Check in subshell to avoid affecting main script
         (
-            source "$HOME/.sdkman/bin/sdkman-init.sh" 2>/dev/null || return 1
+            source "$sdkman_init" 2>/dev/null || return 1
             
             local java_ok=false
             local scala_ok=false
@@ -205,6 +228,9 @@ check_sdkman_tools() {
             fi
         )
         return $?
+    elif [ -d "$HOME/.sdkman" ]; then
+        print_step "SDKMAN directory found but init script missing - incomplete installation"
+        return 1
     else
         print_step "SDKMAN not found"
         return 1
