@@ -152,133 +152,13 @@ check_gcc14() {
 
 # Function to check if SDKMAN and tools are installed
 check_sdkman_tools() {
-    # First, check if SDKMAN directory exists
-    if [ ! -d "$HOME/.sdkman" ]; then
-        print_step "SDKMAN not found (no ~/.sdkman directory)"
+    # Simply check if SDKMAN directory exists
+    if [ -d "$HOME/.sdkman" ]; then
+        print_step "Found SDKMAN installation"
+        return 0
+    else
+        print_step "SDKMAN not found"
         return 1
-    fi
-    
-    print_step "Found SDKMAN directory at ~/.sdkman"
-    
-    # SDKMAN is installed, now check if we can source it and verify tools
-    local sdkman_init=""
-    
-    # Look for init script in common locations
-    if [ -f "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
-        sdkman_init="$HOME/.sdkman/bin/sdkman-init.sh"
-    elif [ -f "$HOME/.sdkman/libexec/sdkman-init.sh" ]; then
-        sdkman_init="$HOME/.sdkman/libexec/sdkman-init.sh"
-    else
-        # Try to find it anywhere in the SDKMAN directory
-        sdkman_init=$(find "$HOME/.sdkman" -name "sdkman-init.sh" 2>/dev/null | head -1)
-    fi
-    
-    # If we found an init script, use it to check tools
-    if [ -n "$sdkman_init" ] && [ -f "$sdkman_init" ]; then
-        print_step "Found SDKMAN init script at: $sdkman_init"
-        
-        # Check tools in subshell to avoid affecting main script
-        (
-            source "$sdkman_init" 2>/dev/null || {
-                echo "  ⚠ Failed to source SDKMAN init script"
-                return 1
-            }
-            
-            local java_ok=false
-            local scala_ok=false
-            local sbt_ok=false
-            
-            # Check Java
-            if command -v java >/dev/null 2>&1; then
-                local java_version=$(java --version 2>/dev/null | head -1)
-                if echo "$java_version" | grep -q "23\." 2>/dev/null; then
-                    echo "  ✓ Java 23: $java_version"
-                    java_ok=true
-                else
-                    echo "  ⚠ Java found but not version 23: $java_version"
-                fi
-            else
-                echo "  ✗ Java not found"
-            fi
-            
-            # Check Scala
-            if command -v scala >/dev/null 2>&1; then
-                local scala_version=$(timeout 5 scala --version 2>/dev/null | head -1 || echo "installed")
-                if echo "$scala_version" | grep -q "2\.13\." 2>/dev/null; then
-                    echo "  ✓ Scala 2.13: $scala_version"
-                    scala_ok=true
-                else
-                    echo "  ⚠ Scala found but not version 2.13: $scala_version"
-                fi
-            else
-                echo "  ✗ Scala not found"
-            fi
-            
-            # Check SBT
-            if command -v sbt >/dev/null 2>&1; then
-                echo "  ✓ SBT: installed"
-                sbt_ok=true
-            else
-                echo "  ✗ SBT not found"
-            fi
-            
-            # Return success only if all tools are properly installed
-            if [ "$java_ok" = true ] && [ "$scala_ok" = true ] && [ "$sbt_ok" = true ]; then
-                return 0
-            else
-                return 1
-            fi
-        )
-        return $?
-    else
-        # SDKMAN directory exists but no init script found
-        print_step "SDKMAN directory found but no init script - checking for tools directly"
-        
-        # Check if tools are available in PATH (might be installed via SDKMAN but not properly initialized)
-        local java_ok=false
-        local scala_ok=false
-        local sbt_ok=false
-        
-        # Check Java
-        if command -v java >/dev/null 2>&1; then
-            local java_version=$(java --version 2>/dev/null | head -1)
-            if echo "$java_version" | grep -q "23\." 2>/dev/null; then
-                echo "  ✓ Java 23: $java_version"
-                java_ok=true
-            else
-                echo "  ⚠ Java found but not version 23: $java_version"
-            fi
-        else
-            echo "  ✗ Java not found"
-        fi
-        
-        # Check Scala
-        if command -v scala >/dev/null 2>&1; then
-            local scala_version=$(timeout 5 scala --version 2>/dev/null | head -1 || echo "installed")
-            if echo "$scala_version" | grep -q "2\.13\." 2>/dev/null; then
-                echo "  ✓ Scala 2.13: $scala_version"
-                scala_ok=true
-            else
-                echo "  ⚠ Scala found but not version 2.13: $scala_version"
-            fi
-        else
-            echo "  ✗ Scala not found"
-        fi
-        
-        # Check SBT
-        if command -v sbt >/dev/null 2>&1; then
-            echo "  ✓ SBT: installed"
-            sbt_ok=true
-        else
-            echo "  ✗ SBT not found"
-        fi
-        
-        # Return success only if all tools are properly installed
-        if [ "$java_ok" = true ] && [ "$scala_ok" = true ] && [ "$sbt_ok" = true ]; then
-            return 0
-        else
-            return 1
-        fi
     fi
 }
 
