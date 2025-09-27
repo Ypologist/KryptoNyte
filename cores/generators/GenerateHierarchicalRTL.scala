@@ -17,7 +17,8 @@ import scala.util.{Try, Success, Failure}
 // Import KryptoNyte modules
 import ALUs.ALU32
 
-// For now, only generate ALU32 until we solve the ZeroNyteRV32ICore import issue
+// Try importing ZeroNyteRV32ICore directly - it should work since zeroNyte is a dependency
+// The class has no package declaration, so import it at the root level
 // Note: RV32IDecode is an object (not a Module class), so it's not imported for RTL generation
 
 // Configuration case class for flexible path management
@@ -264,9 +265,9 @@ Environment Variables:
   def getZeroNyteModules(variant: String): Seq[ModuleSpec] = {
     variant match {
       case "rv32i" => Seq(
-        // Use only ALU32 for now until we solve the ZeroNyteRV32ICore import issue
-        ModuleSpec(() => new ALU32, "ALU32", "32-bit ALU", "ZeroNyte", "rv32i")
-        // TODO: Add ZeroNyteRV32ICore once import issue is resolved
+        // Use both ALU32 and ZeroNyteRV32ICore
+        ModuleSpec(() => new ALU32, "ALU32", "32-bit ALU", "ZeroNyte", "rv32i"),
+        ModuleSpec(() => new ZeroNyteRV32ICore, "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i")
         // Note: RV32IDecode is an object, not a Module class, so it can't be instantiated
       )
       case _ => Seq.empty
