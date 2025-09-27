@@ -614,6 +614,67 @@ fi
 echo "  3. Begin developing your KryptoNyte processor cores!"
 
 echo ""
+
+#######################################
+# Install OpenROAD for Physical Design
+#######################################
+
+print_header "Installing OpenROAD"
+
+# OpenROAD is available as a pre-built binary from GitHub releases
+print_step "Fetching OpenROAD release information"
+
+# Get the latest OpenROAD release URL
+OPENROAD_URL=$(curl -s https://api.github.com/repos/The-OpenROAD-Project/OpenROAD/releases/latest | \
+    jq -r '.assets[] | select(.name | contains("ubuntu22")) | select(.name | contains("amd64")) | .browser_download_url')
+
+if [ -z "$OPENROAD_URL" ] || [ "$OPENROAD_URL" = "null" ]; then
+    print_warning "Failed to fetch OpenROAD release information, trying alternative installation"
+    
+    # Alternative: Install from OpenROAD PPA
+    print_step "Adding OpenROAD PPA"
+    if run_cmd add-apt-repository -y ppa:openroad/ppa; then
+        run_cmd apt-get update -qq
+        print_step "Installing OpenROAD from PPA"
+        if run_cmd apt-get install -y openroad; then
+            print_success "OpenROAD installed from PPA"
+        else
+            print_warning "OpenROAD installation failed - physical design flow will be limited"
+        fi
+    else
+        print_warning "Could not add OpenROAD PPA - physical design flow will be limited"
+    fi
+else
+    print_step "Downloading OpenROAD"
+    if ! wget "$OPENROAD_URL" -O /tmp/openroad.deb; then
+        print_error "Failed to download OpenROAD"
+        print_warning "Physical design flow will be limited without OpenROAD"
+    else
+        print_step "Installing OpenROAD"
+        if run_cmd dpkg -i /tmp/openroad.deb; then
+            print_success "OpenROAD installed"
+        else
+            print_step "Fixing dependencies"
+            run_cmd apt-get install -f -y
+            if run_cmd dpkg -i /tmp/openroad.deb; then
+                print_success "OpenROAD installed"
+            else
+                print_warning "OpenROAD installation failed - physical design flow will be limited"
+            fi
+        fi
+        rm -f /tmp/openroad.deb
+    fi
+fi
+
+# Verify OpenROAD installation
+if command -v openroad >/dev/null 2>&1; then
+    print_step "Verifying OpenROAD installation"
+    openroad -version 2>/dev/null || echo "OpenROAD installed (version check failed)"
+else
+    print_warning "OpenROAD not found in PATH after installation"
+fi
+
+echo ""
 print_success "All tools successfully installed and configured!"
 
 
