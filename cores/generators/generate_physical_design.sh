@@ -3,19 +3,15 @@
 # KryptoNyte Physical Design Flow with OpenLane2
 # Simple shell script to run complete RTL-to-GDSII flow using OpenLane2
 # Place in: KryptoNyte/cores/generators/
-# Can be run from anywhere, but works best from KryptoNyte/cores/
+# Run from: KryptoNyte/cores/generators/ with ./generate_physical_design.sh
 
 set -e  # Exit on any error
 
-# Detect script location and set working directory
+# Detect script location for path resolution
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CORES_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Change to cores directory if not already there
-if [ "$(basename "$(pwd)")" != "cores" ]; then
-    echo "Changing to cores directory: $CORES_DIR"
-    cd "$CORES_DIR"
-fi
+# Note: Script works from current directory, no automatic directory change
 
 # Color codes for output
 RED='\033[0;31m'
