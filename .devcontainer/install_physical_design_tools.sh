@@ -1026,6 +1026,20 @@ extra-trusted-public-keys = openlane.cachix.org-1:qqdwh+QMNGmZAuyeQJTH9ErW57OWSv
         if command -v nix-shell >/dev/null 2>&1; then
             local nix_shell_path=$(command -v nix-shell)
             print_success "nix-shell is available at: $nix_shell_path"
+            
+            # Set up nixpkgs channel for nix-shell compatibility
+            print_step "Setting up nixpkgs channel for OpenLane2 compatibility"
+            if nix-channel --add https://nixos.org/channels/nixpkgs-unstable nixpkgs 2>/dev/null; then
+                print_step "Added nixpkgs channel"
+                if nix-channel --update 2>/dev/null; then
+                    print_success "Updated nixpkgs channel"
+                else
+                    print_warning "Failed to update nixpkgs channel, but continuing"
+                fi
+            else
+                print_warning "Failed to add nixpkgs channel, but continuing"
+            fi
+            
             NIX_INSTALLED=true
         elif command -v nix >/dev/null 2>&1; then
             local nix_version=$(nix --version 2>/dev/null | head -1 || echo "unknown")
@@ -1128,6 +1142,13 @@ install_openlane2() {
     if git clone https://github.com/efabless/openlane2.git "$openlane2_dir"; then
         print_success "OpenLane2 repository cloned successfully"
         
+        # Unset PDK environment variables to avoid conflicts with OpenLane2's PDK management
+        print_step "Unsetting PDK environment variables to avoid conflicts"
+        unset PDK_ROOT 2>/dev/null || true
+        unset SKYWATER_PDK_ROOT 2>/dev/null || true
+        unset STD_CELL_LIBRARY 2>/dev/null || true
+        print_step "PDK variables unset - OpenLane2 will manage its own PDK"
+        
         # Test the Nix environment
         print_step "Testing OpenLane2 Nix environment (this may take 10+ minutes on first run)"
         print_step "Nix will download and cache all required tools..."
@@ -1150,6 +1171,11 @@ install_openlane2() {
         cat > "$openlane_script" << 'EOF'
 #!/bin/bash
 # OpenLane2 convenience script for KryptoNyte
+# Unset PDK environment variables to avoid conflicts with OpenLane2's PDK management
+unset PDK_ROOT 2>/dev/null || true
+unset SKYWATER_PDK_ROOT 2>/dev/null || true
+unset STD_CELL_LIBRARY 2>/dev/null || true
+
 OPENLANE2_DIR="$(dirname "$0")/openlane2"
 if [ -d "$OPENLANE2_DIR" ]; then
     cd "$OPENLANE2_DIR"
