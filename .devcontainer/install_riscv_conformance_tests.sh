@@ -3,11 +3,13 @@
 #######################################
 # RISC-V Conformance Tests Installation Script
 # For KryptoNyte RISC-V Processor Family
+# Includes UV Python, Spike Simulator, and Proxy Kernel
 #######################################
 
 # Script configuration
 USE_SUDO=false
 VERBOSE=true
+UPGRADE_MODE=false
 INSTALL_DIR="/opt/riscv-conformance"
 ARCH_TEST_VERSION="main"  # Can be changed to specific tag/commit
 SPIKE_VERSION="master"
@@ -20,6 +22,7 @@ INSTALL_TOOLCHAIN=true
 BUILD_TESTS=true
 
 # Installation status tracking
+UV_INSTALLED=false
 ARCH_TESTS_INSTALLED=false
 SPIKE_INSTALLED=false
 PK_INSTALLED=false
@@ -45,6 +48,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --quiet)
             VERBOSE=false
+            shift
+            ;;
+        --upgrade)
+            UPGRADE_MODE=true
             shift
             ;;
         --install-dir)
@@ -87,6 +94,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --with-sudo              Use sudo for commands requiring elevated privileges"
             echo "  --quiet                  Reduce output verbosity"
+            echo "  --upgrade                Force upgrade/reinstall of existing tools"
             echo "  --install-dir DIR        Installation directory (default: /opt/riscv-conformance)"
             echo "  --arch-test-version V    RISC-V arch test version/branch (default: main)"
             echo "  --spike-version V        Spike simulator version/branch (default: master)"
@@ -98,11 +106,16 @@ while [[ $# -gt 0 ]]; do
             echo "  --help, -h               Show this help message"
             echo ""
             echo "This script installs:"
+            echo "  - UV Python package manager"
+            echo "  - Python 3.10 virtual environment"
             echo "  - RISC-V Architecture Tests"
             echo "  - Spike RISC-V ISA Simulator"
             echo "  - RISC-V Proxy Kernel (pk)"
             echo "  - RISC-V GNU Toolchain (if not present)"
             echo "  - Test framework and utilities"
+            echo ""
+            echo "Tools are automatically detected and skipped if already installed"
+            echo "unless --upgrade flag is used."
             echo ""
             echo "Environment variables set after installation:"
             echo "  RISCV_CONFORMANCE_ROOT   - Path to conformance test root"
@@ -117,8 +130,8 @@ while [[ $# -gt 0 ]]; do
             echo "  Install to custom directory without Spike:"
             echo "    $0 --with-sudo --install-dir /home/user/riscv-tests --no-spike"
             echo ""
-            echo "  Just clone repositories without building:"
-            echo "    $0 --install-dir ./riscv-tests --no-build"
+            echo "  Force upgrade all components:"
+            echo "    $0 --with-sudo --upgrade"
             echo ""
             exit 0
             ;;
@@ -186,6 +199,80 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Function to check if running in Codespace
+is_codespace() {
+    [ -n "$CODESPACES" ] || [ -n "$GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN" ]
+}
+
+# Function to check if UV is installed
+check_uv() {
+    if command_exists uv; then
+        local version=$(uv --version 2>/dev/null | head -1)
+        print_step "Found UV: $version"
+        return 0
+    else
+        print_step "UV not found"
+        return 1
+    fi
+}
+
+# Function to check if Spike is installed
+check_spike() {
+    if command_exists spike; then
+        local version=$(spike --help 2>&1 | head -1)
+        print_step "Found Spike: $version"
+        return 0
+    elif [ -f "$INSTALL_DIR/spike/bin/spike" ]; then
+        print_step "Found Spike at: $INSTALL_DIR/spike/bin/spike"
+        return 0
+    else
+        print_step "Spike not found"
+        return 1
+    fi
+}
+
+# Function to check if Proxy Kernel is installed
+check_pk() {
+    if command_exists pk; then
+        print_step "Found Proxy Kernel in system PATH"
+        return 0
+    elif [ -f "$INSTALL_DIR/pk/riscv64-unknown-elf/bin/pk" ] || [ -f "$INSTALL_DIR/pk/bin/pk" ]; then
+        print_step "Found Proxy Kernel at: $INSTALL_DIR/pk"
+        return 0
+    else
+        print_step "Proxy Kernel not found"
+        return 1
+    fi
+}
+
+# Function to check if RISC-V Architecture Tests are installed
+check_arch_tests() {
+    if [ -d "$INSTALL_DIR/riscv-arch-test" ] && [ -f "$INSTALL_DIR/riscv-arch-test/README.md" ]; then
+        print_step "Found RISC-V Architecture Tests at: $INSTALL_DIR/riscv-arch-test"
+        return 0
+    else
+        print_step "RISC-V Architecture Tests not found"
+        return 1
+    fi
+}
+
+# Function to check if RISC-V toolchain is available
+check_riscv_toolchain_available() {
+    if command_exists riscv64-unknown-elf-gcc || command_exists riscv32-unknown-elf-gcc; then
+        if command_exists riscv64-unknown-elf-gcc; then
+            local version=$(riscv64-unknown-elf-gcc --version 2>/dev/null | head -1)
+            print_step "Found RISC-V toolchain: $version"
+        else
+            local version=$(riscv32-unknown-elf-gcc --version 2>/dev/null | head -1)
+            print_step "Found RISC-V toolchain: $version"
+        fi
+        return 0
+    else
+        print_step "RISC-V toolchain not found"
+        return 1
+    fi
+}
+
 # Function to check system requirements
 check_requirements() {
     print_step "Checking system requirements"
@@ -199,7 +286,7 @@ check_requirements() {
         print_step "Installing essential build tools"
         sudo apt-get install -y \
             build-essential git make gcc g++ autoconf automake autotools-dev cmake ninja-build \
-            pkg-config
+            pkg-config curl wget unzip tar gzip
         
         print_step "Installing RISC-V toolchain build dependencies"
         sudo apt-get install -y \
@@ -207,21 +294,11 @@ check_requirements() {
         
         print_step "Installing build utilities"
         sudo apt-get install -y \
-            gawk bison flex texinfo gperf libtool patchutils bc m4
+            gawk bison flex texinfo gperf libtool patchutils bc m4 device-tree-compiler
         
         print_step "Installing Python development tools"
         sudo apt-get install -y \
             python3 python3-dev python3-venv
-        
-        print_step "Installing uv (fast Python package manager)"
-        if ! command_exists uv; then
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-            export PATH="$HOME/.cargo/bin:$PATH"
-        fi
-        
-        print_step "Installing additional utilities"
-        sudo apt-get install -y \
-            curl wget unzip tar gzip device-tree-compiler
         
         print_success "All dependencies installed"
     fi
@@ -268,7 +345,6 @@ check_requirements() {
     fi
     
     print_success "Critical build tools available"
-    
     print_success "System requirements satisfied"
 }
 
@@ -276,7 +352,7 @@ check_requirements() {
 create_install_dir() {
     print_step "Creating installation directory: $INSTALL_DIR"
     
-    if [ -d "$INSTALL_DIR" ]; then
+    if [ -d "$INSTALL_DIR" ] && [ "$UPGRADE_MODE" = false ]; then
         print_warning "Installation directory already exists"
         read -p "Do you want to continue and potentially overwrite existing files? (y/N): " -n 1 -r
         echo
@@ -309,6 +385,51 @@ create_install_dir() {
     print_success "Installation directory ready"
 }
 
+# Function to install UV Python package manager
+install_uv() {
+    print_banner "Installing UV Python Package Manager" "$BLUE"
+    
+    # Check if UV is already installed
+    if [ "$UPGRADE_MODE" = false ] && check_uv >/dev/null 2>&1; then
+        print_success "UV already installed - skipping"
+        UV_INSTALLED=true
+        return 0
+    fi
+    
+    if [ "$UPGRADE_MODE" = true ]; then
+        print_step "Upgrade mode: Reinstalling UV"
+    fi
+    
+    print_step "Installing UV Python package manager"
+    curl -LsSf https://astral.sh/uv/install.sh | sh || {
+        print_error "Failed to install UV"
+        return 1
+    }
+    
+    # Add UV to PATH for current session
+    export PATH="$HOME/.cargo/bin:$PATH"
+    
+    # Verify installation
+    if command_exists uv; then
+        UV_INSTALLED=true
+        print_success "UV Python package manager installed"
+        uv --version
+        
+        print_step "Creating Python 3.10 virtual environment"
+        cd "$INSTALL_DIR"
+        uv venv --python 3.10 || {
+            print_warning "Failed to create Python virtual environment"
+            return 1
+        }
+        
+        print_success "Python 3.10 virtual environment created"
+        return 0
+    else
+        print_error "UV installation verification failed"
+        return 1
+    fi
+}
+
 # Function to check/install RISC-V toolchain
 check_riscv_toolchain() {
     if [ "$INSTALL_TOOLCHAIN" = false ]; then
@@ -319,20 +440,16 @@ check_riscv_toolchain() {
     print_banner "Checking RISC-V Toolchain" "$BLUE"
     
     # Check if RISC-V toolchain is already available
-    if command_exists riscv64-unknown-elf-gcc || command_exists riscv32-unknown-elf-gcc; then
-        print_success "RISC-V toolchain found"
-        
-        # Print toolchain info
-        if command_exists riscv64-unknown-elf-gcc; then
-            local version=$(riscv64-unknown-elf-gcc --version | head -n1)
-            print_step "Found: $version"
-        fi
-        if command_exists riscv32-unknown-elf-gcc; then
-            local version=$(riscv32-unknown-elf-gcc --version | head -n1)
-            print_step "Found: $version"
-        fi
-        
+    if [ "$UPGRADE_MODE" = false ] && check_riscv_toolchain_available >/dev/null 2>&1; then
+        print_success "RISC-V toolchain already available - skipping"
+        TOOLCHAIN_AVAILABLE=true
         return 0
+    fi
+    
+    if [ "$UPGRADE_MODE" = true ]; then
+        print_step "Upgrade mode: Reinstalling RISC-V toolchain"
+        # Remove existing toolchain installation
+        rm -rf "$INSTALL_DIR/riscv-gnu-toolchain" "$INSTALL_DIR/riscv-toolchain"
     fi
     
     print_warning "RISC-V toolchain not found"
@@ -359,6 +476,7 @@ check_riscv_toolchain() {
     ./configure --prefix="$toolchain_install" --with-arch=rv64i --with-abi=lp64
     make -j$(nproc)
     
+    TOOLCHAIN_AVAILABLE=true
     print_success "RISC-V toolchain installed"
 }
 
@@ -367,6 +485,18 @@ install_arch_tests() {
     print_banner "Installing RISC-V Architecture Tests" "$PURPLE"
     
     local arch_test_dir="$INSTALL_DIR/riscv-arch-test"
+    
+    # Check if already installed
+    if [ "$UPGRADE_MODE" = false ] && check_arch_tests >/dev/null 2>&1; then
+        print_success "RISC-V Architecture Tests already installed - skipping"
+        ARCH_TESTS_INSTALLED=true
+        return 0
+    fi
+    
+    if [ "$UPGRADE_MODE" = true ]; then
+        print_step "Upgrade mode: Reinstalling RISC-V Architecture Tests"
+        rm -rf "$arch_test_dir"
+    fi
     
     print_step "Cloning RISC-V Architecture Test repository"
     if [ -d "$arch_test_dir" ]; then
@@ -383,12 +513,19 @@ install_arch_tests() {
     cd "$arch_test_dir"
     
     if [ "$BUILD_TESTS" = true ]; then
+        print_step "Setting up Python virtual environment"
+        if [ -f "$INSTALL_DIR/.venv/bin/activate" ]; then
+            source "$INSTALL_DIR/.venv/bin/activate"
+        fi
+        
         print_step "Installing Python dependencies for test framework"
-        if command_exists uv; then
-            uv pip install -r requirements.txt
-        else
-            print_warning "uv not found, falling back to pip3"
-            pip3 install --user -r requirements.txt
+        if [ -f "requirements.txt" ]; then
+            if command_exists uv && [ "$UV_INSTALLED" = true ]; then
+                uv pip install -r requirements.txt
+            else
+                print_warning "UV not available, falling back to pip3"
+                pip3 install --user -r requirements.txt
+            fi
         fi
         
         print_step "Setting up test environment"
@@ -433,17 +570,15 @@ install_spike() {
     local spike_install="$INSTALL_DIR/spike"
     
     # Check if Spike is already installed
-    if [ -f "$spike_install/bin/spike" ]; then
-        print_success "Spike simulator already installed at $spike_install"
+    if [ "$UPGRADE_MODE" = false ] && check_spike >/dev/null 2>&1; then
+        print_success "Spike simulator already installed - skipping"
         SPIKE_INSTALLED=true
         return 0
     fi
     
-    # Check if Spike is available system-wide
-    if command_exists spike; then
-        print_success "Spike simulator found in system PATH"
-        SPIKE_INSTALLED=true
-        return 0
+    if [ "$UPGRADE_MODE" = true ]; then
+        print_step "Upgrade mode: Reinstalling Spike simulator"
+        rm -rf "$spike_dir" "$spike_install"
     fi
     
     print_step "Cloning Spike repository"
@@ -486,16 +621,21 @@ install_pk() {
     local pk_install="$INSTALL_DIR/pk"
     
     # Check if PK is already installed
-    if [ -f "$pk_install/riscv64-unknown-elf/bin/pk" ] || [ -f "$pk_install/bin/pk" ]; then
-        print_success "Proxy kernel already installed at $pk_install"
+    if [ "$UPGRADE_MODE" = false ] && check_pk >/dev/null 2>&1; then
+        print_success "Proxy kernel already installed - skipping"
         PK_INSTALLED=true
         return 0
     fi
     
-    # Check if PK is available system-wide
-    if command_exists pk; then
-        print_success "Proxy kernel found in system PATH"
-        PK_INSTALLED=true
+    if [ "$UPGRADE_MODE" = true ]; then
+        print_step "Upgrade mode: Reinstalling proxy kernel"
+        rm -rf "$pk_dir" "$pk_install"
+    fi
+    
+    # Check if RISC-V toolchain is available
+    if ! check_riscv_toolchain_available >/dev/null 2>&1; then
+        print_warning "RISC-V toolchain not found - proxy kernel requires cross-compiler"
+        print_warning "Skipping proxy kernel installation"
         return 0
     fi
     
@@ -517,6 +657,13 @@ install_pk() {
     mkdir -p build
     cd build
     
+    # Set cross-compiler environment variables
+    export CC=riscv64-unknown-elf-gcc
+    export CXX=riscv64-unknown-elf-g++
+    export AR=riscv64-unknown-elf-ar
+    export RANLIB=riscv64-unknown-elf-ranlib
+    export STRIP=riscv64-unknown-elf-strip
+    
     # Configure for both RV32 and RV64
     ../configure --prefix="$pk_install" --host=riscv64-unknown-elf
     if make -j$(nproc) && make install; then
@@ -526,6 +673,9 @@ install_pk() {
         print_error "Proxy kernel installation failed"
         return 1
     fi
+    
+    # Reset environment variables
+    unset CC CXX AR RANLIB STRIP
 }
 
 # Function to set up environment variables
@@ -548,8 +698,11 @@ export SPIKE_ROOT="$INSTALL_DIR/spike"
 export PK_ROOT="$INSTALL_DIR/pk"
 export RISCV_TOOLCHAIN_ROOT="$INSTALL_DIR/riscv-toolchain"
 
+# UV Python environment
+export UV_PYTHON_ENV="$INSTALL_DIR/.venv"
+
 # Add tools to PATH
-export PATH="\$SPIKE_ROOT/bin:\$PK_ROOT/bin:\$RISCV_TOOLCHAIN_ROOT/bin:\$PATH"
+export PATH="\$SPIKE_ROOT/bin:\$PK_ROOT/bin:\$RISCV_TOOLCHAIN_ROOT/bin:\$HOME/.cargo/bin:\$PATH"
 
 # RISC-V specific environment variables
 export RISCV="\$RISCV_TOOLCHAIN_ROOT"
@@ -566,6 +719,11 @@ export KRYPTONYTE_TEST_CONFIG="\$RISCV_ARCH_TEST_ROOT/kryptonyte_config.yaml"
 
 # Python path for test framework
 export PYTHONPATH="\$RISCV_ARCH_TEST_ROOT:\$PYTHONPATH"
+
+# Activate UV Python environment if available
+if [ -f "\$UV_PYTHON_ENV/bin/activate" ]; then
+    source "\$UV_PYTHON_ENV/bin/activate"
+fi
 
 EOF
 
@@ -620,6 +778,11 @@ TEST_SUITE=${2:-rv32i_m}
 echo "Running RISC-V conformance tests for $ARCH"
 echo "Test suite: $TEST_SUITE"
 
+# Activate UV Python environment if available
+if [ -f "$RISCV_CONFORMANCE_ROOT/.venv/bin/activate" ]; then
+    source "$RISCV_CONFORMANCE_ROOT/.venv/bin/activate"
+fi
+
 cd $RISCV_ARCH_TEST_ROOT
 
 # Run the tests
@@ -659,6 +822,11 @@ fi
 echo "Validating KryptoNyte core: $CORE_EXEC"
 echo "Architecture: $ARCH"
 
+# Activate UV Python environment if available
+if [ -f "$RISCV_CONFORMANCE_ROOT/.venv/bin/activate" ]; then
+    source "$RISCV_CONFORMANCE_ROOT/.venv/bin/activate"
+fi
+
 # TODO: Implement core-specific test execution
 # This would involve:
 # 1. Compiling test programs for the specific core
@@ -683,6 +851,14 @@ verify_installation() {
     local warnings=0
     
     print_step "Checking installation status based on component completion"
+    
+    # Check UV installation status
+    if [ "$UV_INSTALLED" = true ]; then
+        print_success "UV Python package manager installation completed successfully"
+    else
+        print_warning "UV Python package manager installation failed or skipped"
+        ((warnings++))
+    fi
     
     # Check Architecture Tests installation status
     if [ "$ARCH_TESTS_INSTALLED" = true ]; then
@@ -718,7 +894,7 @@ verify_installation() {
     
     # Check toolchain availability
     if [ "$INSTALL_TOOLCHAIN" = true ]; then
-        if command_exists riscv64-unknown-elf-gcc || command_exists riscv32-unknown-elf-gcc; then
+        if [ "$TOOLCHAIN_AVAILABLE" = true ] || check_riscv_toolchain_available >/dev/null 2>&1; then
             TOOLCHAIN_AVAILABLE=true
             print_success "RISC-V toolchain found and available"
         else
@@ -752,14 +928,16 @@ verify_installation() {
         fi
         
         echo -e "\n${CYAN}📋 Component Status Summary:${NC}"
+        [ "$UV_INSTALLED" = true ] && echo -e "  🐍 UV Python Manager: ${GREEN}✅ Installed${NC}" || echo -e "  🐍 UV Python Manager: ${YELLOW}⚠️  Not Available${NC}"
         echo -e "  📚 Architecture Tests: ${GREEN}✅ Installed${NC}"
-        [ "$INSTALL_SPIKE" = true ] && echo -e "  🔧 Spike Simulator: ${GREEN}✅ Installed${NC}"
-        [ "$INSTALL_PK" = true ] && echo -e "  ⚙️  Proxy Kernel: ${GREEN}✅ Installed${NC}"
+        [ "$INSTALL_SPIKE" = true ] && [ "$SPIKE_INSTALLED" = true ] && echo -e "  🔧 Spike Simulator: ${GREEN}✅ Installed${NC}"
+        [ "$INSTALL_PK" = true ] && [ "$PK_INSTALLED" = true ] && echo -e "  ⚙️  Proxy Kernel: ${GREEN}✅ Installed${NC}"
         [ "$TOOLCHAIN_AVAILABLE" = true ] && echo -e "  🛠️  RISC-V Toolchain: ${GREEN}✅ Available${NC}"
         echo -e "  🌍 Environment Setup: ${GREEN}✅ Configured${NC}"
         
         echo -e "\n${CYAN}📁 Installation Locations:${NC}"
         echo -e "  📂 Conformance Root: ${WHITE}$INSTALL_DIR${NC}"
+        echo -e "  🐍 UV Python Environment: ${WHITE}$INSTALL_DIR/.venv${NC}"
         echo -e "  📚 Architecture Tests: ${WHITE}$INSTALL_DIR/riscv-arch-test${NC}"
         [ "$INSTALL_SPIKE" = true ] && echo -e "  🔧 Spike Simulator: ${WHITE}$INSTALL_DIR/spike/bin/spike${NC}"
         [ "$INSTALL_PK" = true ] && echo -e "  ⚙️  Proxy Kernel: ${WHITE}$INSTALL_DIR/pk${NC}"
@@ -799,6 +977,13 @@ verify_installation() {
 main() {
     print_banner "RISC-V Conformance Tests Installation for KryptoNyte" "$BLUE"
     
+    # Auto-detect environment
+    if is_codespace; then
+        print_banner "DETECTED: GitHub Codespace Environment" "$PURPLE"
+    else
+        print_banner "DETECTED: Standalone Environment" "$PURPLE"
+    fi
+    
     echo -e "${CYAN}Installation Configuration:${NC}"
     echo -e "  Install Directory: ${WHITE}$INSTALL_DIR${NC}"
     echo -e "  Arch Test Version: ${WHITE}$ARCH_TEST_VERSION${NC}"
@@ -807,10 +992,61 @@ main() {
     echo -e "  Install Toolchain: ${WHITE}$INSTALL_TOOLCHAIN${NC}"
     echo -e "  Build Tests: ${WHITE}$BUILD_TESTS${NC}"
     echo -e "  Use Sudo: ${WHITE}$USE_SUDO${NC}"
+    echo -e "  Upgrade Mode: ${WHITE}$UPGRADE_MODE${NC}"
+    
+    # Tool detection summary
+    print_banner "Checking Existing Tools" "$CYAN"
+    echo -e "${CYAN}Tool Detection Summary:${NC}"
+    
+    local uv_installed=false
+    local arch_tests_found=false
+    local spike_found=false
+    local pk_found=false
+    local toolchain_found=false
+    
+    if check_uv >/dev/null 2>&1; then
+        echo -e "  🐍 UV Python Manager: ${GREEN}Found${NC}"
+        uv_installed=true
+    else
+        echo -e "  🐍 UV Python Manager: ${RED}Not Found${NC}"
+    fi
+    
+    if check_arch_tests >/dev/null 2>&1; then
+        echo -e "  📚 Architecture Tests: ${GREEN}Found${NC}"
+        arch_tests_found=true
+    else
+        echo -e "  📚 Architecture Tests: ${RED}Not Found${NC}"
+    fi
+    
+    if check_spike >/dev/null 2>&1; then
+        echo -e "  🔧 Spike Simulator: ${GREEN}Found${NC}"
+        spike_found=true
+    else
+        echo -e "  🔧 Spike Simulator: ${RED}Not Found${NC}"
+    fi
+    
+    if check_pk >/dev/null 2>&1; then
+        echo -e "  ⚙️  Proxy Kernel: ${GREEN}Found${NC}"
+        pk_found=true
+    else
+        echo -e "  ⚙️  Proxy Kernel: ${RED}Not Found${NC}"
+    fi
+    
+    if check_riscv_toolchain_available >/dev/null 2>&1; then
+        echo -e "  🛠️  RISC-V Toolchain: ${GREEN}Found${NC}"
+        toolchain_found=true
+    else
+        echo -e "  🛠️  RISC-V Toolchain: ${RED}Not Found${NC}"
+    fi
     
     # Confirm installation
     if [ "$VERBOSE" = true ]; then
         echo ""
+        if [ "$UPGRADE_MODE" = true ]; then
+            echo "Upgrade mode enabled - will reinstall all tools"
+        else
+            echo "Normal mode - will skip existing tools"
+        fi
         read -p "Continue with installation? (Y/n): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Nn]$ ]]; then
@@ -821,6 +1057,7 @@ main() {
     
     check_requirements
     create_install_dir
+    install_uv
     check_riscv_toolchain
     install_arch_tests
     install_spike
