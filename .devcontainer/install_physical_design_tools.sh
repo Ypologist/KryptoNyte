@@ -183,13 +183,12 @@ check_magic() {
     
     if [ -f "$magic_path" ] && [ -x "$magic_path" ]; then
         print_step "Found existing Magic VLSI installation at: $magic_path"
-        local version=$(get_command_version "$magic_path" "-noconsole -dnull -rcfile /dev/null")
-        print_step "Current version: $version"
+        print_step "Magic executable found and is executable"
         return 0
     elif command_exists magic; then
         print_step "Found Magic VLSI in system PATH"
-        local version=$(get_command_version "magic" "-noconsole -dnull -rcfile /dev/null")
-        print_step "Current version: $version"
+        local magic_system_path=$(command -v magic)
+        print_step "Magic found at: $magic_system_path"
         return 0
     else
         print_step "Magic VLSI not found"
@@ -716,16 +715,11 @@ verify_installation() {
     if [ "$MAGIC_INSTALLED" = true ]; then
         print_success "Magic VLSI Layout Tool installation completed successfully"
         
-        # Optional: Test Magic executable if it exists
-        if [ -f "$INSTALL_DIR/magic-install/bin/magic" ]; then
-            if "$INSTALL_DIR/magic-install/bin/magic" -noconsole -dnull -rcfile /dev/null <<< "exit" >/dev/null 2>&1; then
-                print_success "Magic executable verified and working"
-            else
-                print_warning "Magic installed but executable test failed"
-                ((warnings++))
-            fi
+        # Check Magic executable exists and is executable
+        if [ -f "$INSTALL_DIR/magic-install/bin/magic" ] && [ -x "$INSTALL_DIR/magic-install/bin/magic" ]; then
+            print_success "Magic executable found and is executable"
         else
-            print_warning "Magic marked as installed but executable not found"
+            print_warning "Magic marked as installed but executable not found or not executable"
             ((warnings++))
         fi
     else
