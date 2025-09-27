@@ -876,84 +876,116 @@ install_openroad() {
         esac
     fi
     
-    # Install jq if needed for JSON parsing
-    if ! command_exists jq; then
-        print_step "Installing jq for JSON parsing"
-        if [ "$USE_SUDO" = true ]; then
-            sudo apt-get update -qq
-            sudo apt-get install -y jq
-        else
-            print_warning "jq not available and cannot install without sudo"
-            print_step "Attempting alternative OpenROAD installation method"
-        fi
-    fi
+    # Try multiple installation methods for OpenROAD
+    local installation_success=false
     
-    # OpenROAD is available as a pre-built binary from GitHub releases
-    print_step "Fetching OpenROAD release information"
-    
-    # Get the latest OpenROAD release URL
-    if command_exists jq; then
-        OPENROAD_URL=$(curl -s https://api.github.com/repos/The-OpenROAD-Project/OpenROAD/releases/latest | \
-            jq -r '.assets[] | select(.name | contains("ubuntu22")) | select(.name | contains("amd64")) | .browser_download_url')
-    else
-        OPENROAD_URL=""
-    fi
-    
-    if [ -z "$OPENROAD_URL" ] || [ "$OPENROAD_URL" = "null" ]; then
-        print_warning "Failed to fetch OpenROAD release information, trying alternative installation"
+    # Method 1: Try to install from Ubuntu repositories first (most reliable)
+    if [ "$USE_SUDO" = true ] && [ "$installation_success" = false ]; then
+        print_step "Attempting OpenROAD installation from Ubuntu repositories"
+        sudo apt-get update -qq 2>/dev/null || true
         
-        # Alternative: Install from OpenROAD PPA
-        if [ "$USE_SUDO" = true ]; then
-            print_step "Adding OpenROAD PPA"
-            if sudo add-apt-repository -y ppa:openroad/ppa 2>/dev/null; then
-                sudo apt-get update -qq
-                print_step "Installing OpenROAD from PPA"
-                if sudo apt-get install -y openroad; then
-                    print_success "OpenROAD installed from PPA"
-                    OPENROAD_INSTALLED=true
-                else
-                    print_warning "OpenROAD installation failed - physical design flow will be limited"
-                fi
-            else
-                print_warning "Could not add OpenROAD PPA - trying direct installation"
-                # Try installing from Ubuntu repositories as fallback
-                if sudo apt-get install -y openroad 2>/dev/null; then
-                    print_success "OpenROAD installed from Ubuntu repositories"
-                    OPENROAD_INSTALLED=true
-                else
-                    print_warning "OpenROAD not available - physical design flow will be limited"
-                fi
+        # Check if openroad package is available
+        if apt-cache show openroad >/dev/null 2>&1; then
+            print_step "Installing OpenROAD from Ubuntu repositories"
+            if sudo apt-get install -y openroad 2>/dev/null; then
+                print_success "OpenROAD installed from Ubuntu repositories"
+                OPENROAD_INSTALLED=true
+                installation_success=true
             fi
-        else
-            print_warning "Cannot install OpenROAD without sudo - physical design flow will be limited"
         fi
-    else
-        print_step "Downloading OpenROAD"
-        if wget "$OPENROAD_URL" -O /tmp/openroad.deb 2>/dev/null; then
-            print_step "Installing OpenROAD from downloaded package"
-            if [ "$USE_SUDO" = true ]; then
-                if sudo dpkg -i /tmp/openroad.deb 2>/dev/null; then
-                    print_success "OpenROAD installed"
-                    OPENROAD_INSTALLED=true
-                else
-                    print_step "Fixing dependencies and retrying installation"
-                    sudo apt-get install -f -y
-                    if sudo dpkg -i /tmp/openroad.deb; then
-                        print_success "OpenROAD installed after dependency fix"
-                        OPENROAD_INSTALLED=true
-                    else
-                        print_warning "OpenROAD installation failed - physical design flow will be limited"
+    fi
+    
+    # Method 2: Try GitHub releases with improved error handling
+    if [ "$installation_success" = false ]; then
+        print_step "Attempting OpenROAD installation from GitHub releases"
+        
+        # Install jq if needed and possible
+        if ! command_exists jq && [ "$USE_SUDO" = true ]; then
+            print_step "Installing jq for JSON parsing"
+            sudo apt-get install -y jq 2>/dev/null || print_warning "Could not install jq"
+        fi
+        
+        # Try to get release information with better error handling
+        if command_exists jq; then
+            print_step "Fetching OpenROAD release information"
+            local api_response=$(curl -s --connect-timeout 10 --max-time 30 \
+                https://api.github.com/repos/The-OpenROAD-Project/OpenROAD/releases/latest 2>/dev/null)
+            
+            if [ -n "$api_response" ] && echo "$api_response" | jq -e . >/dev/null 2>&1; then
+                OPENROAD_URL=$(echo "$api_response" | \
+                    jq -r '.assets[]? | select(.name | contains("ubuntu22"))? | select(.name | contains("amd64"))? | .browser_download_url' 2>/dev/null | head -1)
+                
+                if [ -n "$OPENROAD_URL" ] && [ "$OPENROAD_URL" != "null" ]; then
+                    print_step "Downloading OpenROAD from: $OPENROAD_URL"
+                    if wget --timeout=60 "$OPENROAD_URL" -O /tmp/openroad.deb 2>/dev/null; then
+                        print_step "Installing OpenROAD from downloaded package"
+                        if [ "$USE_SUDO" = true ]; then
+                            # Install dependencies first
+                            sudo apt-get install -f -y 2>/dev/null || true
+                            
+                            if sudo dpkg -i /tmp/openroad.deb 2>/dev/null; then
+                                print_success "OpenROAD installed from GitHub release"
+                                OPENROAD_INSTALLED=true
+                                installation_success=true
+                            else
+                                print_step "Fixing dependencies and retrying installation"
+                                sudo apt-get install -f -y 2>/dev/null || true
+                                if sudo dpkg -i /tmp/openroad.deb 2>/dev/null; then
+                                    print_success "OpenROAD installed after dependency fix"
+                                    OPENROAD_INSTALLED=true
+                                    installation_success=true
+                                fi
+                            fi
+                        fi
+                        rm -f /tmp/openroad.deb 2>/dev/null || true
                     fi
                 fi
-            else
-                print_warning "Cannot install OpenROAD package without sudo"
             fi
-            rm -f /tmp/openroad.deb
-        else
-            print_error "Failed to download OpenROAD"
-            print_warning "Physical design flow will be limited without OpenROAD"
         fi
     fi
+    
+    # Method 3: Try building from source (last resort)
+    if [ "$installation_success" = false ] && [ "$USE_SUDO" = true ]; then
+        print_step "Attempting to build OpenROAD from source (this may take a while)"
+        print_warning "This is a fallback method and may take 30+ minutes"
+        
+        # Install build dependencies
+        sudo apt-get install -y build-essential cmake git python3-dev \
+            tcl-dev tk-dev libboost-all-dev libeigen3-dev \
+            bison flex swig libreadline-dev 2>/dev/null || true
+        
+        # Try a minimal OpenROAD build
+        local openroad_src="$INSTALL_DIR/openroad-src"
+        if git clone --depth 1 https://github.com/The-OpenROAD-Project/OpenROAD.git "$openroad_src" 2>/dev/null; then
+            cd "$openroad_src"
+            if mkdir -p build && cd build; then
+                if cmake .. -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR/openroad-install" 2>/dev/null; then
+                    print_step "Building OpenROAD (this will take time)..."
+                    if make -j$(nproc) 2>/dev/null && make install 2>/dev/null; then
+                        # Add to PATH
+                        export PATH="$INSTALL_DIR/openroad-install/bin:$PATH"
+                        print_success "OpenROAD built and installed from source"
+                        OPENROAD_INSTALLED=true
+                        installation_success=true
+                    fi
+                fi
+            fi
+            cd "$INSTALL_DIR"
+            rm -rf "$openroad_src" 2>/dev/null || true
+        fi
+    fi
+    
+    # Final status check
+    if [ "$installation_success" = false ]; then
+        print_warning "OpenROAD installation failed with all methods"
+        print_warning "Physical design flow will be limited without OpenROAD"
+        print_step "You can manually install OpenROAD later using:"
+        print_step "  sudo apt-get install openroad"
+        print_step "  or visit: https://github.com/The-OpenROAD-Project/OpenROAD"
+    fi
+    
+    # Clean up any temporary files
+    rm -f /tmp/openroad.deb 2>/dev/null || true
     
     # Verify OpenROAD installation
     if command -v openroad >/dev/null 2>&1; then
