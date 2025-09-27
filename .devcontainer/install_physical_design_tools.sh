@@ -278,14 +278,30 @@ install_skywater_pdk() {
     
     local skywater_dir="$INSTALL_DIR/skywater-pdk"
     
-    print_step "Cloning SkyWater PDK repository"
+    print_step "Checking SkyWater PDK repository"
     if [ -d "$skywater_dir" ]; then
-        print_step "Updating existing SkyWater PDK repository"
-        cd "$skywater_dir"
-        git fetch origin
-        git checkout "$SKYWATER_VERSION"
-        git pull origin "$SKYWATER_VERSION"
+        print_warning "SkyWater PDK directory already exists: $skywater_dir"
+        echo -n "Do you want to overwrite it? (y/N): "
+        read -r response
+        case "$response" in
+            [yY]|[yY][eE][sS])
+                print_step "Removing existing SkyWater PDK directory"
+                rm -rf "$skywater_dir"
+                print_step "Cloning fresh SkyWater PDK repository"
+                git clone --depth 1 --branch "$SKYWATER_VERSION" \
+                    https://github.com/google/skywater-pdk.git "$skywater_dir"
+                ;;
+            *)
+                print_warning "Skipping SkyWater PDK installation - using existing directory"
+                print_step "Attempting to update existing repository"
+                cd "$skywater_dir"
+                git fetch origin 2>/dev/null || print_warning "Could not fetch updates"
+                git checkout "$SKYWATER_VERSION" 2>/dev/null || print_warning "Could not checkout $SKYWATER_VERSION"
+                git pull origin "$SKYWATER_VERSION" 2>/dev/null || print_warning "Could not pull latest changes"
+                ;;
+        esac
     else
+        print_step "Cloning SkyWater PDK repository"
         git clone --depth 1 --branch "$SKYWATER_VERSION" \
             https://github.com/google/skywater-pdk.git "$skywater_dir"
     fi
