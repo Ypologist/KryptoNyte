@@ -291,7 +291,7 @@ prepare_design_config() {
     local target_rtl="$src_dir/$EFFECTIVE_TOP_MODULE.v"
     cp "$input_rtl" "$target_rtl"
     
-    # Create OpenLane2 configuration file
+    # Create OpenLane2 configuration file with current valid variables
     local config_file="$design_dir/config.json"
     cat > "$config_file" << EOF
 {
@@ -305,32 +305,18 @@ prepare_design_config() {
   
   "FP_CORE_UTIL": $CORE_UTILIZATION,
   "FP_ASPECT_RATIO": $ASPECT_RATIO,
-  "FP_PDN_AUTO_ADJUST": true,
   
   "SYNTH_STRATEGY": "$SYNTHESIS_STRATEGY",
-  "PL_BASIC_PLACEMENT": $([ "$PLACEMENT_STRATEGY" = "BASIC" ] && echo "true" || echo "false"),
-  "RT_MAX_LAYER": 6,
+  "RT_MAX_LAYER": "6",
   
-  "RUN_KLAYOUT": $GENERATE_GDS,
+  "RUN_KLAYOUT_STREAMOUT": $GENERATE_GDS,
   "RUN_KLAYOUT_DRC": $RUN_DRC,
   "RUN_KLAYOUT_XOR": false,
   
-  "RUN_MAGIC": true,
-  "RUN_MAGIC_DRC": $RUN_DRC,
-  "RUN_MAGIC_SPICE_EXPORT": $RUN_LVS,
+  "RUN_MAGIC_STREAMOUT": true,
+  "ERROR_ON_MAGIC_DRC": false,
   
-  "RUN_NETGEN": $RUN_LVS,
-  "RUN_NETGEN_LVS": $RUN_LVS,
-  
-  "RUN_OPENSTA": $RUN_STA,
-  "STA_REPORT_POWER": true,
-  
-  "RUN_CVC": false,
-  "RUN_ANTENNA_CHECK": $RUN_ANTENNA,
-  
-  "QUIT_ON_TIMING_VIOLATIONS": false,
-  "QUIT_ON_MAGIC_DRC": false,
-  "QUIT_ON_LVS_ERROR": false,
+  "ERROR_ON_LVS_ERROR": false,
   
   "EXTRA_LEFS": [],
   "EXTRA_GDS_FILES": [],
