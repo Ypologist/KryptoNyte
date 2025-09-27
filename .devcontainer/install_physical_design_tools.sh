@@ -949,50 +949,93 @@ install_nix() {
     
     print_step "Detected environment: $env_type"
     
-    # Install Nix with OpenLane cache configuration
-    print_step "Installing Nix with OpenLane binary cache"
-    print_step "This may take 5-10 minutes..."
+    # Install Nix using Ubuntu package manager
+    print_step "Installing Nix using Ubuntu package manager"
+    print_step "This is faster and simpler than the curl installer"
     
-    # Use the Determinate Systems installer with OpenLane cache
-    local nix_install_cmd='curl --proto "=https" --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm --extra-conf "
-    extra-substituters = https://openlane.cachix.org
-    extra-trusted-public-keys = openlane.cachix.org-1:qqdwh+QMNGmZAuyeQJTH9ErW57OWSvdtuwfBKdS254E=
-"'
+    if [ "$USE_SUDO" = true ]; then
+        # Update package list and install nix-bin
+        print_step "Updating package list..."
+        sudo apt-get update -qq 2>/dev/null || true
+        
+        print_step "Installing nix-bin package..."
+        if sudo apt-get install -y nix-bin; then
+            print_success "Nix package installed successfully"
+        else
+            print_error "Failed to install nix-bin package"
+            return 1
+        fi
+    else
+        print_error "Nix installation requires sudo privileges"
+        print_step "Please run with --with-sudo flag"
+        return 1
+    fi
     
-    if eval "$nix_install_cmd"; then
+    # Configure OpenLane binary cache
+    print_step "Configuring OpenLane binary cache"
+    local nix_conf_dir="/etc/nix"
+    local nix_conf_file="$nix_conf_dir/nix.conf"
+    
+    if [ "$USE_SUDO" = true ]; then
+        # Create nix configuration directory if it doesn't exist
+        sudo mkdir -p "$nix_conf_dir"
+        
+        # Add OpenLane cache configuration
+        local cache_config="extra-substituters = https://openlane.cachix.org
+extra-trusted-public-keys = openlane.cachix.org-1:qqdwh+QMNGmZAuyeQJTH9ErW57OWSvdtuwfBKdS254E="
+        
+        if [ -f "$nix_conf_file" ]; then
+            # Check if cache is already configured
+            if ! grep -q "openlane.cachix.org" "$nix_conf_file"; then
+                print_step "Adding OpenLane cache to existing nix.conf"
+                echo "$cache_config" | sudo tee -a "$nix_conf_file" >/dev/null
+            else
+                print_step "OpenLane cache already configured"
+            fi
+        else
+            print_step "Creating nix.conf with OpenLane cache"
+            echo "$cache_config" | sudo tee "$nix_conf_file" >/dev/null
+        fi
+    fi
+    
+    if true; then
         print_success "Nix installed successfully"
         
-        # Try multiple methods to source Nix environment
+        # Set up Nix environment for current session
         print_step "Setting up Nix environment for current session"
         
-        # Method 1: Source from profile.d
-        if [ -f "$HOME/.nix-profile/etc/profile.d/nix.sh" ]; then
-            print_step "Sourcing Nix from ~/.nix-profile/etc/profile.d/nix.sh"
-            source "$HOME/.nix-profile/etc/profile.d/nix.sh"
+        # For Ubuntu package installation, nix-shell should be available in /usr/bin
+        if [ -f "/usr/bin/nix-shell" ] && [[ ":$PATH:" != *":/usr/bin:"* ]]; then
+            print_step "Adding /usr/bin to PATH for nix-shell"
+            export PATH="/usr/bin:$PATH"
         fi
         
-        # Method 2: Source from /nix/var/nix/profiles/default
+        # Also try standard Nix locations for completeness
         if [ -f "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh" ]; then
             print_step "Sourcing Nix daemon from /nix/var/nix/profiles/default"
             source "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh"
         fi
         
-        # Method 3: Add Nix to PATH manually if found
+        # Add standard Nix paths if they exist
         if [ -d "/nix/var/nix/profiles/default/bin" ] && [[ ":$PATH:" != *":/nix/var/nix/profiles/default/bin:"* ]]; then
             print_step "Adding Nix to PATH manually"
             export PATH="/nix/var/nix/profiles/default/bin:$PATH"
         fi
         
-        # Verify Nix is now available
-        if command -v nix >/dev/null 2>&1; then
+        # Verify Nix tools are available
+        if command -v nix-shell >/dev/null 2>&1; then
+            local nix_shell_path=$(command -v nix-shell)
+            print_success "nix-shell is available at: $nix_shell_path"
+            NIX_INSTALLED=true
+        elif command -v nix >/dev/null 2>&1; then
             local nix_version=$(nix --version 2>/dev/null | head -1 || echo "unknown")
-            print_success "Nix is now available in PATH: $nix_version"
+            print_success "Nix is available in PATH: $nix_version"
             NIX_INSTALLED=true
         else
             print_warning "Nix installed but not found in PATH"
             print_step "Nix may require a new shell session to be available"
-            print_step "To manually source: source ~/.nix-profile/etc/profile.d/nix.sh"
-            NIX_INSTALLED=true  # Mark as installed even if not in current PATH
+            print_step "You can verify installation with: which nix-shell"
+            NIX_INSTALLED=true  # Mark as installed since apt install succeeded
         fi
         
     else
