@@ -17,8 +17,10 @@ import scala.util.{Try, Success, Failure}
 // Import KryptoNyte modules
 import ALUs.ALU32
 
-// Try importing ZeroNyteRV32ICore directly - it should work since zeroNyte is a dependency
-// The class has no package declaration, so import it at the root level
+// Explicit import for ZeroNyteRV32ICore
+// Since it has no package, we try importing it directly
+import ZeroNyteRV32ICore
+
 // Note: RV32IDecode is an object (not a Module class), so it's not imported for RTL generation
 
 // Configuration case class for flexible path management
