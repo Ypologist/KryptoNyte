@@ -1,5 +1,5 @@
-// KryptoNyte Physical Design Flow
-// Flattens hierarchical RTL and runs complete physical design flow to GDS-II
+// KryptoNyte Physical Design Flow with OpenLane2
+// Flattens hierarchical RTL and runs complete RTL-to-GDSII flow using OpenLane2
 // Place in: KryptoNyte/cores/generators/
 // Run from: KryptoNyte/cores/ with sbt 'runMain generators.GeneratePhysicalDesign'
 
@@ -11,7 +11,7 @@ import java.nio.file.{Files, Paths, StandardCopyOption}
 import scala.util.{Try, Success, Failure}
 import scala.io.Source
 
-// Configuration for physical design flow
+// Configuration for OpenLane2 physical design flow
 case class PhysicalDesignConfig(
   // Input configuration
   inputRTLPath: String = "generated/verilog_hierarchical_timed",
@@ -20,19 +20,15 @@ case class PhysicalDesignConfig(
   
   // Output directories
   outputRoot: String = "physical_design",
-  synthesisDir: String = "synthesis",
-  floorplanDir: String = "floorplan", 
-  placementDir: String = "placement",
-  routingDir: String = "routing",
-  signoffDir: String = "signoff",
-  gdsDir: String = "gds",
+  openlaneRunsDir: String = "runs",
   reportsDir: String = "reports",
   
-  // PDK configuration
-  pdkRoot: String = "",
-  standardCellLibrary: String = "",
-  technologyFile: String = "",
-  layerMap: String = "",
+  // OpenLane2 configuration
+  openlane2Path: String = "",
+  nixShellPath: String = "",
+  
+  // PDK configuration (OpenLane2 handles PDK automatically)
+  pdkVariant: String = "sky130_fd_sc_hd", // SkyWater 130nm high density
   
   // Design constraints
   clockPeriod: Double = 10.0, // ns
@@ -42,22 +38,22 @@ case class PhysicalDesignConfig(
   // Physical design parameters
   coreUtilization: Double = 0.7,
   aspectRatio: Double = 1.0,
-  coreMargin: Double = 10.0, // microns
-  
-  // Tool paths (auto-discovered if empty)
-  yosysPath: String = "",
-  openStaPath: String = "",
-  openRoadPath: String = "",
-  magicPath: String = "",
-  klayoutPath: String = "",
+  dieArea: String = "", // Auto-calculated if empty
+  coreArea: String = "", // Auto-calculated if empty
   
   // Flow control
   runSynthesis: Boolean = true,
   runFloorplan: Boolean = true,
   runPlacement: Boolean = true,
+  runCTS: Boolean = true, // Clock Tree Synthesis
   runRouting: Boolean = true,
   runSignoff: Boolean = true,
   generateGDS: Boolean = true,
+  
+  // OpenLane2 specific options
+  synthesisStrategy: String = "AREA 0", // AREA 0, AREA 1, AREA 2, DELAY 0, DELAY 1, etc.
+  placementStrategy: String = "BASIC", // BASIC, CONGESTION_AWARE
+  routingStrategy: String = "0", // 0-3, higher numbers for more effort
   
   // Options
   verbose: Boolean = true,
@@ -65,56 +61,67 @@ case class PhysicalDesignConfig(
   generateReports: Boolean = true,
   runDRC: Boolean = true,
   runLVS: Boolean = true,
-  runSTA: Boolean = true
+  runSTA: Boolean = true,
+  runAntenna: Boolean = true
 ) {
   
   // Computed paths
   def fullOutputRoot: String = if (Paths.get(outputRoot).isAbsolute) outputRoot else s"${System.getProperty("user.dir")}/$outputRoot"
-  def fullSynthesisPath: String = s"$fullOutputRoot/$synthesisDir"
-  def fullFloorplanPath: String = s"$fullOutputRoot/$floorplanDir"
-  def fullPlacementPath: String = s"$fullOutputRoot/$placementDir"
-  def fullRoutingPath: String = s"$fullOutputRoot/$routingDir"
-  def fullSignoffPath: String = s"$fullOutputRoot/$signoffDir"
-  def fullGdsPath: String = s"$fullOutputRoot/$gdsDir"
+  def fullRunsPath: String = s"$fullOutputRoot/$openlaneRunsDir"
   def fullReportsPath: String = s"$fullOutputRoot/$reportsDir"
   
   def effectiveTopModule: String = if (topModule.nonEmpty) topModule else moduleName
   
-  // PDK auto-discovery
-  def discoverPDK(): PhysicalDesignConfig = {
-    if (pdkRoot.nonEmpty) return this
+  // OpenLane2 auto-discovery
+  def discoverOpenLane2(): PhysicalDesignConfig = {
+    if (openlane2Path.nonEmpty) return this
     
-    val pdkSearchPaths = Seq(
-      "/opt/skywater-pdk/pdks/share/pdk/sky130A",
-      "/usr/local/share/pdk/sky130A",
-      System.getenv("PDK_ROOT"),
-      System.getenv("SKYWATER_PDK_ROOT")
+    val openlaneSearchPaths = Seq(
+      "/opt/skywater-pdk/openlane2",
+      "/usr/local/openlane2",
+      s"${System.getProperty("user.home")}/openlane2",
+      System.getenv("OPENLANE2_ROOT"),
+      System.getenv("OPENLANE_ROOT")
     ).filter(_ != null)
     
-    val discoveredPDK = pdkSearchPaths.find(path => Files.exists(Paths.get(path)))
+    val discoveredOpenLane = openlaneSearchPaths.find(path => 
+      Files.exists(Paths.get(path)) && 
+      (Files.exists(Paths.get(s"$path/flake.nix")) || Files.exists(Paths.get(s"$path/shell.nix")))
+    )
     
-    discoveredPDK match {
-      case Some(pdk) =>
-        val libPath = s"$pdk/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib"
-        val techPath = s"$pdk/libs.tech/magic/sky130A.tech"
-        val layerMapPath = s"$pdk/libs.tech/klayout/sky130A.lyp"
-        
-        this.copy(
-          pdkRoot = pdk,
-          standardCellLibrary = if (Files.exists(Paths.get(libPath))) libPath else standardCellLibrary,
-          technologyFile = if (Files.exists(Paths.get(techPath))) techPath else technologyFile,
-          layerMap = if (Files.exists(Paths.get(layerMapPath))) layerMapPath else layerMap
-        )
+    discoveredOpenLane match {
+      case Some(ol2Path) =>
+        this.copy(openlane2Path = ol2Path)
       case None => this
+    }
+  }
+  
+  // Discover Nix
+  def discoverNix(): PhysicalDesignConfig = {
+    if (nixShellPath.nonEmpty) return this
+    
+    val nixPaths = Seq(
+      "/nix/var/nix/profiles/default/bin/nix-shell",
+      s"${System.getProperty("user.home")}/.nix-profile/bin/nix-shell",
+      "nix-shell" // In PATH
+    )
+    
+    val discoveredNix = nixPaths.find(path => {
+      Try {
+        val result = s"which ${path.split("/").last}".!!.trim
+        result.nonEmpty && Files.exists(Paths.get(result))
+      }.getOrElse(false)
+    })
+    
+    discoveredNix match {
+      case Some(nixPath) => this.copy(nixShellPath = nixPath)
+      case None => this.copy(nixShellPath = "nix-shell") // Default fallback
     }
   }
   
   // Create all necessary directories
   def createDirectories(): Unit = {
-    val dirs = Seq(
-      fullSynthesisPath, fullFloorplanPath, fullPlacementPath, 
-      fullRoutingPath, fullSignoffPath, fullGdsPath, fullReportsPath
-    )
+    val dirs = Seq(fullRunsPath, fullReportsPath)
     dirs.foreach { dir =>
       val path = Paths.get(dir)
       if (!Files.exists(path)) {
@@ -130,8 +137,8 @@ object GeneratePhysicalDesign extends App {
   // Parse command line arguments
   val config = parseArgs(args)
   
-  // Auto-discover PDK if not specified
-  val finalConfig = config.discoverPDK()
+  // Auto-discover OpenLane2 and Nix if not specified
+  val finalConfig = config.discoverOpenLane2().discoverNix()
   
   // Validate configuration
   validateConfiguration(finalConfig)
@@ -144,18 +151,19 @@ object GeneratePhysicalDesign extends App {
     printConfiguration(finalConfig)
   }
   
-  // Run physical design flow
+  // Run OpenLane2 physical design flow
   try {
-    runPhysicalDesignFlow(finalConfig)
+    runOpenLane2Flow(finalConfig)
     
     println("\n" + "="*80)
-    println("Physical design flow completed successfully!")
-    println(s"GDS-II file: ${finalConfig.fullGdsPath}/${finalConfig.effectiveTopModule}.gds")
+    println("OpenLane2 physical design flow completed successfully!")
+    println(s"Results directory: ${finalConfig.fullRunsPath}")
+    println(s"GDS-II file: ${finalConfig.fullRunsPath}/${finalConfig.effectiveTopModule}/results/final/gds/${finalConfig.effectiveTopModule}.gds")
     println("="*80)
     
   } catch {
     case e: Exception =>
-      println(s"Physical design flow failed: ${e.getMessage}")
+      println(s"OpenLane2 physical design flow failed: ${e.getMessage}")
       if (finalConfig.verbose) e.printStackTrace()
       System.exit(1)
   }
@@ -180,8 +188,11 @@ object GeneratePhysicalDesign extends App {
         case "--output-root" => 
           config = config.copy(outputRoot = args(i + 1))
           i += 2
-        case "--pdk-root" => 
-          config = config.copy(pdkRoot = args(i + 1))
+        case "--openlane2-path" => 
+          config = config.copy(openlane2Path = args(i + 1))
+          i += 2
+        case "--pdk-variant" => 
+          config = config.copy(pdkVariant = args(i + 1))
           i += 2
         case "--clock-period" => 
           config = config.copy(clockPeriod = args(i + 1).toDouble)
@@ -192,8 +203,17 @@ object GeneratePhysicalDesign extends App {
         case "--aspect-ratio" => 
           config = config.copy(aspectRatio = args(i + 1).toDouble)
           i += 2
+        case "--synthesis-strategy" => 
+          config = config.copy(synthesisStrategy = args(i + 1))
+          i += 2
+        case "--placement-strategy" => 
+          config = config.copy(placementStrategy = args(i + 1))
+          i += 2
+        case "--routing-strategy" => 
+          config = config.copy(routingStrategy = args(i + 1))
+          i += 2
         case "--synthesis-only" => 
-          config = config.copy(runFloorplan = false, runPlacement = false, runRouting = false, runSignoff = false, generateGDS = false)
+          config = config.copy(runFloorplan = false, runPlacement = false, runCTS = false, runRouting = false, runSignoff = false, generateGDS = false)
           i += 1
         case "--no-signoff" => 
           config = config.copy(runSignoff = false)
@@ -218,69 +238,75 @@ object GeneratePhysicalDesign extends App {
   
   def printHelp(): Unit = {
     println("""
-KryptoNyte Physical Design Flow
+KryptoNyte Physical Design Flow with OpenLane2
 
-Usage: sbt 'runMain kryptonyte.generators.GeneratePhysicalDesign [options]'
+Usage: sbt 'runMain generators.GeneratePhysicalDesign [options]'
 
 Options:
   --input-rtl <path>          Input RTL directory (from hierarchical generator)
   --module-name <name>        Module name to process
   --top-module <name>         Top-level module name (defaults to module-name)
   --output-root <path>        Root directory for physical design outputs
-  --pdk-root <path>           PDK root directory (auto-discovered if not specified)
+  --openlane2-path <path>     OpenLane2 installation directory (auto-discovered if not specified)
+  --pdk-variant <variant>     PDK variant (default: sky130_fd_sc_hd)
   --clock-period <ns>         Clock period in nanoseconds (default: 10.0)
   --utilization <ratio>       Core utilization ratio 0.0-1.0 (default: 0.7)
   --aspect-ratio <ratio>      Core aspect ratio (default: 1.0)
+  --synthesis-strategy <str>  Synthesis strategy (default: "AREA 0")
+  --placement-strategy <str>  Placement strategy (default: "BASIC")
+  --routing-strategy <num>    Routing strategy 0-3 (default: "0")
   --synthesis-only            Run synthesis only, skip physical design
   --no-signoff                Skip signoff verification (DRC/LVS/STA)
   --no-gds                    Skip GDS-II generation
   --quiet                     Reduce output verbosity
   --help, -h                  Show this help message
 
-Flow Steps:
-  1. Synthesis       - Logic synthesis with standard cells
+OpenLane2 Flow Steps:
+  1. Synthesis       - Logic synthesis with Yosys
   2. Floorplan       - Die and core area planning
-  3. Placement       - Standard cell placement
-  4. Routing         - Global and detailed routing
-  5. Signoff         - DRC, LVS, and STA verification
-  6. GDS Generation  - Final GDS-II layout export
+  3. Placement       - Global and detailed placement
+  4. CTS             - Clock tree synthesis
+  5. Routing         - Global and detailed routing
+  6. Signoff         - DRC, LVS, STA, and antenna checks
+  7. GDS Generation  - Final GDS-II layout export
 
 Examples:
   # Complete flow for ZeroNyte core
-  sbt 'runMain kryptonyte.generators.GeneratePhysicalDesign --module-name ZeroNyteRV32ICore'
+  sbt 'runMain generators.GeneratePhysicalDesign --module-name ZeroNyteRV32ICore'
   
   # Synthesis only with custom clock
-  sbt 'runMain kryptonyte.generators.GeneratePhysicalDesign --module-name ALU32 --clock-period 5.0 --synthesis-only'
+  sbt 'runMain generators.GeneratePhysicalDesign --module-name ALU32 --clock-period 5.0 --synthesis-only'
   
-  # Custom PDK and output location
-  sbt 'runMain kryptonyte.generators.GeneratePhysicalDesign --pdk-root /opt/skywater-pdk/pdks/sky130A --output-root /tmp/physical'
+  # Custom OpenLane2 path and output location
+  sbt 'runMain generators.GeneratePhysicalDesign --openlane2-path /opt/skywater-pdk/openlane2 --output-root /tmp/physical'
 
 Environment Variables:
-  PDK_ROOT                    PDK root directory
-  SKYWATER_PDK_ROOT          SkyWater PDK root directory
-  OPENROAD_PATH              Path to OpenROAD binary
-  MAGIC_PATH                 Path to Magic VLSI binary
-  KLAYOUT_PATH               Path to KLayout binary
+  OPENLANE2_ROOT             OpenLane2 installation directory
+  OPENLANE_ROOT              OpenLane installation directory (legacy)
 """)
   }
   
   def printConfiguration(config: PhysicalDesignConfig): Unit = {
     println("\n" + "="*80)
-    println("KryptoNyte Physical Design Flow Configuration")
+    println("KryptoNyte OpenLane2 Physical Design Flow Configuration")
     println("="*80)
     println(s"Input RTL Path:        ${config.inputRTLPath}")
     println(s"Module Name:           ${config.moduleName}")
     println(s"Top Module:            ${config.effectiveTopModule}")
     println(s"Output Root:           ${config.fullOutputRoot}")
-    println(s"PDK Root:              ${if (config.pdkRoot.nonEmpty) config.pdkRoot else "Not configured"}")
-    println(s"Standard Cell Library: ${if (config.standardCellLibrary.nonEmpty) config.standardCellLibrary else "Not configured"}")
-    println(s"Technology File:       ${if (config.technologyFile.nonEmpty) config.technologyFile else "Not configured"}")
+    println(s"OpenLane2 Path:        ${if (config.openlane2Path.nonEmpty) config.openlane2Path else "Auto-discover"}")
+    println(s"Nix Shell Path:        ${config.nixShellPath}")
+    println(s"PDK Variant:           ${config.pdkVariant}")
     println(s"Clock Period:          ${config.clockPeriod} ns")
     println(s"Core Utilization:      ${config.coreUtilization}")
     println(s"Aspect Ratio:          ${config.aspectRatio}")
+    println(s"Synthesis Strategy:    ${config.synthesisStrategy}")
+    println(s"Placement Strategy:    ${config.placementStrategy}")
+    println(s"Routing Strategy:      ${config.routingStrategy}")
     println(s"Run Synthesis:         ${config.runSynthesis}")
     println(s"Run Floorplan:         ${config.runFloorplan}")
     println(s"Run Placement:         ${config.runPlacement}")
+    println(s"Run CTS:               ${config.runCTS}")
     println(s"Run Routing:           ${config.runRouting}")
     println(s"Run Signoff:           ${config.runSignoff}")
     println(s"Generate GDS:          ${config.generateGDS}")
@@ -288,11 +314,10 @@ Environment Variables:
   }
   
   def validateConfiguration(config: PhysicalDesignConfig): Unit = {
-    // Check input RTL file exists - ensure proper path resolution
+    // Check input RTL file exists
     val inputRTLPath = if (config.inputRTLPath.startsWith("/")) {
-      config.inputRTLPath  // Absolute path
+      config.inputRTLPath
     } else {
-      // Relative path - resolve from current working directory
       new File(".").getCanonicalPath + "/" + config.inputRTLPath
     }
     val inputRTLFile = new File(s"${inputRTLPath}/${config.moduleName}.v")
@@ -300,13 +325,28 @@ Environment Variables:
       throw new RuntimeException(s"Input RTL file not found: ${inputRTLFile.getAbsolutePath}")
     }
     
-    // Check PDK configuration
-    if (config.runSynthesis && config.standardCellLibrary.isEmpty) {
-      throw new RuntimeException("Standard cell library not configured - required for synthesis")
+    // Check OpenLane2 installation
+    if (config.openlane2Path.isEmpty) {
+      throw new RuntimeException("OpenLane2 installation not found - please install OpenLane2 or specify --openlane2-path")
     }
     
-    if (config.generateGDS && config.technologyFile.isEmpty) {
-      throw new RuntimeException("Technology file not configured - required for GDS generation")
+    if (!Files.exists(Paths.get(config.openlane2Path))) {
+      throw new RuntimeException(s"OpenLane2 path does not exist: ${config.openlane2Path}")
+    }
+    
+    // Check for Nix environment files
+    val hasFlakeNix = Files.exists(Paths.get(s"${config.openlane2Path}/flake.nix"))
+    val hasShellNix = Files.exists(Paths.get(s"${config.openlane2Path}/shell.nix"))
+    if (!hasFlakeNix && !hasShellNix) {
+      throw new RuntimeException(s"OpenLane2 Nix environment not found at: ${config.openlane2Path}")
+    }
+    
+    // Check Nix availability
+    Try {
+      s"${config.nixShellPath} --version".!!
+    } match {
+      case Success(_) => // Nix is available
+      case Failure(_) => throw new RuntimeException(s"Nix not found at: ${config.nixShellPath}")
     }
     
     // Validate design parameters
@@ -319,340 +359,132 @@ Environment Variables:
     }
   }
   
-  def runPhysicalDesignFlow(config: PhysicalDesignConfig): Unit = {
+  def runOpenLane2Flow(config: PhysicalDesignConfig): Unit = {
     println(s"\n${"="*60}")
-    println(s"Starting Physical Design Flow for ${config.effectiveTopModule}")
+    println(s"Starting OpenLane2 Flow for ${config.effectiveTopModule}")
     println(s"${"="*60}")
     
-    // Step 1: Synthesis
-    if (config.runSynthesis) {
-      runSynthesis(config)
-    }
+    // Step 1: Prepare design configuration
+    prepareDesignConfig(config)
     
-    // Step 2: Floorplan
-    if (config.runFloorplan) {
-      runFloorplan(config)
-    }
+    // Step 2: Run OpenLane2 flow
+    runOpenLane2(config)
     
-    // Step 3: Placement
-    if (config.runPlacement) {
-      runPlacement(config)
-    }
-    
-    // Step 4: Routing
-    if (config.runRouting) {
-      runRouting(config)
-    }
-    
-    // Step 5: Signoff
-    if (config.runSignoff) {
-      runSignoff(config)
-    }
-    
-    // Step 6: GDS Generation
-    if (config.generateGDS) {
-      generateGDS(config)
-    }
-    
-    // Generate final reports
+    // Step 3: Generate reports
     if (config.generateReports) {
       generateFinalReports(config)
     }
   }
   
-  def runSynthesis(config: PhysicalDesignConfig): Unit = {
+  def prepareDesignConfig(config: PhysicalDesignConfig): Unit = {
     println(s"\n${"-"*40}")
-    println("Step 1: Logic Synthesis")
+    println("Preparing OpenLane2 Design Configuration")
     println(s"${"-"*40}")
-    
-    val yosysPath = discoverTool("yosys", config.yosysPath)
-    if (yosysPath.isEmpty) {
-      throw new RuntimeException("yosys not found - required for synthesis")
-    }
     
     val inputRTL = s"${config.inputRTLPath}/${config.moduleName}.v"
-    val outputNetlist = s"${config.fullSynthesisPath}/${config.effectiveTopModule}_synth.v"
-    val reportFile = s"${config.fullReportsPath}/synthesis_report.txt"
+    val designDir = s"${config.fullRunsPath}/${config.effectiveTopModule}"
+    val srcDir = s"$designDir/src"
     
-    // Create synthesis script
-    val synthScript = s"""
-# KryptoNyte Synthesis Script
-read_liberty -lib ${config.standardCellLibrary}
-read_verilog $inputRTL
-hierarchy -check -top ${config.effectiveTopModule}
-
-# Synthesis flow
-proc
-opt
-fsm
-opt
-memory
-opt
-techmap
-opt
-
-# Map to standard cells
-dfflibmap -liberty ${config.standardCellLibrary}
-abc -liberty ${config.standardCellLibrary}
-opt_clean
-
-# Generate reports
-stat -liberty ${config.standardCellLibrary}
-check
-
-# Write outputs
-write_verilog -noattr $outputNetlist
-"""
+    // Create design directory structure
+    Files.createDirectories(Paths.get(srcDir))
     
-    val scriptFile = s"${config.fullSynthesisPath}/synthesis.ys"
-    writeToFile(scriptFile, synthScript)
+    // Copy RTL file to design source directory
+    val targetRTL = s"$srcDir/${config.effectiveTopModule}.v"
+    Files.copy(Paths.get(inputRTL), Paths.get(targetRTL), StandardCopyOption.REPLACE_EXISTING)
     
-    val yosysCommand = Seq(yosysPath, "-s", scriptFile)
+    // Create OpenLane2 configuration file
+    val configContent = generateOpenLaneConfig(config)
+    val configFile = s"$designDir/config.json"
+    writeToFile(configFile, configContent)
     
-    if (config.verbose) {
-      println(s"Running synthesis: ${yosysCommand.mkString(" ")}")
-    }
-    
-    val result = (yosysCommand #> new File(reportFile)).!
-    if (result != 0) {
-      throw new RuntimeException(s"Synthesis failed with code $result")
-    }
-    
-    println("✅ Synthesis completed successfully")
+    println(s"✅ Design configuration prepared at: $designDir")
   }
   
-  def runFloorplan(config: PhysicalDesignConfig): Unit = {
+  def generateOpenLaneConfig(config: PhysicalDesignConfig): String = {
+    val clockPeriodStr = f"${config.clockPeriod}%.2f"
+    
+    s"""{
+  "DESIGN_NAME": "${config.effectiveTopModule}",
+  "VERILOG_FILES": ["dir::src/${config.effectiveTopModule}.v"],
+  "CLOCK_PORT": "${config.clockPort}",
+  "CLOCK_PERIOD": $clockPeriodStr,
+  
+  "PDK": "sky130A",
+  "STD_CELL_LIBRARY": "${config.pdkVariant}",
+  
+  "FP_CORE_UTIL": ${config.coreUtilization},
+  "FP_ASPECT_RATIO": ${config.aspectRatio},
+  "FP_PDN_AUTO_ADJUST": true,
+  
+  "SYNTH_STRATEGY": "${config.synthesisStrategy}",
+  "PL_BASIC_PLACEMENT": ${config.placementStrategy == "BASIC"},
+  "RT_MAX_LAYER": 6,
+  
+  "RUN_KLAYOUT": ${config.generateGDS},
+  "RUN_KLAYOUT_DRC": ${config.runDRC},
+  "RUN_KLAYOUT_XOR": false,
+  
+  "RUN_MAGIC": true,
+  "RUN_MAGIC_DRC": ${config.runDRC},
+  "RUN_MAGIC_SPICE_EXPORT": ${config.runLVS},
+  
+  "RUN_NETGEN": ${config.runLVS},
+  "RUN_NETGEN_LVS": ${config.runLVS},
+  
+  "RUN_OPENSTA": ${config.runSTA},
+  "STA_REPORT_POWER": true,
+  
+  "RUN_CVC": false,
+  "RUN_ANTENNA_CHECK": ${config.runAntenna},
+  
+  "QUIT_ON_TIMING_VIOLATIONS": false,
+  "QUIT_ON_MAGIC_DRC": false,
+  "QUIT_ON_LVS_ERROR": false,
+  
+  "EXTRA_LEFS": [],
+  "EXTRA_GDS_FILES": [],
+  "EXTRA_LIBS": []
+}"""
+  }
+  
+  def runOpenLane2(config: PhysicalDesignConfig): Unit = {
     println(s"\n${"-"*40}")
-    println("Step 2: Floorplan")
+    println("Running OpenLane2 Flow")
     println(s"${"-"*40}")
     
-    val openroadPath = discoverTool("openroad", config.openRoadPath)
-    if (openroadPath.isEmpty) {
-      throw new RuntimeException("OpenROAD not found - required for floorplan")
-    }
+    val designDir = s"${config.fullRunsPath}/${config.effectiveTopModule}"
+    val logFile = s"${config.fullReportsPath}/openlane2_run.log"
     
-    val inputNetlist = s"${config.fullSynthesisPath}/${config.effectiveTopModule}_synth.v"
-    val outputDef = s"${config.fullFloorplanPath}/${config.effectiveTopModule}_floorplan.def"
-    
-    // Create floorplan script
-    val floorplanScript = s"""
-# KryptoNyte Floorplan Script
-read_liberty ${config.standardCellLibrary}
-read_verilog $inputNetlist
-link_design ${config.effectiveTopModule}
-
-# Initialize floorplan
-initialize_floorplan \\
-  -utilization ${config.coreUtilization} \\
-  -aspect_ratio ${config.aspectRatio} \\
-  -core_space ${config.coreMargin}
-
-# Place I/O pins
-auto_place_pins
-
-# Write outputs
-write_def $outputDef
-"""
-    
-    val scriptFile = s"${config.fullFloorplanPath}/floorplan.tcl"
-    writeToFile(scriptFile, floorplanScript)
-    
-    val openroadCommand = Seq(openroadPath, "-no_init", scriptFile)
+    // Construct OpenLane2 command
+    val openlaneCommand = Seq(
+      config.nixShellPath,
+      "--run",
+      s"cd ${config.openlane2Path} && openlane --run-dir $designDir $designDir"
+    )
     
     if (config.verbose) {
-      println(s"Running floorplan: ${openroadCommand.mkString(" ")}")
+      println(s"Running OpenLane2: ${openlaneCommand.mkString(" ")}")
+      println(s"Design directory: $designDir")
+      println(s"Log file: $logFile")
     }
     
-    val result = openroadCommand.!
+    // Set working directory to OpenLane2 installation
+    val processBuilder = Process(openlaneCommand, new File(config.openlane2Path))
+    
+    // Run OpenLane2 with output redirection
+    val result = if (config.verbose) {
+      // Show output in real-time and save to log
+      (processBuilder #> new File(logFile)).!
+    } else {
+      // Only save to log file
+      (processBuilder #> new File(logFile) #&& processBuilder).!
+    }
+    
     if (result != 0) {
-      throw new RuntimeException(s"Floorplan failed with code $result")
+      throw new RuntimeException(s"OpenLane2 flow failed with exit code $result. Check log: $logFile")
     }
     
-    println("✅ Floorplan completed successfully")
-  }
-  
-  def runPlacement(config: PhysicalDesignConfig): Unit = {
-    println(s"\n${"-"*40}")
-    println("Step 3: Placement")
-    println(s"${"-"*40}")
-    
-    val openroadPath = discoverTool("openroad", config.openRoadPath)
-    if (openroadPath.isEmpty) {
-      throw new RuntimeException("OpenROAD not found - required for placement")
-    }
-    
-    val inputDef = s"${config.fullFloorplanPath}/${config.effectiveTopModule}_floorplan.def"
-    val outputDef = s"${config.fullPlacementPath}/${config.effectiveTopModule}_placed.def"
-    
-    // Create placement script
-    val placementScript = s"""
-# KryptoNyte Placement Script
-read_liberty ${config.standardCellLibrary}
-read_def $inputDef
-
-# Global placement
-global_placement
-
-# Detailed placement
-detailed_placement
-
-# Write outputs
-write_def $outputDef
-"""
-    
-    val scriptFile = s"${config.fullPlacementPath}/placement.tcl"
-    writeToFile(scriptFile, placementScript)
-    
-    val openroadCommand = Seq(openroadPath, "-no_init", scriptFile)
-    
-    if (config.verbose) {
-      println(s"Running placement: ${openroadCommand.mkString(" ")}")
-    }
-    
-    val result = openroadCommand.!
-    if (result != 0) {
-      throw new RuntimeException(s"Placement failed with code $result")
-    }
-    
-    println("✅ Placement completed successfully")
-  }
-  
-  def runRouting(config: PhysicalDesignConfig): Unit = {
-    println(s"\n${"-"*40}")
-    println("Step 4: Routing")
-    println(s"${"-"*40}")
-    
-    val openroadPath = discoverTool("openroad", config.openRoadPath)
-    if (openroadPath.isEmpty) {
-      throw new RuntimeException("OpenROAD not found - required for routing")
-    }
-    
-    val inputDef = s"${config.fullPlacementPath}/${config.effectiveTopModule}_placed.def"
-    val outputDef = s"${config.fullRoutingPath}/${config.effectiveTopModule}_routed.def"
-    
-    // Create routing script
-    val routingScript = s"""
-# KryptoNyte Routing Script
-read_liberty ${config.standardCellLibrary}
-read_def $inputDef
-
-# Global routing
-global_route
-
-# Detailed routing
-detailed_route
-
-# Write outputs
-write_def $outputDef
-"""
-    
-    val scriptFile = s"${config.fullRoutingPath}/routing.tcl"
-    writeToFile(scriptFile, routingScript)
-    
-    val openroadCommand = Seq(openroadPath, "-no_init", scriptFile)
-    
-    if (config.verbose) {
-      println(s"Running routing: ${openroadCommand.mkString(" ")}")
-    }
-    
-    val result = openroadCommand.!
-    if (result != 0) {
-      throw new RuntimeException(s"Routing failed with code $result")
-    }
-    
-    println("✅ Routing completed successfully")
-  }
-  
-  def runSignoff(config: PhysicalDesignConfig): Unit = {
-    println(s"\n${"-"*40}")
-    println("Step 5: Signoff Verification")
-    println(s"${"-"*40}")
-    
-    if (config.runDRC) {
-      runDRC(config)
-    }
-    
-    if (config.runLVS) {
-      runLVS(config)
-    }
-    
-    if (config.runSTA) {
-      runSTA(config)
-    }
-    
-    println("✅ Signoff verification completed")
-  }
-  
-  def runDRC(config: PhysicalDesignConfig): Unit = {
-    println("Running DRC...")
-    
-    val magicPath = discoverTool("magic", config.magicPath)
-    if (magicPath.isEmpty) {
-      println("Warning: Magic not found, skipping DRC")
-      return
-    }
-    
-    // DRC implementation would go here
-    println("✅ DRC completed")
-  }
-  
-  def runLVS(config: PhysicalDesignConfig): Unit = {
-    println("Running LVS...")
-    
-    // LVS implementation would go here
-    println("✅ LVS completed")
-  }
-  
-  def runSTA(config: PhysicalDesignConfig): Unit = {
-    println("Running STA...")
-    
-    val openstaPath = discoverTool("sta", config.openStaPath)
-    if (openstaPath.isEmpty) {
-      println("Warning: OpenSTA not found, skipping STA")
-      return
-    }
-    
-    // STA implementation would go here
-    println("✅ STA completed")
-  }
-  
-  def generateGDS(config: PhysicalDesignConfig): Unit = {
-    println(s"\n${"-"*40}")
-    println("Step 6: GDS-II Generation")
-    println(s"${"-"*40}")
-    
-    val magicPath = discoverTool("magic", config.magicPath)
-    if (magicPath.isEmpty) {
-      throw new RuntimeException("Magic not found - required for GDS generation")
-    }
-    
-    val inputDef = s"${config.fullRoutingPath}/${config.effectiveTopModule}_routed.def"
-    val outputGds = s"${config.fullGdsPath}/${config.effectiveTopModule}.gds"
-    
-    // Create Magic script for GDS generation
-    val magicScript = s"""
-# KryptoNyte GDS Generation Script
-tech load ${config.technologyFile}
-def read $inputDef
-gds write $outputGds
-quit
-"""
-    
-    val scriptFile = s"${config.fullGdsPath}/gds_gen.tcl"
-    writeToFile(scriptFile, magicScript)
-    
-    val magicCommand = Seq(magicPath, "-noconsole", "-dnull", "-rcfile", scriptFile)
-    
-    if (config.verbose) {
-      println(s"Generating GDS: ${magicCommand.mkString(" ")}")
-    }
-    
-    val result = magicCommand.!
-    if (result != 0) {
-      throw new RuntimeException(s"GDS generation failed with code $result")
-    }
-    
-    println("✅ GDS-II generation completed successfully")
+    println("✅ OpenLane2 flow completed successfully")
   }
   
   def generateFinalReports(config: PhysicalDesignConfig): Unit = {
@@ -660,39 +492,87 @@ quit
     println("Generating Final Reports")
     println(s"${"-"*40}")
     
+    val designDir = s"${config.fullRunsPath}/${config.effectiveTopModule}"
+    val resultsDir = s"$designDir/results/final"
     val reportFile = s"${config.fullReportsPath}/final_report.md"
+    
+    // Check for output files
+    val gdsFile = s"$resultsDir/gds/${config.effectiveTopModule}.gds"
+    val defFile = s"$resultsDir/def/${config.effectiveTopModule}.def"
+    val netlistFile = s"$resultsDir/verilog/gl/${config.effectiveTopModule}.v"
+    val sdfFile = s"$resultsDir/sdf/${config.effectiveTopModule}.sdf"
+    
     val report = s"""
-# KryptoNyte Physical Design Report
+# KryptoNyte OpenLane2 Physical Design Report
 
 ## Design Information
 - **Module Name**: ${config.effectiveTopModule}
-- **Clock Period**: ${config.clockPeriod} ns
+- **Clock Period**: ${config.clockPeriod} ns (${1000.0/config.clockPeriod} MHz)
 - **Core Utilization**: ${config.coreUtilization}
 - **Aspect Ratio**: ${config.aspectRatio}
+- **PDK Variant**: ${config.pdkVariant}
+
+## OpenLane2 Configuration
+- **Synthesis Strategy**: ${config.synthesisStrategy}
+- **Placement Strategy**: ${config.placementStrategy}
+- **Routing Strategy**: ${config.routingStrategy}
 
 ## Flow Summary
 - **Synthesis**: ${if (config.runSynthesis) "✅ Completed" else "⏭️ Skipped"}
 - **Floorplan**: ${if (config.runFloorplan) "✅ Completed" else "⏭️ Skipped"}
 - **Placement**: ${if (config.runPlacement) "✅ Completed" else "⏭️ Skipped"}
+- **Clock Tree Synthesis**: ${if (config.runCTS) "✅ Completed" else "⏭️ Skipped"}
 - **Routing**: ${if (config.runRouting) "✅ Completed" else "⏭️ Skipped"}
 - **Signoff**: ${if (config.runSignoff) "✅ Completed" else "⏭️ Skipped"}
 - **GDS Generation**: ${if (config.generateGDS) "✅ Completed" else "⏭️ Skipped"}
 
 ## Output Files
-- **Synthesis Netlist**: ${config.fullSynthesisPath}/${config.effectiveTopModule}_synth.v
-- **Final DEF**: ${config.fullRoutingPath}/${config.effectiveTopModule}_routed.def
-- **GDS-II Layout**: ${config.fullGdsPath}/${config.effectiveTopModule}.gds
+- **Gate-Level Netlist**: ${if (Files.exists(Paths.get(netlistFile))) s"✅ $netlistFile" else "❌ Not generated"}
+- **Standard Delay Format**: ${if (Files.exists(Paths.get(sdfFile))) s"✅ $sdfFile" else "❌ Not generated"}
+- **Final DEF Layout**: ${if (Files.exists(Paths.get(defFile))) s"✅ $defFile" else "❌ Not generated"}
+- **GDS-II Layout**: ${if (Files.exists(Paths.get(gdsFile))) s"✅ $gdsFile" else "❌ Not generated"}
 
-## PDK Information
-- **PDK Root**: ${config.pdkRoot}
-- **Standard Cell Library**: ${config.standardCellLibrary}
-- **Technology File**: ${config.technologyFile}
+## OpenLane2 Results Directory
+- **Full Results**: $resultsDir
+- **Reports**: $designDir/reports
+- **Logs**: $designDir/logs
+
+## Usage Instructions
+
+### View Layout in KLayout
+```bash
+klayout ${if (Files.exists(Paths.get(gdsFile))) gdsFile else "path/to/gds/file"}
+```
+
+### Simulate with Gate-Level Netlist
+```bash
+# Use the gate-level netlist for post-synthesis simulation
+# Netlist: $netlistFile
+# SDF: $sdfFile
+```
+
+### Next Steps
+1. **Verification**: Run post-layout simulation with SDF timing
+2. **Analysis**: Review timing, power, and area reports in $designDir/reports
+3. **Tapeout**: Use GDS-II file for fabrication submission
 
 Generated on: ${java.time.LocalDateTime.now()}
+Generated by: KryptoNyte OpenLane2 Physical Design Flow
 """
     
     writeToFile(reportFile, report)
     println(s"✅ Final report generated: $reportFile")
+    
+    // Print summary of key files
+    if (Files.exists(Paths.get(gdsFile))) {
+      println(s"✅ GDS-II layout: $gdsFile")
+    }
+    if (Files.exists(Paths.get(netlistFile))) {
+      println(s"✅ Gate-level netlist: $netlistFile")
+    }
+    if (Files.exists(Paths.get(sdfFile))) {
+      println(s"✅ SDF timing file: $sdfFile")
+    }
   }
   
   def writeToFile(filePath: String, content: String): Unit = {
@@ -704,30 +584,5 @@ Generated on: ${java.time.LocalDateTime.now()}
     } finally {
       writer.close()
     }
-  }
-  
-  def discoverTool(toolName: String, configPath: String): String = {
-    // Check config path first
-    if (configPath.nonEmpty && Files.exists(Paths.get(configPath))) {
-      return configPath
-    }
-    
-    // Check environment variable
-    val envVar = s"${toolName.toUpperCase}_PATH"
-    val envPath = System.getenv(envVar)
-    if (envPath != null && Files.exists(Paths.get(envPath))) {
-      return envPath
-    }
-    
-    // Check if tool is in PATH
-    Try {
-      val result = s"which $toolName".!!.trim
-      if (result.nonEmpty && Files.exists(Paths.get(result))) {
-        return result
-      }
-    }
-    
-    // Tool not found
-    ""
   }
 }
