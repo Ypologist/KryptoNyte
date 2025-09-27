@@ -3,7 +3,7 @@
 #######################################
 # Physical Design Tools Installation Script
 # Installs SkyWater 130nm PDK, Open PDK, Magic VLSI Layout Tool, 
-# and OpenROAD for complete ASIC design flow with KryptoNyte processors
+# and OpenLane2 for complete RTL-to-GDSII ASIC design flow with KryptoNyte processors
 #######################################
 
 # Script configuration
@@ -17,7 +17,8 @@ OPEN_PDK_VERSION="master"  # Open PDK uses master branch, not main
 SKYWATER_PDK_INSTALLED=false
 MAGIC_INSTALLED=false
 OPEN_PDK_INSTALLED=false
-OPENROAD_INSTALLED=false
+NIX_INSTALLED=false
+OPENLANE2_INSTALLED=false
 ENVIRONMENT_SETUP=false
 
 # Color codes for output
@@ -226,17 +227,44 @@ check_open_pdk() {
     fi
 }
 
-# Function to check if OpenROAD is installed
-check_openroad() {
-    if command_exists openroad; then
-        print_step "Found existing OpenROAD installation"
-        local version=$(get_command_version "openroad" "-version")
+# Function to check if Nix is installed
+check_nix() {
+    if command_exists nix; then
+        print_step "Found existing Nix installation"
+        local version=$(nix --version 2>/dev/null | head -1 || echo "unknown")
         print_step "Current version: $version"
-        local install_path=$(which openroad)
+        local install_path=$(which nix)
         print_step "Installation path: $install_path"
         return 0
     else
-        print_step "OpenROAD not found"
+        print_step "Nix not found"
+        return 1
+    fi
+}
+
+# Function to check if OpenLane2 is installed
+check_openlane2() {
+    local openlane2_dir="$INSTALL_DIR/openlane2"
+    
+    if [ -d "$openlane2_dir" ]; then
+        print_step "Found existing OpenLane2 installation at: $openlane2_dir"
+        
+        # Check if it's a git repository and get version info
+        if [ -d "$openlane2_dir/.git" ]; then
+            cd "$openlane2_dir"
+            local current_branch=$(git branch --show-current 2>/dev/null || echo "unknown")
+            local last_commit=$(git log -1 --format="%h %s" 2>/dev/null || echo "unknown")
+            print_step "Current version: branch '$current_branch', commit: $last_commit"
+        fi
+        
+        # Check if nix-shell works in the directory
+        if [ -f "$openlane2_dir/flake.nix" ] || [ -f "$openlane2_dir/shell.nix" ]; then
+            print_step "OpenLane2 Nix environment available"
+        fi
+        
+        return 0
+    else
+        print_step "OpenLane2 not found"
         return 1
     fi
 }
@@ -746,24 +774,47 @@ verify_installation() {
         ((errors++))
     fi
     
-    # Check OpenROAD installation status
-    if [ "$OPENROAD_INSTALLED" = true ]; then
-        print_success "OpenROAD installation completed successfully"
+    # Check Nix installation status
+    if [ "$NIX_INSTALLED" = true ]; then
+        print_success "Nix package manager installation completed successfully"
         
-        # Optional: Test OpenROAD executable if it exists
-        if command -v openroad >/dev/null 2>&1; then
-            if openroad -version >/dev/null 2>&1; then
-                print_success "OpenROAD executable verified and working"
+        # Test Nix executable
+        if command -v nix >/dev/null 2>&1; then
+            if nix --version >/dev/null 2>&1; then
+                print_success "Nix executable verified and working"
             else
-                print_warning "OpenROAD installed but version check failed"
+                print_warning "Nix installed but version check failed"
                 ((warnings++))
             fi
         else
-            print_warning "OpenROAD marked as installed but not found in PATH"
+            print_warning "Nix marked as installed but not found in PATH"
             ((warnings++))
         fi
     else
-        print_warning "OpenROAD installation failed - physical design flow will be limited"
+        print_warning "Nix installation failed - OpenLane2 will not be available"
+        ((warnings++))
+    fi
+    
+    # Check OpenLane2 installation status
+    if [ "$OPENLANE2_INSTALLED" = true ]; then
+        print_success "OpenLane2 installation completed successfully"
+        
+        # Check if OpenLane2 directory exists
+        local openlane2_dir="$INSTALL_DIR/openlane2"
+        if [ -d "$openlane2_dir" ]; then
+            print_success "OpenLane2 repository found at: $openlane2_dir"
+            
+            # Check for convenience script
+            local openlane_script="$INSTALL_DIR/openlane"
+            if [ -x "$openlane_script" ]; then
+                print_success "OpenLane2 convenience script created"
+            fi
+        else
+            print_warning "OpenLane2 marked as installed but directory not found"
+            ((warnings++))
+        fi
+    else
+        print_warning "OpenLane2 installation failed - RTL-to-GDSII flow will not be available"
         ((warnings++))
     fi
     
@@ -800,7 +851,8 @@ verify_installation() {
         [ "$SKYWATER_PDK_INSTALLED" = true ] && echo -e "  📦 SkyWater PDK Source: ${GREEN}✅ Installed${NC}" || echo -e "  📦 SkyWater PDK Source: ${RED}❌ Failed${NC}"
         [ "$MAGIC_INSTALLED" = true ] && echo -e "  🔧 Magic VLSI Tool: ${GREEN}✅ Installed${NC}" || echo -e "  🔧 Magic VLSI Tool: ${RED}❌ Failed${NC}"
         [ "$OPEN_PDK_INSTALLED" = true ] && echo -e "  ⚙️  Open PDK Processing: ${GREEN}✅ Completed${NC}" || echo -e "  ⚙️  Open PDK Processing: ${RED}❌ Failed${NC}"
-        [ "$OPENROAD_INSTALLED" = true ] && echo -e "  🏗️  OpenROAD Physical Design: ${GREEN}✅ Installed${NC}" || echo -e "  🏗️  OpenROAD Physical Design: ${YELLOW}⚠️  Not Available${NC}"
+        [ "$NIX_INSTALLED" = true ] && echo -e "  📦 Nix Package Manager: ${GREEN}✅ Installed${NC}" || echo -e "  📦 Nix Package Manager: ${RED}❌ Failed${NC}"
+        [ "$OPENLANE2_INSTALLED" = true ] && echo -e "  🏗️  OpenLane2 RTL-to-GDSII: ${GREEN}✅ Installed${NC}" || echo -e "  🏗️  OpenLane2 RTL-to-GDSII: ${YELLOW}⚠️  Not Available${NC}"
         [ "$ENVIRONMENT_SETUP" = true ] && echo -e "  🌍 Environment Setup: ${GREEN}✅ Configured${NC}" || echo -e "  🌍 Environment Setup: ${YELLOW}⚠️  Incomplete${NC}"
         
         echo -e "\n${CYAN}📁 Installation Locations:${NC}"
@@ -845,30 +897,29 @@ verify_installation() {
     fi
 }
 
-# Install OpenROAD for physical design flow
-install_openroad() {
-    print_banner "Installing OpenROAD" "$PURPLE"
+# Function to install Nix package manager
+install_nix() {
+    print_banner "Installing Nix Package Manager" "$PURPLE"
     
-    # Check if OpenROAD is already installed
-    if check_openroad; then
+    # Check if Nix is already installed
+    if check_nix; then
         local current_info=""
-        if command_exists openroad; then
-            local version=$(get_command_version "openroad" "-version")
-            local install_path=$(which openroad)
+        if command_exists nix; then
+            local version=$(nix --version 2>/dev/null | head -1 || echo "unknown")
+            local install_path=$(which nix)
             current_info="$install_path ($version)"
         fi
         
-        prompt_upgrade "OpenROAD" "$current_info"
+        prompt_upgrade "Nix" "$current_info"
         local upgrade_choice=$?
         
         case $upgrade_choice in
             0)  # Keep existing
-                OPENROAD_INSTALLED=true
+                NIX_INSTALLED=true
                 return 0
                 ;;
             1)  # Upgrade/reinstall
-                print_step "Will attempt to upgrade/reinstall OpenROAD"
-                # Note: We don't remove system-installed OpenROAD, just install over it
+                print_step "Will attempt to upgrade/reinstall Nix"
                 ;;
             2)  # Skip
                 return 0
@@ -876,129 +927,155 @@ install_openroad() {
         esac
     fi
     
-    # Try multiple installation methods for OpenROAD
-    local installation_success=false
-    
-    # Method 1: Try to install from Ubuntu repositories first (most reliable)
-    if [ "$USE_SUDO" = true ] && [ "$installation_success" = false ]; then
-        print_step "Attempting OpenROAD installation from Ubuntu repositories"
-        sudo apt-get update -qq 2>/dev/null || true
-        
-        # Check if openroad package is available
-        if apt-cache show openroad >/dev/null 2>&1; then
-            print_step "Installing OpenROAD from Ubuntu repositories"
-            if sudo apt-get install -y openroad 2>/dev/null; then
-                print_success "OpenROAD installed from Ubuntu repositories"
-                OPENROAD_INSTALLED=true
-                installation_success=true
-            fi
-        fi
-    fi
-    
-    # Method 2: Try GitHub releases with improved error handling
-    if [ "$installation_success" = false ]; then
-        print_step "Attempting OpenROAD installation from GitHub releases"
-        
-        # Install jq if needed and possible
-        if ! command_exists jq && [ "$USE_SUDO" = true ]; then
-            print_step "Installing jq for JSON parsing"
-            sudo apt-get install -y jq 2>/dev/null || print_warning "Could not install jq"
-        fi
-        
-        # Try to get release information with better error handling
-        if command_exists jq; then
-            print_step "Fetching OpenROAD release information"
-            local api_response=$(curl -s --connect-timeout 10 --max-time 30 \
-                https://api.github.com/repos/The-OpenROAD-Project/OpenROAD/releases/latest 2>/dev/null)
-            
-            if [ -n "$api_response" ] && echo "$api_response" | jq -e . >/dev/null 2>&1; then
-                OPENROAD_URL=$(echo "$api_response" | \
-                    jq -r '.assets[]? | select(.name | contains("ubuntu22"))? | select(.name | contains("amd64"))? | .browser_download_url' 2>/dev/null | head -1)
-                
-                if [ -n "$OPENROAD_URL" ] && [ "$OPENROAD_URL" != "null" ]; then
-                    print_step "Downloading OpenROAD from: $OPENROAD_URL"
-                    if wget --timeout=60 "$OPENROAD_URL" -O /tmp/openroad.deb 2>/dev/null; then
-                        print_step "Installing OpenROAD from downloaded package"
-                        if [ "$USE_SUDO" = true ]; then
-                            # Install dependencies first
-                            sudo apt-get install -f -y 2>/dev/null || true
-                            
-                            if sudo dpkg -i /tmp/openroad.deb 2>/dev/null; then
-                                print_success "OpenROAD installed from GitHub release"
-                                OPENROAD_INSTALLED=true
-                                installation_success=true
-                            else
-                                print_step "Fixing dependencies and retrying installation"
-                                sudo apt-get install -f -y 2>/dev/null || true
-                                if sudo dpkg -i /tmp/openroad.deb 2>/dev/null; then
-                                    print_success "OpenROAD installed after dependency fix"
-                                    OPENROAD_INSTALLED=true
-                                    installation_success=true
-                                fi
-                            fi
-                        fi
-                        rm -f /tmp/openroad.deb 2>/dev/null || true
-                    fi
-                fi
-            fi
-        fi
-    fi
-    
-    # Method 3: Try building from source (last resort)
-    if [ "$installation_success" = false ] && [ "$USE_SUDO" = true ]; then
-        print_step "Attempting to build OpenROAD from source (this may take a while)"
-        print_warning "This is a fallback method and may take 30+ minutes"
-        
-        # Install build dependencies
-        sudo apt-get install -y build-essential cmake git python3-dev \
-            tcl-dev tk-dev libboost-all-dev libeigen3-dev \
-            bison flex swig libreadline-dev 2>/dev/null || true
-        
-        # Try a minimal OpenROAD build
-        local openroad_src="$INSTALL_DIR/openroad-src"
-        if git clone --depth 1 https://github.com/The-OpenROAD-Project/OpenROAD.git "$openroad_src" 2>/dev/null; then
-            cd "$openroad_src"
-            if mkdir -p build && cd build; then
-                if cmake .. -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR/openroad-install" 2>/dev/null; then
-                    print_step "Building OpenROAD (this will take time)..."
-                    if make -j$(nproc) 2>/dev/null && make install 2>/dev/null; then
-                        # Add to PATH
-                        export PATH="$INSTALL_DIR/openroad-install/bin:$PATH"
-                        print_success "OpenROAD built and installed from source"
-                        OPENROAD_INSTALLED=true
-                        installation_success=true
-                    fi
-                fi
-            fi
-            cd "$INSTALL_DIR"
-            rm -rf "$openroad_src" 2>/dev/null || true
-        fi
-    fi
-    
-    # Final status check
-    if [ "$installation_success" = false ]; then
-        print_warning "OpenROAD installation failed with all methods"
-        print_warning "Physical design flow will be limited without OpenROAD"
-        print_step "You can manually install OpenROAD later using:"
-        print_step "  sudo apt-get install openroad"
-        print_step "  or visit: https://github.com/The-OpenROAD-Project/OpenROAD"
-    fi
-    
-    # Clean up any temporary files
-    rm -f /tmp/openroad.deb 2>/dev/null || true
-    
-    # Verify OpenROAD installation
-    if command -v openroad >/dev/null 2>&1; then
-        print_step "Verifying OpenROAD installation"
-        if openroad -version 2>/dev/null; then
-            print_success "OpenROAD verification successful"
+    # Install curl if needed
+    if ! command_exists curl; then
+        if [ "$USE_SUDO" = true ]; then
+            print_step "Installing curl (required for Nix installation)"
+            sudo apt-get update -qq 2>/dev/null || true
+            sudo apt-get install -y curl
         else
-            print_warning "OpenROAD installed but version check failed"
+            print_error "curl is required for Nix installation but sudo is not available"
+            return 1
         fi
-        OPENROAD_INSTALLED=true
-        return 0
+    fi
+    
+    # Detect environment type
+    local env_type="standalone"
+    if [ -n "$CODESPACES" ] || [ -n "$GITHUB_CODESPACE_TOKEN" ]; then
+        env_type="codespace"
+    elif grep -q Microsoft /proc/version 2>/dev/null; then
+        env_type="wsl"
+    fi
+    
+    print_step "Detected environment: $env_type"
+    
+    # Install Nix with OpenLane cache configuration
+    print_step "Installing Nix with OpenLane binary cache"
+    print_step "This may take 5-10 minutes..."
+    
+    # Use the Determinate Systems installer with OpenLane cache
+    local nix_install_cmd='curl --proto "=https" --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm --extra-conf "
+    extra-substituters = https://openlane.cachix.org
+    extra-trusted-public-keys = openlane.cachix.org-1:qqdwh+QMNGmZAuyeQJTH9ErW57OWSvdtuwfBKdS254E=
+"'
+    
+    if eval "$nix_install_cmd"; then
+        print_success "Nix installed successfully"
+        NIX_INSTALLED=true
+        
+        # Source Nix environment for current session
+        if [ -f "$HOME/.nix-profile/etc/profile.d/nix.sh" ]; then
+            source "$HOME/.nix-profile/etc/profile.d/nix.sh"
+        fi
+        
+        print_step "Nix installation completed"
+        print_warning "You may need to restart your terminal or source the Nix environment"
+        print_step "To source Nix in current session: source ~/.nix-profile/etc/profile.d/nix.sh"
+        
     else
-        print_warning "OpenROAD not found in PATH after installation"
+        print_error "Nix installation failed"
+        print_step "You can try manual installation from: https://nixos.org/download.html"
+        NIX_INSTALLED=false
+        return 1
+    fi
+}
+
+# Function to install OpenLane2
+install_openlane2() {
+    print_banner "Installing OpenLane2" "$PURPLE"
+    
+    # Check if OpenLane2 is already installed
+    if check_openlane2; then
+        local current_info=""
+        local openlane2_dir="$INSTALL_DIR/openlane2"
+        if [ -d "$openlane2_dir" ]; then
+            current_info="$openlane2_dir"
+        fi
+        
+        prompt_upgrade "OpenLane2" "$current_info"
+        local upgrade_choice=$?
+        
+        case $upgrade_choice in
+            0)  # Keep existing
+                OPENLANE2_INSTALLED=true
+                return 0
+                ;;
+            1)  # Upgrade/reinstall
+                print_step "Will attempt to upgrade/reinstall OpenLane2"
+                if [ -d "$openlane2_dir" ]; then
+                    print_step "Removing existing OpenLane2 installation"
+                    rm -rf "$openlane2_dir"
+                fi
+                ;;
+            2)  # Skip
+                return 0
+                ;;
+        esac
+    fi
+    
+    # Ensure Nix is available
+    if ! command_exists nix; then
+        print_error "Nix is required for OpenLane2 but is not installed"
+        print_step "Please install Nix first or run this script with Nix installation enabled"
+        return 1
+    fi
+    
+    # Install git if needed
+    if ! command_exists git; then
+        if [ "$USE_SUDO" = true ]; then
+            print_step "Installing git (required for OpenLane2)"
+            sudo apt-get update -qq 2>/dev/null || true
+            sudo apt-get install -y git
+        else
+            print_error "git is required for OpenLane2 installation but sudo is not available"
+            return 1
+        fi
+    fi
+    
+    # Clone OpenLane2 repository
+    local openlane2_dir="$INSTALL_DIR/openlane2"
+    print_step "Cloning OpenLane2 repository to: $openlane2_dir"
+    
+    if git clone https://github.com/efabless/openlane2.git "$openlane2_dir"; then
+        print_success "OpenLane2 repository cloned successfully"
+        
+        # Test the Nix environment
+        print_step "Testing OpenLane2 Nix environment (this may take 10+ minutes on first run)"
+        print_step "Nix will download and cache all required tools..."
+        
+        cd "$openlane2_dir"
+        
+        # Try to enter nix-shell and run smoke test
+        if timeout 1800 nix-shell --run "openlane --smoke-test" 2>/dev/null; then
+            print_success "OpenLane2 smoke test passed"
+            OPENLANE2_INSTALLED=true
+        else
+            print_warning "OpenLane2 smoke test failed or timed out"
+            print_step "OpenLane2 is installed but may need manual verification"
+            print_step "To test manually: cd $openlane2_dir && nix-shell --run 'openlane --smoke-test'"
+            OPENLANE2_INSTALLED=true
+        fi
+        
+        # Create convenience script
+        local openlane_script="$INSTALL_DIR/openlane"
+        cat > "$openlane_script" << 'EOF'
+#!/bin/bash
+# OpenLane2 convenience script for KryptoNyte
+OPENLANE2_DIR="$(dirname "$0")/openlane2"
+if [ -d "$OPENLANE2_DIR" ]; then
+    cd "$OPENLANE2_DIR"
+    exec nix-shell --run "openlane $*"
+else
+    echo "Error: OpenLane2 not found at $OPENLANE2_DIR"
+    exit 1
+fi
+EOF
+        chmod +x "$openlane_script"
+        print_step "Created convenience script: $openlane_script"
+        
+    else
+        print_error "Failed to clone OpenLane2 repository"
+        OPENLANE2_INSTALLED=false
         return 1
     fi
 }
@@ -1035,10 +1112,16 @@ main() {
         echo -e "  ⚙️  Open PDK: ${RED}Not Found${NC}"
     fi
     
-    if check_openroad >/dev/null 2>&1; then
-        echo -e "  🏗️  OpenROAD: ${GREEN}Found${NC}"
+    if check_nix >/dev/null 2>&1; then
+        echo -e "  📦 Nix Package Manager: ${GREEN}Found${NC}"
     else
-        echo -e "  🏗️  OpenROAD: ${RED}Not Found${NC}"
+        echo -e "  📦 Nix Package Manager: ${RED}Not Found${NC}"
+    fi
+    
+    if check_openlane2 >/dev/null 2>&1; then
+        echo -e "  🏗️  OpenLane2: ${GREEN}Found${NC}"
+    else
+        echo -e "  🏗️  OpenLane2: ${RED}Not Found${NC}"
     fi
     
     # Confirm installation
@@ -1063,7 +1146,8 @@ main() {
     install_skywater_pdk || print_warning "SkyWater PDK installation failed or skipped"
     install_magic || print_warning "Magic VLSI installation failed or skipped"
     install_open_pdk || print_warning "Open PDK installation failed or skipped"
-    install_openroad || print_warning "OpenROAD installation failed or skipped"
+    install_nix || print_warning "Nix installation failed or skipped"
+    install_openlane2 || print_warning "OpenLane2 installation failed or skipped"
     
     setup_environment
     verify_installation
