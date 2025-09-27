@@ -70,6 +70,12 @@ lazy val generators = (project in file("generators"))
     name := "Generators",
     commonSettings,
     
+    // Ensure dependencies are compiled before generators
+    Compile / compile := (Compile / compile).dependsOn(
+      library / Compile / compile,
+      zeroNyte / Compile / compile
+    ).value,
+    
     // Additional dependencies for RTL generation and physical design
     // Note: scala-sys-process is part of Scala standard library since 2.13
     // No need to add it as external dependency
