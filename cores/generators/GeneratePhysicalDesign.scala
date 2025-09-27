@@ -455,11 +455,11 @@ Environment Variables:
     val designDir = s"${config.fullRunsPath}/${config.effectiveTopModule}"
     val logFile = s"${config.fullReportsPath}/openlane2_run.log"
     
-    // Construct OpenLane2 command
+    // Construct OpenLane2 command with correct syntax
     val openlaneCommand = Seq(
       config.nixShellPath,
       "--run",
-      s"cd ${config.openlane2Path} && openlane --run-dir $designDir $designDir"
+      s"cd ${config.openlane2Path} && openlane --design-dir $designDir"
     )
     
     if (config.verbose) {
