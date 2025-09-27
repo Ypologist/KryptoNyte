@@ -14,7 +14,7 @@ import scala.io.Source
 // Configuration for physical design flow
 case class PhysicalDesignConfig(
   // Input configuration
-  inputRTLPath: String = "generators/generated/verilog_hierarchical_timed",
+  inputRTLPath: String = "generated/verilog_hierarchical_timed",
   moduleName: String = "ZeroNyteRV32ICore",
   topModule: String = "",
   
@@ -85,7 +85,7 @@ case class PhysicalDesignConfig(
     if (pdkRoot.nonEmpty) return this
     
     val pdkSearchPaths = Seq(
-      "/opt/skywater-pdk/pdks/sky130A",
+      "/opt/skywater-pdk/pdks/share/pdk/sky130A",
       "/usr/local/share/pdk/sky130A",
       System.getenv("PDK_ROOT"),
       System.getenv("SKYWATER_PDK_ROOT")
