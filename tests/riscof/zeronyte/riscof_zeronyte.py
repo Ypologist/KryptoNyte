@@ -180,19 +180,22 @@ class zeronyte(pluginTemplate):
         
         arch_test_env = os.path.join(arch_test_root, 'riscv-test-suite', 'env')
         
-        # Compilation command
+        # Compilation command with assembler flags to handle macros
         cmd = [
             f"{self.prefix}gcc",
-            "-march=rv32i",
+            "-march=rv32imc",  # Enable compressed instructions for compatibility
             "-mabi=ilp32",
             "-static",
             "-mcmodel=medany",
             "-fvisibility=hidden",
             "-nostdlib",
             "-nostartfiles",
+            "-Wa,-march=rv32imc",  # Pass march to assembler
+            "-Wa,--no-warn",       # Suppress assembler warnings
             f"-T{self.archtest_env}/link.ld",
             f"-I{self.archtest_env}",
             f"-I{arch_test_env}",  # Add architecture test framework headers
+            "-DRVTEST_E=1",        # Define test environment
             "-o", elf_file,
             test_path
         ]
