@@ -48,8 +48,12 @@ class zeronyte(pluginTemplate):
         self.rtl_file = os.path.join(self.kryptonyte_root, 
                                    'rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v')
         
-        # RISC-V toolchain configuration
-        self.prefix = "/usr/bin/riscv32-unknown-elf-"
+        # RISC-V toolchain configuration - auto-detect
+        try:
+            self.prefix = self._find_riscv_prefix()
+        except RuntimeError:
+            # Fallback to default path
+            self.prefix = "/opt/riscv/collab/bin/riscv32-unknown-elf-"
         
         # Verilator configuration
         self.verilator_cmd = 'verilator'
@@ -69,9 +73,18 @@ class zeronyte(pluginTemplate):
         logger.info(f"ZeroNyte plugin initialized")
         logger.info(f"RTL file: {self.rtl_file}")
         logger.info(f"Toolchain prefix: {self.prefix}")
+        logger.info(f"Expected GCC location: {self.prefix}gcc")
 
     def _find_riscv_prefix(self):
         """Find the appropriate RISC-V toolchain prefix"""
+        # Check common installation paths
+        common_paths = [
+            "/opt/riscv/collab/bin/",
+            "/opt/riscv/bin/", 
+            "/usr/bin/",
+            "/usr/local/bin/"
+        ]
+        
         prefixes = [
             'riscv32-unknown-elf-',
             'riscv64-unknown-elf-',
@@ -79,6 +92,14 @@ class zeronyte(pluginTemplate):
             'riscv64-unknown-linux-gnu-'
         ]
         
+        # First try the paths with prefixes
+        for path in common_paths:
+            for prefix in prefixes:
+                full_path = f"{path}{prefix}"
+                if os.path.exists(f"{full_path}gcc"):
+                    return full_path
+        
+        # Fallback to system PATH
         for prefix in prefixes:
             if shutil.which(f"{prefix}gcc"):
                 return prefix
