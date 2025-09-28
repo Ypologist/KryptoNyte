@@ -173,15 +173,21 @@ class zeronyte(pluginTemplate):
         elf_file = os.path.join(work_dir, f"{test_name}.elf")
         
         # Find the architecture test framework headers
-        arch_test_root = os.environ.get('RISCV_ARCH_TEST_ROOT', '')
-        if not arch_test_root:
-            # Try to find it relative to the current location
-            arch_test_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'riscv-arch-test')
+        # First try local installation, then fall back to system
+        local_arch_test_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'riscv-arch-test')
         
-        arch_test_env = os.path.join(arch_test_root, 'riscv-test-suite', 'env')
-        
-        # Find our local working arch_test.h (not the problematic system one)
-        local_arch_test_env = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'riscv-arch-test', 'riscv-test-suite', 'env')
+        if os.path.exists(local_arch_test_root):
+            # Use local installation (development environment)
+            arch_test_env = os.path.join(local_arch_test_root, 'riscv-test-suite', 'env')
+        else:
+            # Use system installation (user environment)
+            system_arch_test_root = '/opt/riscv-conformance/riscv-arch-test'
+            if os.path.exists(system_arch_test_root):
+                arch_test_env = os.path.join(system_arch_test_root, 'riscv-test-suite', 'env')
+            else:
+                # Fallback to environment variable
+                arch_test_root = os.environ.get('RISCV_ARCH_TEST_ROOT', '')
+                arch_test_env = os.path.join(arch_test_root, 'riscv-test-suite', 'env') if arch_test_root else ''
         
         # Compilation command with assembler flags to handle macros
         cmd = [
@@ -197,7 +203,7 @@ class zeronyte(pluginTemplate):
             "-Wa,--no-warn",       # Suppress assembler warnings
             f"-T{self.archtest_env}/link.ld",
             f"-I{self.archtest_env}",  # Our local model_test.h and link.ld
-            f"-I{local_arch_test_env}",  # Our local working arch_test.h
+            f"-I{arch_test_env}",  # Working arch_test.h (local or system)
             "-DRVTEST_E=1",        # Define test environment
             "-o", elf_file,
             test_path
