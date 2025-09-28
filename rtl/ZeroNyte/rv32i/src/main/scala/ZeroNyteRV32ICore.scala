@@ -25,7 +25,7 @@ class ZeroNyteRV32ICore extends Module {
   })
 
   // ---------- Program Counter ----------
-  val pc = RegInit(0.U(32.W))
+  val pc = RegInit("h80000000".U(32.W))  // Start at RISC-V reset vector
   io.pc_out := pc
 
   // ---------- Instruction Memory ----------
