@@ -193,8 +193,8 @@ class zeronyte(pluginTemplate):
             "-Wa,-march=rv32imc",  # Pass march to assembler
             "-Wa,--no-warn",       # Suppress assembler warnings
             f"-T{self.archtest_env}/link.ld",
-            f"-I{self.archtest_env}",
-            f"-I{arch_test_env}",  # Add architecture test framework headers
+            f"-I{self.archtest_env}",  # Use our local environment files FIRST
+            # Note: Removed problematic system arch_test_env include
             "-DRVTEST_E=1",        # Define test environment
             "-o", elf_file,
             test_path
