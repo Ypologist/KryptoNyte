@@ -8,7 +8,6 @@
 **/project/target/
 **/project/project/
 
-**/physical_design/
 
 # Generated Verilog files
 **/*.v
