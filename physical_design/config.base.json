@@ -1,81 +1,45 @@
 {
-  "_metadata": {
-    "description": "KryptoNyte Base Configuration - Common settings for all designs",
-    "version": "1.0.0",
-    "extends": null
-  },
+  "PDK": "sky130A",
+  "STD_CELL_LIBRARY": "sky130_fd_sc_hd",
   
-  "DESIGN_FAMILY": "KryptoNyte",
+  "CLOCK_PORT": "clock",
+  "CLOCK_PERIOD": 10.0,
   
-  "PDK_CONFIG": {
-    "PDK": "sky130A",
-    "STD_CELL_LIBRARY": "sky130_fd_sc_hd",
-    "EXTRA_LEFS": [],
-    "EXTRA_GDS_FILES": [],
-    "EXTRA_LIBS": []
-  },
+  "FP_CORE_UTIL": 0.7,
+  "FP_ASPECT_RATIO": 1.0,
+  "FP_PDN_VPITCH": 7.0,
+  "FP_PDN_HPITCH": 7.0,
+  "FP_PDN_VOFFSET": 7.0,
+  "FP_PDN_HOFFSET": 7.0,
   
-  "DEFAULT_CLOCK_CONFIG": {
-    "CLOCK_PORT": "clock",
-    "CLOCK_PERIOD": 10.0
-  },
+  "SYNTH_STRATEGY": "AREA 0",
+  "SYNTH_READ_BLACKBOX_LIB": true,
+  "SYNTH_BUFFERING": true,
+  "SYNTH_SIZING": true,
   
-  "DEFAULT_FLOORPLAN_CONFIG": {
-    "FP_CORE_UTIL": 0.7,
-    "FP_ASPECT_RATIO": 1.0,
-    "FP_PDN_VPITCH": 7.0,
-    "FP_PDN_HPITCH": 7.0,
-    "FP_PDN_VOFFSET": 7.0,
-    "FP_PDN_HOFFSET": 7.0
-  },
+  "PL_TARGET_DENSITY": 0.6,
+  "PL_BASIC_PLACEMENT": true,
+  "PL_SKIP_INITIAL_PLACEMENT": false,
   
-  "DEFAULT_SYNTHESIS_CONFIG": {
-    "SYNTH_STRATEGY": "AREA 0",
-    "SYNTH_READ_BLACKBOX_LIB": true,
-    "SYNTH_BUFFERING": true,
-    "SYNTH_SIZING": true
-  },
+  "RT_MAX_LAYER": 6,
+  "ROUTING_STRATEGY": "0",
+  "GLB_RT_ADJUSTMENT": 0.1,
   
-  "DEFAULT_PLACEMENT_CONFIG": {
-    "PL_TARGET_DENSITY": 0.6,
-    "PL_BASIC_PLACEMENT": true,
-    "PL_SKIP_INITIAL_PLACEMENT": false
-  },
+  "RUN_KLAYOUT_STREAMOUT": true,
+  "RUN_KLAYOUT_DRC": true,
+  "RUN_KLAYOUT_XOR": false,
+  "RUN_MAGIC_STREAMOUT": true,
+  "ERROR_ON_MAGIC_DRC": false,
+  "ERROR_ON_LVS_ERROR": false,
+  "RUN_SPEF_EXTRACTION": true,
   
-  "DEFAULT_ROUTING_CONFIG": {
-    "RT_MAX_LAYER": 6,
-    "ROUTING_STRATEGY": "0",
-    "GLB_RT_ADJUSTMENT": 0.1
-  },
+  "RUN_CVC": true,
+  "RUN_STA": true,
+  "RUN_ANTENNA_CHECK": true,
+  "QUIT_ON_TIMING_VIOLATIONS": false,
+  "QUIT_ON_HOLD_VIOLATIONS": false,
   
-  "DEFAULT_FLOW_CONTROL": {
-    "RUN_KLAYOUT_STREAMOUT": true,
-    "RUN_KLAYOUT_DRC": true,
-    "RUN_KLAYOUT_XOR": false,
-    "RUN_MAGIC_STREAMOUT": true,
-    "ERROR_ON_MAGIC_DRC": false,
-    "ERROR_ON_LVS_ERROR": false,
-    "RUN_SPEF_EXTRACTION": true
-  },
-  
-  "DEFAULT_VERIFICATION_CONFIG": {
-    "RUN_CVC": true,
-    "RUN_STA": true,
-    "RUN_ANTENNA_CHECK": true,
-    "QUIT_ON_TIMING_VIOLATIONS": false,
-    "QUIT_ON_HOLD_VIOLATIONS": false
-  },
-  
-  "DEFAULT_OUTPUT_CONFIG": {
-    "GENERATE_FINAL_SUMMARY_REPORT": true,
-    "SAVE_FINAL_VIEWS": true,
-    "COMPRESS_RESULTS": false
-  },
-  
-  "COMMON_PATHS": {
-    "RTL_BASE_DIR": "../rtl",
-    "CONSTRAINT_DIR": "constraints",
-    "RESULTS_DIR": "results",
-    "REPORTS_DIR": "reports"
-  }
+  "EXTRA_LEFS": [],
+  "EXTRA_GDS_FILES": [],
+  "EXTRA_LIBS": []
 }
