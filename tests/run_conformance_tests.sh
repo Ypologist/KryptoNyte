@@ -329,34 +329,38 @@ run_riscof_tests() {
     riscof_cmd+=" --env=riscof/zeronyte/env"
     riscof_cmd+=" --work-dir=$WORK_DIR"
     
-    # Handle smoke test - create a minimal test suite with just ADDI
+    # Handle smoke test - create a database with just ADDI test
     if [ "$RUN_ALL_TESTS" = false ] && [ "$SPECIFIC_TESTS" = "addi-01" ]; then
         print_step "Setting up smoke test (ADDI only)"
         
-        # Create a temporary suite directory with just the ADDI test
-        local smoke_suite="$WORK_DIR/smoke_suite"
-        rm -rf "$smoke_suite"  # Clean up any previous smoke suite
-        mkdir -p "$smoke_suite/riscv-test-suite/rv32i_m/I/src"
+        # Create a custom database file with just the ADDI test
+        local smoke_db="$WORK_DIR/smoke_database.yaml"
+        cat > "$smoke_db" << EOF
+!!omap
+- $ARCH_TEST_ROOT/riscv-test-suite/$TEST_SUITE/I/src/addi-01.S:
+    commit_id: b91f98f3a0e908bad4680c2e3901fbc24b63a563
+    isa:
+    - RV32I
+    parts: !!omap
+    - '0':
+        check:
+        - check ISA:=regex(.*32.*)
+        - check ISA:=regex(.*I.*)
+        define:
+        - def TEST_CASE_1=True
+        mac: []
+        coverage_labels:
+        - addi
+        verify: []
+EOF
         
-        # Copy the ADDI test to the smoke suite
-        cp "$ARCH_TEST_ROOT/riscv-test-suite/$TEST_SUITE/I/src/addi-01.S" "$smoke_suite/riscv-test-suite/rv32i_m/I/src/"
-        
-        # Initialize as a git repository (RISCOF requires this)
-        cd "$smoke_suite"
-        git init --quiet
-        git config user.email "test@kryptonyte.com"
-        git config user.name "KryptoNyte Smoke Test"
-        echo "# Smoke Test Suite - ADDI Only" > README.md
-        git add .
-        git commit --quiet -m "Initial smoke test suite with ADDI test"
-        cd - > /dev/null
-        
-        # Update the suite path to use our smoke suite
+        # Update the RISCOF command to use the custom database
         riscof_cmd=" riscof run"
         riscof_cmd+=" --config=riscof/config.ini"
-        riscof_cmd+=" --suite=$smoke_suite/riscv-test-suite/$TEST_SUITE"
+        riscof_cmd+=" --suite=$ARCH_TEST_ROOT/riscv-test-suite/$TEST_SUITE"
         riscof_cmd+=" --env=riscof/zeronyte/env"
         riscof_cmd+=" --work-dir=$WORK_DIR"
+        riscof_cmd+=" --dbfile=$smoke_db"
         
         print_step "Smoke test configured: Running ADDI test only"
     fi
