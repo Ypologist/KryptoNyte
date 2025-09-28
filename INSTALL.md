@@ -4,6 +4,9 @@
 
 The KryptoNyte RISC-V processor development environment consists of modular installation scripts that provide comprehensive toolchain setup with intelligent tool detection and upgrade capabilities.
 
+## Supported Platforms
+Currently only Ubuntu 24.04 is known to work both native and under Windows WSL.
+
 ## Installation Scripts
 
 ### 📦 **Basic Development Tools**

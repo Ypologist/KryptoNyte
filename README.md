@@ -10,24 +10,30 @@ The KryptoNyte family is a comprehensive collection of RISC-V processor implemen
 All processor cores are implemented in Chisel and generate Verilog for synthesis and simulation. The repository follows a monorepo approach with shared components and comprehensive verification infrastructure.
 
 # Installation
+See INSTALL.md
 
-## Github Codespace
+# Running the code
+## Compile / Test RTL
+```bash
+cd rtl/
+sbt compile
+sbt test
+```
 
-Create a normal github codespace. By default, the base RTL tools are included.
+## Generate Verilog RTL
+```bash
+cd rtl/
+sbt generateRTL
+```
 
+## Create GDLII
+```bash
+cd physical_design/
+./generate_physical_design.sh
+```
 
-## Ubuntu 24.04
-
-Run the following shell scripts from the ROOT respository directory. You can pick and choose.
-
-For example, if you don't need to do physical design, don't run the last script.
-
-1. Base RTL Tools: .devcontainer/install_base_rtl_tools.sh --with-sudo
-2. RISCV Compiler Toolchain: .devcontainer/install_riscv_compiler_tools.sh --with-sudo
-3. Spike Simulator: .devcontainer/install_uv_python_and_spike_simulator.sh --with-sudo
-4. Conformance Tests: .devcontainer/install_riscv_conformance_tests.sh --with-sudo
-5. Physical Design and RTL generation: .devcontainer/install_skywater_pdk.sh --with-sudo
-
+## Run RISC-V Conformance Tests
+TBD
 
 # KryptoNyte Directory Tree
 
