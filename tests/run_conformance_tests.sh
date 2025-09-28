@@ -278,12 +278,17 @@ prepare_work_directory() {
 validate_configuration() {
     print_step "Validating RISCOF configuration"
     
-    # Check if config file is valid using the correct RISCOF command
-    if ! riscof validateyaml --config="$CONFIG_FILE" >/dev/null 2>&1; then
+    # Change to tests directory for validation
+    cd "$(dirname "$RISCOF_ROOT")"
+    
+    local validation_log="$WORK_DIR/logs/riscof_validation.log"
+    mkdir -p "$(dirname "$validation_log")"
+    
+    if ! riscof validateyaml --config="riscof/config.ini" > "$validation_log" 2>&1; then
         print_warning "RISCOF configuration validation had issues"
         if [ "$VERBOSE" = true ]; then
             print_step "Running configuration validation for details:"
-            riscof validateyaml --config="$CONFIG_FILE" || true
+            riscof validateyaml --config="riscof/config.ini" || true
         fi
     else
         print_success "Configuration validation passed"
@@ -304,12 +309,12 @@ run_riscof_tests() {
     echo "  Parallel Jobs: $PARALLEL_JOBS"
     echo "  Timeout: ${TIMEOUT}s"
     
-    # Change to RISCOF directory for plugin imports, then to work directory
-    cd "$RISCOF_ROOT"
+    # Change to tests directory for proper path resolution
+    cd "$(dirname "$RISCOF_ROOT")"
     
     # Build RISCOF command
     local riscof_cmd="riscof run"
-    riscof_cmd+=" --config=config.ini"
+    riscof_cmd+=" --config=riscof/config.ini"
     riscof_cmd+=" --suite=$ARCH_TEST_ROOT/riscv-test-suite/$TEST_SUITE"
     riscof_cmd+=" --env=$RISCOF_ROOT/zeronyte/env"
     riscof_cmd+=" --work-dir=$WORK_DIR"
