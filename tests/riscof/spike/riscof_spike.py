@@ -16,8 +16,8 @@ from riscv_isac.isac import isac
 
 logger = logging.getLogger()
 
-class sail_cSim(pluginTemplate):
-    __model__ = "sail_c_simulator"
+class spike(pluginTemplate):
+    __model__ = "spike"
     __version__ = "0.5.0"
 
     def __init__(self, *args, **kwargs):

@@ -49,7 +49,11 @@ class zeronyte(pluginTemplate):
                                    'rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v')
         
         # RISC-V toolchain configuration
-        self.prefix = self._find_riscv_prefix()
+        try:
+            self.prefix = self._find_riscv_prefix()
+        except RuntimeError as e:
+            logger.warning(f"RISC-V toolchain not found: {e}")
+            self.prefix = "riscv32-unknown-elf-"  # Default prefix for validation
         
         # Verilator configuration
         self.verilator_cmd = 'verilator'
@@ -99,11 +103,24 @@ class zeronyte(pluginTemplate):
         """Build the DUT (compile RTL if needed)"""
         logger.info("Building ZeroNyte DUT")
         
+        # Check if RISC-V toolchain is available
+        if not shutil.which(f"{self.prefix}gcc"):
+            logger.error(f"RISC-V toolchain not found: {self.prefix}gcc")
+            logger.info("Please install the RISC-V toolchain using:")
+            logger.info(".devcontainer/install_riscv_conformance_tests.sh --with-sudo")
+            return False
+        
         # Check if RTL file exists
         if not os.path.exists(self.rtl_file):
             logger.warning(f"RTL file not found: {self.rtl_file}")
             logger.info("You may need to generate RTL first using:")
             logger.info("cd rtl && sbt 'runMain generators.GenerateHierarchicalRTL'")
+            return False
+            
+        # Check if Verilator is available
+        if not shutil.which(self.verilator_cmd):
+            logger.error(f"Verilator not found: {self.verilator_cmd}")
+            logger.info("Please install Verilator: sudo apt-get install verilator")
             return False
             
         logger.info("ZeroNyte DUT build completed")
@@ -324,4 +341,3 @@ int main(int argc, char** argv) {{
                 f.write("00000000\\n")  # Placeholder signature
         
         logger.debug(f"Signature extracted to: {sig_file}")
-'''
