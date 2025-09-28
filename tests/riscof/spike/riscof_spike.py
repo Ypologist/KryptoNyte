@@ -29,8 +29,14 @@ class spike(pluginTemplate):
             raise SystemExit(1)
         self.num_jobs = str(config['jobs'] if 'jobs' in config else 1)
         self.pluginpath = os.path.abspath(config['pluginpath'])
-        self.sail_exe = { '32' : os.path.join(config['PATH'] if 'PATH' in config else "","riscv_sim_rv32d"),
-                '64' : os.path.join(config['PATH'] if 'PATH' in config else "","riscv_sim_rv64d")}
+        # Try to find spike in the configured PATH or system PATH
+        spike_path = config.get('PATH', '')
+        if spike_path and os.path.exists(os.path.join(spike_path, 'spike')):
+            spike_cmd = os.path.join(spike_path, 'spike')
+        else:
+            spike_cmd = 'spike'  # Use system PATH
+        
+        self.spike_exe = { '32' : spike_cmd, '64' : spike_cmd }
         self.isa_spec = os.path.abspath(config['ispec']) if 'ispec' in config else ''
         self.platform_spec = os.path.abspath(config['pspec']) if 'ispec' in config else ''
         self.make = config['make'] if 'make' in config else 'make'
@@ -75,8 +81,8 @@ class spike(pluginTemplate):
         if shutil.which(compiler) is None:
             logger.error(compiler+": executable not found. Please check environment setup.")
             raise SystemExit(1)
-        if shutil.which(self.sail_exe[self.xlen]) is None:
-            logger.error(self.sail_exe[self.xlen]+ ": executable not found. Please check environment setup.")
+        if shutil.which(self.spike_exe[self.xlen]) is None:
+            logger.error(self.spike_exe[self.xlen]+ ": executable not found. Please check environment setup.")
             raise SystemExit(1)
         if shutil.which(self.make) is None:
             logger.error(self.make+": executable not found. Please check environment setup.")
@@ -142,7 +148,7 @@ class spike(pluginTemplate):
             with open(sail_config_path, 'w', encoding='utf-8') as file:
                 json.dump(sail_config, file, indent=4)
 
-            execute += self.sail_exe[self.xlen] + ' --config={0} -v --trace=step --signature-granularity=8  --test-signature={1} {2} > {3}.log 2>&1;'.format(sail_config_path, sig_file, elf, test_name)
+            execute += self.spike_exe[self.xlen] + ' --isa={0} -m0x80000000:0x10000000 {1} > {2}.log 2>&1;'.format('rv32imc', elf, test_name)
 
             cov_str = ' '
             for label in testentry['coverage_labels']:
