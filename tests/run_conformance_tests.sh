@@ -29,7 +29,7 @@ EXCLUDE_TESTS=""
 
 # Environment paths
 CONFORMANCE_ROOT="/opt/riscv-conformance"
-ARCH_TEST_ROOT="$CONFORMANCE_ROOT/riscv-arch-test"
+ARCH_TEST_ROOT="$RISCOF_ROOT/riscv-arch-test"
 
 # Color codes for output
 RED='\033[0;31m'
@@ -204,6 +204,15 @@ check_prerequisites() {
         print_step "You may need to generate RTL first using the RTL generation scripts"
     fi
     
+    # Check for architecture test suite
+    if [ ! -d "$ARCH_TEST_ROOT" ]; then
+        print_error "RISC-V architecture test suite not found: $ARCH_TEST_ROOT"
+        print_step "Downloading architecture test suite..."
+        cd "$RISCOF_ROOT"
+        riscof arch-test --clone --dir ./riscv-arch-test
+        cd - >/dev/null
+    fi
+    
     print_success "Prerequisites check completed"
 }
 
@@ -231,6 +240,9 @@ setup_environment() {
     export RISCV_CONFORMANCE_ROOT="$CONFORMANCE_ROOT"
     export RISCV_ARCH_TEST_ROOT="$ARCH_TEST_ROOT"
     export KRYPTONYTE_ROOT="$KRYPTONYTE_ROOT"
+    
+    # Add current directory to Python path for plugin imports
+    export PYTHONPATH="$RISCOF_ROOT:$PYTHONPATH"
     
     print_success "Environment setup completed"
 }
@@ -290,7 +302,7 @@ run_riscof_tests() {
     # Build RISCOF command
     local riscof_cmd="riscof run"
     riscof_cmd+=" --config=$CONFIG_FILE"
-    riscof_cmd+=" --suite=$TEST_SUITE"
+    riscof_cmd+=" --suite=$ARCH_TEST_ROOT/riscv-test-suite/$TEST_SUITE"
     riscof_cmd+=" --env=$RISCOF_ROOT/zeronyte/env"
     
     if [ "$RUN_ALL_TESTS" = false ] && [ -n "$SPECIFIC_TESTS" ]; then
