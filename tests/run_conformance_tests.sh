@@ -335,15 +335,26 @@ run_riscof_tests() {
         
         # Create a temporary suite directory with just the ADDI test
         local smoke_suite="$WORK_DIR/smoke_suite"
-        mkdir -p "$smoke_suite/I/src"
+        rm -rf "$smoke_suite"  # Clean up any previous smoke suite
+        mkdir -p "$smoke_suite/riscv-test-suite/rv32i_m/I/src"
         
         # Copy the ADDI test to the smoke suite
-        cp "$ARCH_TEST_ROOT/riscv-test-suite/$TEST_SUITE/I/src/addi-01.S" "$smoke_suite/I/src/"
+        cp "$ARCH_TEST_ROOT/riscv-test-suite/$TEST_SUITE/I/src/addi-01.S" "$smoke_suite/riscv-test-suite/rv32i_m/I/src/"
+        
+        # Initialize as a git repository (RISCOF requires this)
+        cd "$smoke_suite"
+        git init --quiet
+        git config user.email "test@kryptonyte.com"
+        git config user.name "KryptoNyte Smoke Test"
+        echo "# Smoke Test Suite - ADDI Only" > README.md
+        git add .
+        git commit --quiet -m "Initial smoke test suite with ADDI test"
+        cd - > /dev/null
         
         # Update the suite path to use our smoke suite
         riscof_cmd=" riscof run"
         riscof_cmd+=" --config=riscof/config.ini"
-        riscof_cmd+=" --suite=$smoke_suite"
+        riscof_cmd+=" --suite=$smoke_suite/riscv-test-suite/$TEST_SUITE"
         riscof_cmd+=" --env=riscof/zeronyte/env"
         riscof_cmd+=" --work-dir=$WORK_DIR"
         
