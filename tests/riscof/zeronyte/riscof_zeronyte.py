@@ -183,15 +183,30 @@ class zeronyte(pluginTemplate):
                     os.path.join(test_dir, f"{base_test_name}.signature"),
                     os.path.join(test_dir, "obj_dir", f"{base_test_name}.signature"),
                     os.path.join(test_dir, f"addi-01.signature"),  # Sometimes the name changes
+                    os.path.join(test_dir, f"{os.path.basename(test_path).replace('.S', '')}.signature"),
                 ]
                 
                 dut_sig_file = os.path.join(dut_dir, 'DUT-zeronyte.signature')
                 signature_found = False
                 
                 for tb_sig_file in possible_sig_files:
+                    logger.debug(f"Checking for signature file: {tb_sig_file}")
                     if os.path.exists(tb_sig_file):
                         logger.info(f"Found signature file: {tb_sig_file}")
+                        # Check file size and content
+                        file_size = os.path.getsize(tb_sig_file)
+                        logger.info(f"Signature file size: {file_size} bytes")
+                        
+                        # Copy and verify
                         shutil.copy(tb_sig_file, dut_sig_file)
+                        if os.path.exists(dut_sig_file):
+                            logger.info(f"Successfully copied signature to: {dut_sig_file}")
+                            # Show first few lines of signature
+                            with open(dut_sig_file, 'r') as f:
+                                content = f.read()
+                                logger.info(f"Signature content preview: {content[:200]}...")
+                        else:
+                            logger.error(f"Failed to copy signature file to: {dut_sig_file}")
                         signature_found = True
                         break
                 
