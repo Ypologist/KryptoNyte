@@ -172,6 +172,14 @@ class zeronyte(pluginTemplate):
         test_name = os.path.basename(test_path).replace('.S', '')
         elf_file = os.path.join(work_dir, f"{test_name}.elf")
         
+        # Find the architecture test framework headers
+        arch_test_root = os.environ.get('RISCV_ARCH_TEST_ROOT', '')
+        if not arch_test_root:
+            # Try to find it relative to the current location
+            arch_test_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'riscv-arch-test')
+        
+        arch_test_env = os.path.join(arch_test_root, 'riscv-test-suite', 'env')
+        
         # Compilation command
         cmd = [
             f"{self.prefix}gcc",
@@ -184,6 +192,7 @@ class zeronyte(pluginTemplate):
             "-nostartfiles",
             f"-T{self.archtest_env}/link.ld",
             f"-I{self.archtest_env}",
+            f"-I{arch_test_env}",  # Add architecture test framework headers
             "-o", elf_file,
             test_path
         ]
