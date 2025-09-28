@@ -316,7 +316,7 @@ run_riscof_tests() {
     local riscof_cmd="riscof run"
     riscof_cmd+=" --config=riscof/config.ini"
     riscof_cmd+=" --suite=$ARCH_TEST_ROOT/riscv-test-suite/$TEST_SUITE"
-    riscof_cmd+=" --env=$RISCOF_ROOT/zeronyte/env"
+    riscof_cmd+=" --env=riscof/zeronyte/env"
     riscof_cmd+=" --work-dir=$WORK_DIR"
     
     if [ "$RUN_ALL_TESTS" = false ] && [ -n "$SPECIFIC_TESTS" ]; then
