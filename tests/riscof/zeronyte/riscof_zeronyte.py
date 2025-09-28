@@ -298,20 +298,38 @@ int main(int argc, char** argv) {{
     VZeroNyteRV32ICore* dut = new VZeroNyteRV32ICore;
     VerilatedVcdC* tfp = new VerilatedVcdC;
 
-    // Simulated Memory
+    // Simulated Memory (4MB starting at MEM_BASE)
     std::vector<uint32_t> mem(1 << 22, 0);
     if (argc > 1) {{
         std::ifstream hex_file(argv[1]);
         std::string line;
         uint32_t addr = MEM_BASE;
+        std::cout << "Loading hex file: " << argv[1] << std::endl;
+        
         while (std::getline(hex_file, line)) {{
+            if (line.empty() || line[0] == '#') continue; // Skip empty lines and comments
+            
             if (line[0] == '@') {{
-                addr = std::stoul(line.substr(1), nullptr, 16) * 4;
+                // Address directive - convert from hex words to byte address
+                uint32_t word_addr = std::stoul(line.substr(1), nullptr, 16);
+                addr = word_addr * 4; // Convert word address to byte address
+                std::cout << "Setting address to: 0x" << std::hex << addr << std::endl;
             }} else {{
-                mem[(addr - MEM_BASE) / 4] = std::stoul(line, nullptr, 16);
+                // Data line - ensure address is within our memory range
+                if (addr >= MEM_BASE && addr < MEM_BASE + (mem.size() * 4)) {{
+                    uint32_t mem_index = (addr - MEM_BASE) / 4;
+                    uint32_t value = std::stoul(line, nullptr, 16);
+                    mem[mem_index] = value;
+                    std::cout << "Loaded 0x" << std::hex << value << " at address 0x" << addr 
+                             << " (mem[" << std::dec << mem_index << "])" << std::endl;
+                }} else {{
+                    std::cout << "Warning: Address 0x" << std::hex << addr 
+                             << " outside memory range" << std::endl;
+                }}
                 addr += 4;
             }}
         }}
+        std::cout << "Hex file loading completed" << std::endl;
     }}
 
     dut->trace(tfp, 99);
@@ -332,6 +350,7 @@ int main(int argc, char** argv) {{
     }}
     
     dut->reset = 0;
+    std::cout << "Reset completed, starting execution" << std::endl;
     
     // Run simulation
     for (int cycle = 0; cycle < MAX_CYCLES; cycle++) {{
@@ -358,6 +377,13 @@ int main(int argc, char** argv) {{
         dut->clock = 1;
         dut->eval();
         tfp->dump(2*cycle + 21);
+
+        // Debug output for first few cycles
+        if (cycle < 20) {{
+            std::cout << "Cycle " << cycle << ": PC=0x" << std::hex << dut->io_pc_out 
+                     << " Instr=0x" << dut->io_instr_out 
+                     << " Result=0x" << dut->io_result << std::endl;
+        }}
 
         // Memory Write - with bounds checking
         if (dut->io_dmem_wen && dut->io_dmem_addr >= MEM_BASE && (dut->io_dmem_addr - MEM_BASE) / 4 < mem.size()) {{
