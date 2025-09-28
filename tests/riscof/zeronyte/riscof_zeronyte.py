@@ -378,7 +378,7 @@ int main(int argc, char** argv) {{
         # Build with Verilator
         cmd = [self.verilator_cmd] + self.verilator_args + [
             '-CFLAGS', '-std=c++14',
-            '--Mdir', os.path.join(work_dir, 'obj_dir'),
+            '--Mdir', os.path.join(test_dir, 'obj_dir'),
             local_rtl,
             tb_file
         ]
