@@ -172,19 +172,8 @@ class zeronyte(pluginTemplate):
         test_name = os.path.basename(test_path).replace('.S', '')
         elf_file = os.path.join(work_dir, f"{test_name}.elf")
         
-        # Find the architecture test framework headers
-        # ALWAYS use our local working arch_test.h to avoid system macro issues
-        local_arch_test_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'riscv-arch-test')
-        local_arch_test_env = os.path.join(local_arch_test_root, 'riscv-test-suite', 'env')
-        
-        if os.path.exists(local_arch_test_env):
-            # Use our local working arch_test.h (compatible with our compilation flags)
-            arch_test_env = local_arch_test_env
-            logger.debug(f"Using local arch_test.h: {arch_test_env}")
-        else:
-            # This should not happen in a properly set up environment
-            logger.warning("Local arch_test.h not found - this may cause compilation issues")
-            arch_test_env = ""
+        # Use our local environment directory which contains working arch_test.h
+        # This avoids the problematic system arch_test.h that has macro expansion issues
         
         # Compilation command with assembler flags to handle macros
         cmd = [
@@ -199,8 +188,7 @@ class zeronyte(pluginTemplate):
             "-Wa,-march=rv32imc",  # Pass march to assembler
             "-Wa,--no-warn",       # Suppress assembler warnings
             f"-T{self.archtest_env}/link.ld",
-            f"-I{self.archtest_env}",  # Our local model_test.h and link.ld
-            f"-I{arch_test_env}",  # Working arch_test.h (local or system)
+            f"-I{self.archtest_env}",  # Our local environment with working arch_test.h, model_test.h, and link.ld
             "-DRVTEST_E=1",        # Define test environment
             "-o", elf_file,
             test_path
