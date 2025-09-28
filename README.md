@@ -35,7 +35,7 @@ For example, if you don't need to do physical design, don't run the last script.
 ```
 KryptoNyte/
 ├── .devcontainer/                    # GitHub Codespaces configuration
-├── cores/                           # Individual processor families
+├── rtl/                           # Individual processor families
 ├── shared/                          # Global shared components
 ├── docs/                            # Family-wide documentation
 ├── verification/                    # Family-wide verification
@@ -51,7 +51,7 @@ KryptoNyte/
 │   ├── Dockerfile                   # Container build instructions
 │   └── install.sh                   # Setup script for development environment
 │
-├── cores/                           # Individual processor families
+├── rtl/                           # Individual processor families
 │   ├── ZeroNyte/                    # ZeroNyte: Simple fetch-execute architecture
 │   ├── PipeNyte/                    # PipeNyte: 4-stage pipelined architecture
 │   ├── TetraNyte/                   # TetraNyte: 4-threaded architecture
@@ -110,7 +110,7 @@ KryptoNyte/
 │   ├── Dockerfile                   # Container build instructions
 │   └── install.sh                   # Setup script for development environment
 │
-├── cores/                           # Individual processor families
+├── rtl/                           # Individual processor families
 │   ├── ZeroNyte/                    # ZeroNyte: Simple fetch-execute architecture
 │   │   ├── rv32i/                   # RV32I implementation
 │   │   ├── rv64i/                   # RV64I implementation
@@ -296,7 +296,7 @@ KryptoNyte/
 │   ├── Dockerfile                   # Container build instructions
 │   └── install.sh                   # Setup script for development environment
 │
-├── cores/                           # Individual processor families
+├── rtl/                           # Individual processor families
 │   ├── ZeroNyte/                    # ZeroNyte: Simple fetch-execute architecture
 │   │   ├── rv32i/                   # RV32I implementation
 │   │   │   ├── rtl/                 # RTL source and generation
@@ -1266,7 +1266,7 @@ KryptoNyte/
 │   │   └── logs/                    # Simulation logs
 │   ├── regression/                  # Family-wide regression
 │   │   ├── nightly/                 # Nightly regression tests
-│   │   │   ├── all-cores/           # All cores regression
+│   │   │   ├── all-rtl/           # All cores regression
 │   │   │   ├── cross-core/          # Cross-core regression
 │   │   │   └── performance/         # Performance regression
 │   │   ├── weekly/                  # Weekly comprehensive tests
@@ -1383,7 +1383,7 @@ The KryptoNyte repository is organized as a **monorepo** containing all four pro
 - **Shared Components**: Efficient reuse of common RTL, verification, and documentation
 - **Coordinated Releases**: Family-wide version control and release management
 
-### Core Family Structure (`cores/`)
+### Core Family Structure (`rtl/`)
 
 Each processor family follows a consistent three-level hierarchy:
 

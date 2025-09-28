@@ -61,7 +61,7 @@ Before using the new flow, ensure you have installed:
 
 ```bash
 # Navigate to your KryptoNyte RTL/Chisel directory
-cd cores/
+cd rtl/
 
 # Generate RTL with default settings (ZeroNyte RV32I)
 sbt 'runMain kryptonyte.generators.GenerateHierarchicalRTL'
