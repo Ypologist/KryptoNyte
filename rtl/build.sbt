@@ -48,14 +48,14 @@ lazy val commonSettings = Seq(
 // ***************************
 
 // ----------------- Library Project -----------------
-lazy val library = (project in file("library/rtl/chisel"))
+lazy val library = (project in file("library/chisel"))
   .settings(
     name := "Library",
     commonSettings 
   )
 
 // ----------------- ZeroNyte Project -----------------
-lazy val zeroNyte = (project in file("ZeroNyte/rv32i/rtl/chisel"))
+lazy val zeroNyte = (project in file("ZeroNyte/rv32i/chisel"))
   .dependsOn(library)
   .settings(
     name := "ZeroNyte",
@@ -90,18 +90,6 @@ lazy val generators = (project in file("generators"))
       (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL").value
     },
     
-    TaskKey[Unit]("generatePhysical") := {
-      (library / Compile / compile).value
-      (zeroNyte / Compile / compile).value
-      (Compile / runMain).toTask(" generators.GeneratePhysicalDesign").value
-    },
-    
-    TaskKey[Unit]("generateComplete") := {
-      (library / Compile / compile).value
-      (zeroNyte / Compile / compile).value
-      (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL").value
-      (Compile / runMain).toTask(" generators.GeneratePhysicalDesign").value
-    }
   )
 
 // ----------------- Root Project -----------------
@@ -116,10 +104,4 @@ lazy val root = (project in file("."))
     addCommandAlias("genTetraNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family TetraNyte"),
     addCommandAlias("genOctoNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family OctoNyte"),
     
-    addCommandAlias("physicalZeroNyte", "generators/runMain generators.GeneratePhysicalDesign --module-name ZeroNyteRV32ICore"),
-    addCommandAlias("physicalALU32", "generators/runMain generators.GeneratePhysicalDesign --module-name ALU32"),
-    
-    // Complete flow aliases
-    addCommandAlias("completeZeroNyte", "; genZeroNyte ; physicalZeroNyte"),
-    addCommandAlias("completeALU32", "; generators/runMain generators.GenerateHierarchicalRTL --core-family ZeroNyte ; physicalALU32")
   )
