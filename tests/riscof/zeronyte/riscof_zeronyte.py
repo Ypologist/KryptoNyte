@@ -178,12 +178,30 @@ class zeronyte(pluginTemplate):
                 dut_dir = os.path.join(test_dir, 'dut')
                 os.makedirs(dut_dir, exist_ok=True)
 
-                # Handle signature file
-                tb_sig_file = os.path.join(test_dir, f"{base_test_name}.signature")
+                # Handle signature file - check multiple possible locations
+                possible_sig_files = [
+                    os.path.join(test_dir, f"{base_test_name}.signature"),
+                    os.path.join(test_dir, "obj_dir", f"{base_test_name}.signature"),
+                    os.path.join(test_dir, f"addi-01.signature"),  # Sometimes the name changes
+                ]
+                
                 dut_sig_file = os.path.join(dut_dir, 'DUT-zeronyte.signature')
-                if os.path.exists(tb_sig_file):
-                    shutil.copy(tb_sig_file, dut_sig_file)
-                else:
+                signature_found = False
+                
+                for tb_sig_file in possible_sig_files:
+                    if os.path.exists(tb_sig_file):
+                        logger.info(f"Found signature file: {tb_sig_file}")
+                        shutil.copy(tb_sig_file, dut_sig_file)
+                        signature_found = True
+                        break
+                
+                if not signature_found:
+                    logger.warning("No signature file found, creating placeholder")
+                    # List all files in test_dir for debugging
+                    logger.debug(f"Files in {test_dir}: {os.listdir(test_dir)}")
+                    if os.path.exists(os.path.join(test_dir, "obj_dir")):
+                        logger.debug(f"Files in obj_dir: {os.listdir(os.path.join(test_dir, 'obj_dir'))}")
+                    
                     with open(dut_sig_file, 'w') as f:
                         f.write("# Test failed to generate signature\n")
 
@@ -435,8 +453,18 @@ int main(int argc, char** argv) {{
             
             if result.returncode != 0:
                 logger.warning(f"Simulation returned non-zero exit code: {result.returncode}")
-                logger.debug(f"Simulation output: {result.stdout}")
-                logger.debug(f"Simulation errors: {result.stderr}")
+                # Read the log file to see what happened
+                if os.path.exists(log_file):
+                    with open(log_file, 'r') as f:
+                        log_content = f.read()
+                        logger.debug(f"Simulation log content: {log_content}")
+            else:
+                logger.info("Simulation completed successfully")
+                # Read the log file to see what happened
+                if os.path.exists(log_file):
+                    with open(log_file, 'r') as f:
+                        log_content = f.read()
+                        logger.debug(f"Simulation log content: {log_content}")
         else:
             raise RuntimeError(f"Simulation executable not found: {sim_exe}")
 
