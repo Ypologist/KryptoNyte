@@ -27,9 +27,13 @@ RUN_ALL_TESTS=true
 SPECIFIC_TESTS=""
 EXCLUDE_TESTS=""
 
-# Environment paths
+# Environment paths - check for system installation first
 CONFORMANCE_ROOT="/opt/riscv-conformance"
-ARCH_TEST_ROOT="$RISCOF_ROOT/riscv-arch-test"
+if [ -d "$CONFORMANCE_ROOT/riscv-arch-test" ]; then
+    ARCH_TEST_ROOT="$CONFORMANCE_ROOT/riscv-arch-test"
+else
+    ARCH_TEST_ROOT="$RISCOF_ROOT/riscv-arch-test"
+fi
 
 # Color codes for output
 RED='\033[0;31m'
@@ -225,6 +229,10 @@ setup_environment() {
     if [ -f "$env_file" ]; then
         source "$env_file"
         print_success "Loaded RISC-V conformance environment"
+        # Update ARCH_TEST_ROOT from environment if available
+        if [ -n "$RISCV_ARCH_TEST_ROOT" ] && [ -d "$RISCV_ARCH_TEST_ROOT" ]; then
+            ARCH_TEST_ROOT="$RISCV_ARCH_TEST_ROOT"
+        fi
     fi
     
     # Set up Python environment
@@ -296,14 +304,15 @@ run_riscof_tests() {
     echo "  Parallel Jobs: $PARALLEL_JOBS"
     echo "  Timeout: ${TIMEOUT}s"
     
-    # Change to work directory
-    cd "$WORK_DIR"
+    # Change to RISCOF directory for plugin imports, then to work directory
+    cd "$RISCOF_ROOT"
     
     # Build RISCOF command
     local riscof_cmd="riscof run"
-    riscof_cmd+=" --config=$CONFIG_FILE"
+    riscof_cmd+=" --config=config.ini"
     riscof_cmd+=" --suite=$ARCH_TEST_ROOT/riscv-test-suite/$TEST_SUITE"
-    riscof_cmd+=" --env=$RISCOF_ROOT/zeronyte/env"
+    riscof_cmd+=" --env=zeronyte/env"
+    riscof_cmd+=" --work-dir=$WORK_DIR"
     
     if [ "$RUN_ALL_TESTS" = false ] && [ -n "$SPECIFIC_TESTS" ]; then
         riscof_cmd+=" --filter=$SPECIFIC_TESTS"
