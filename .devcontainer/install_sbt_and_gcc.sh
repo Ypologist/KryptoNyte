@@ -179,19 +179,12 @@ install_gcc14() {
     }
 
     print_step "Installing GCC 14 and G++ 14"
-    run_cmd apt install -y gcc-14 g++-14 && run_cmd apt clean || {
-        print_error "Failed to install GCC 14"
+    run_cmd apt install -y build-essential && run_cmd apt clean || {
+        print_error "Failed to install build-essential"
         return 1
     }
 
-    print_step "Setting up GCC 14 as default compiler"
-    run_cmd update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 && \
-    run_cmd update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100 && \
-    run_cmd update-alternatives --set gcc /usr/bin/gcc-14 && \
-    run_cmd update-alternatives --set g++ /usr/bin/g++-14 || {
-        print_error "Failed to set GCC 14 as default"
-        return 1
-    }
+    print_step "Skipping GCC default setup as build-essential provides a working default."
 
     print_success "GCC 14 installed and configured"
     gcc --version | head -1

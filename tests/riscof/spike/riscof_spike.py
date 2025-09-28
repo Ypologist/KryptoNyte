@@ -130,10 +130,15 @@ class spike(pluginTemplate):
 
             # Skip config generation for Spike - not needed
             # Spike doesn't have a --print-default-config option like SAIL
-            sail_config = {}
-
-            sail_config["memory"]["pmp"]["grain"] = pmp_flags["pmp-grain"]
-            sail_config["memory"]["pmp"]["count"] = pmp_flags["pmp-count"]
+            # Create minimal config structure expected by RISCOF
+            sail_config = {
+                "memory": {
+                    "pmp": {
+                        "grain": pmp_flags.get("pmp-grain", 0) if pmp_flags else 0,
+                        "count": pmp_flags.get("pmp-count", 0) if pmp_flags else 0
+                    }
+                }
+            }
 
             #For User-configuration: Replace this variable with your configuration. "/home/riscv-arch-test/custom_sail_config.json"
             sail_config_path = os.path.join(self.pluginpath, 'env', 'sail_config.json')

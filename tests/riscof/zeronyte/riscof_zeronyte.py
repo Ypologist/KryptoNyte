@@ -49,11 +49,7 @@ class zeronyte(pluginTemplate):
                                    'rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v')
         
         # RISC-V toolchain configuration
-        try:
-            self.prefix = self._find_riscv_prefix()
-        except RuntimeError as e:
-            logger.warning(f"RISC-V toolchain not found: {e}")
-            self.prefix = "riscv32-unknown-elf-"  # Default prefix for validation
+        self.prefix = "/usr/bin/riscv32-unknown-elf-"
         
         # Verilator configuration
         self.verilator_cmd = 'verilator'
@@ -65,7 +61,9 @@ class zeronyte(pluginTemplate):
             '-O3',
             '--x-assign', 'fast',
             '--x-initial', 'fast',
-            '--noassert'
+            '--noassert',
+            '--trace',
+            '-Wno-UNOPTFLAT'
         ]
 
         logger.info(f"ZeroNyte plugin initialized")
@@ -135,37 +133,49 @@ class zeronyte(pluginTemplate):
             
             # Get test details
             testentry = testList[testname]
-            test = testentry['test_path']
+            test_path = testentry['test_path']
             test_dir = testentry['work_dir']
+            base_test_name = os.path.basename(test_path).replace('.S', '')
             
             # Create test-specific directory
             os.makedirs(test_dir, exist_ok=True)
             
             try:
                 # Compile the test
-                elf_file = self._compile_test(test, test_dir)
+                elf_file = self._compile_test(test_path, test_dir)
                 
                 # Convert to hex format
                 hex_file = self._elf_to_hex(elf_file, test_dir)
                 
                 # Create Verilator testbench
-                tb_file = self._create_testbench(hex_file, test_dir, testname)
+                tb_file = self._create_testbench(hex_file, test_dir, base_test_name)
                 
                 # Run simulation
-                self._run_simulation(tb_file, test_dir, testname)
+                self._run_simulation(tb_file, test_dir, base_test_name, hex_file)
                 
-                # Extract signature
-                sig_file = os.path.join(test_dir, f"{testname}.signature")
-                self._extract_signature(test_dir, sig_file)
-                
+                # Create dut directory
+                dut_dir = os.path.join(test_dir, 'dut')
+                os.makedirs(dut_dir, exist_ok=True)
+
+                # Handle signature file
+                tb_sig_file = os.path.join(test_dir, f"{base_test_name}.signature")
+                dut_sig_file = os.path.join(dut_dir, 'DUT-zeronyte.signature')
+                if os.path.exists(tb_sig_file):
+                    shutil.copy(tb_sig_file, dut_sig_file)
+                else:
+                    with open(dut_sig_file, 'w') as f:
+                        f.write("# Test failed to generate signature\n")
+
                 logger.info(f"Test {testname} completed successfully")
                 
             except Exception as e:
                 logger.error(f"Test {testname} failed: {str(e)}")
                 # Create empty signature file to indicate failure
-                sig_file = os.path.join(test_dir, f"{testname}.signature")
-                with open(sig_file, 'w') as f:
-                    f.write("# Test failed\n")
+                dut_dir = os.path.join(test_dir, 'dut')
+                os.makedirs(dut_dir, exist_ok=True)
+                dut_sig_file = os.path.join(dut_dir, 'DUT-zeronyte.signature')
+                with open(dut_sig_file, 'w') as f:
+                    f.write(f"# Test failed with exception: {e}\n")
 
     def _compile_test(self, test_path, work_dir):
         """Compile test to ELF format"""
@@ -179,6 +189,7 @@ class zeronyte(pluginTemplate):
         cmd = [
             f"{self.prefix}gcc",
             "-march=rv32imc",  # Enable compressed instructions for compatibility
+            "-DXLEN=32",
             "-mabi=ilp32",
             "-static",
             "-mcmodel=medany",
@@ -226,24 +237,44 @@ class zeronyte(pluginTemplate):
         """Create Verilator testbench for the test"""
         tb_file = os.path.join(work_dir, f"{test_name}_tb.cpp")
         
+        # Correctly escape C++ curly braces in f-string
         testbench_code = f'''
 #include <verilated.h>
 #include <verilated_vcd_c.h>
 #include "VZeroNyteRV32ICore.h"
 #include <iostream>
 #include <fstream>
+#include <iomanip>
+#include <vector>
 
-#define MAX_CYCLES 100000
+#define MAX_CYCLES 1000000
+#define MEM_BASE 0x80000000
 #define SIGNATURE_START 0x80001000
 #define SIGNATURE_END   0x80002000
 
-int main(int argc, char** argv) {{
+int main(int argc, char** argv) {{ 
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
     
     VZeroNyteRV32ICore* dut = new VZeroNyteRV32ICore;
     VerilatedVcdC* tfp = new VerilatedVcdC;
-    
+
+    // Simulated Memory
+    std::vector<uint32_t> mem(1 << 22, 0);
+    if (argc > 1) {{
+        std::ifstream hex_file(argv[1]);
+        std::string line;
+        uint32_t addr = MEM_BASE;
+        while (std::getline(hex_file, line)) {{
+            if (line[0] == '@') {{
+                addr = std::stoul(line.substr(1), nullptr, 16) * 4;
+            }} else {{
+                mem[(addr - MEM_BASE) / 4] = std::stoul(line, nullptr, 16);
+                addr += 4;
+            }}
+        }}
+    }}
+
     dut->trace(tfp, 99);
     tfp->open("{test_name}.vcd");
     
@@ -268,24 +299,40 @@ int main(int argc, char** argv) {{
         dut->clock = 0;
         dut->eval();
         tfp->dump(2*cycle + 20);
+
+        // Memory Read
+        if ((dut->io_imem_addr - MEM_BASE) / 4 >= mem.size()) {{
+            std::cout << "imem out of bounds: " << std::hex << dut->io_imem_addr << std::endl;
+            exit(1);
+        }}
+        dut->io_imem_rdata = mem[(dut->io_imem_addr - MEM_BASE) / 4];
+
+        if ((dut->io_dmem_addr - MEM_BASE) / 4 >= mem.size()) {{
+            std::cout << "dmem out of bounds: " << std::hex << dut->io_dmem_addr << std::endl;
+            exit(1);
+        }}
+        dut->io_dmem_rdata = mem[(dut->io_dmem_addr - MEM_BASE) / 4];
         
         dut->clock = 1;
         dut->eval();
         tfp->dump(2*cycle + 21);
-        
-        // Check for test completion (implementation specific)
-        // This is a simplified check - real implementation would
-        // monitor specific signals or memory locations
-        
-        if (cycle % 1000 == 0) {{
-            std::cout << "Cycle: " << cycle << std::endl;
+
+        // Memory Write
+        if (dut->io_dmem_wen) {{
+            mem[(dut->io_dmem_addr - MEM_BASE) / 4] = dut->io_dmem_wdata;
+        }}
+
+        // Standard test completion check
+        if (mem[(SIGNATURE_START - MEM_BASE) / 4] == 1) {{
+            break;
         }}
     }}
     
-    // Extract signature (simplified)
+    // Extract signature
     std::ofstream sig_file("{test_name}.signature");
-    sig_file << "# ZeroNyte test signature\\n";
-    sig_file << "# Test: {test_name}\\n";
+    for (uint32_t i = SIGNATURE_START; i < SIGNATURE_END; i += 4) {{
+        sig_file << std::hex << std::setw(8) << std::setfill('0') << mem[(i - MEM_BASE) / 4] << std::endl;
+    }}
     sig_file.close();
     
     tfp->close();
@@ -301,10 +348,10 @@ int main(int argc, char** argv) {{
             
         return tb_file
 
-    def _run_simulation(self, tb_file, work_dir, test_name):
+    def _run_simulation(self, tb_file, test_dir, test_name, hex_file):
         """Run Verilator simulation"""
         # Copy RTL file to work directory
-        local_rtl = os.path.join(work_dir, 'ZeroNyteRV32ICore.v')
+        local_rtl = os.path.join(test_dir, 'ZeroNyteRV32ICore.v')
         shutil.copy2(self.rtl_file, local_rtl)
         
         # Build with Verilator
@@ -316,16 +363,22 @@ int main(int argc, char** argv) {{
         ]
         
         logger.debug(f"Verilator build: {' '.join(cmd)}")
-        result = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True)
+        result = subprocess.run(cmd, cwd=test_dir, capture_output=True, text=True)
+
         
         if result.returncode != 0:
             raise RuntimeError(f"Verilator build failed: {result.stderr}")
         
         # Run simulation
-        sim_exe = os.path.join(work_dir, 'obj_dir', f'V{os.path.basename(local_rtl).replace(".v", "")}')
+        sim_exe = os.path.join(test_dir, 'obj_dir', f'V{os.path.basename(local_rtl).replace(".v", "")}')
         if os.path.exists(sim_exe):
             logger.debug(f"Running simulation: {sim_exe}")
-            result = subprocess.run([sim_exe], cwd=work_dir, capture_output=True, text=True, timeout=60)
+            log_file = os.path.join(test_dir, f"{test_name}.log")
+            with open(log_file, "w") as f:
+                result = subprocess.run([sim_exe, hex_file], cwd=test_dir, stdout=f, stderr=f, text=True, timeout=60)
+
+
+
             
             if result.returncode != 0:
                 logger.warning(f"Simulation returned non-zero exit code: {result.returncode}")
@@ -334,11 +387,12 @@ int main(int argc, char** argv) {{
         else:
             raise RuntimeError(f"Simulation executable not found: {sim_exe}")
 
-    def _extract_signature(self, work_dir, sig_file):
+    def _extract_signature(self, test_dir, test_name):
         """Extract test signature from simulation results"""
         # This is a simplified signature extraction
         # Real implementation would parse memory dumps or VCD files
         
+        sig_file = os.path.join(test_dir, f"{test_name}.signature")
         if not os.path.exists(sig_file):
             # Create a basic signature file
             with open(sig_file, 'w') as f:
