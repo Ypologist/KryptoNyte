@@ -148,6 +148,9 @@ class spike(pluginTemplate):
                 json.dump(sail_config, file, indent=4)
 
             execute += self.spike_exe[self.xlen] + ' --isa={0} -m0x80000000:0x10000000 {1} > {2}.log 2>&1;'.format('rv32imc', elf, test_name)
+            
+            # Extract signature using riscv_isac
+            execute += 'riscv_isac --verbose info normalize -t {0}.log --parser-name spike --sig-label begin_signature end_signature -e {1} -x{2} -o {3};'.format(test_name, elf, self.xlen, sig_file)
 
             cov_str = ' '
             for label in testentry['coverage_labels']:
