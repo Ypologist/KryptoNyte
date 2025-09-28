@@ -48,14 +48,14 @@ lazy val commonSettings = Seq(
 // ***************************
 
 // ----------------- Library Project -----------------
-lazy val library = (project in file("library/chisel"))
+lazy val library = (project in file("library"))
   .settings(
     name := "Library",
     commonSettings 
   )
 
 // ----------------- ZeroNyte Project -----------------
-lazy val zeroNyte = (project in file("ZeroNyte/rv32i/chisel"))
+lazy val zeroNyte = (project in file("ZeroNyte/rv32i"))
   .dependsOn(library)
   .settings(
     name := "ZeroNyte",
