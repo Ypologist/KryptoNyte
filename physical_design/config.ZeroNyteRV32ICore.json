@@ -2,7 +2,7 @@
   "DESIGN_NAME": "ZeroNyteRV32ICore",
   
   "VERILOG_FILES": [
-    "dir::../rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v"
+    "dir::src/ZeroNyteRV32ICore.v"
   ],
   
   "CLOCK_PORT": "clock",
@@ -17,8 +17,5 @@
   "PL_TARGET_DENSITY": 0.65,
   
   "ROUTING_STRATEGY": "0",
-  "GLB_RT_ALLOW_CONGESTION": true,
-  
-  "PNR_SDC_FILE": "constraints/ZeroNyteRV32ICore.sdc",
-  "SIGNOFF_SDC_FILE": "constraints/ZeroNyteRV32ICore_signoff.sdc"
+  "GLB_RT_ALLOW_CONGESTION": true
 }

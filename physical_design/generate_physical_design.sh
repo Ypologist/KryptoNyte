@@ -111,16 +111,18 @@ prepare_design_config() {
     print_step "Preparing OpenLane2 design configuration..."
     
     local design_dir="$RUNS_PATH/$MODULE_NAME"
-    mkdir -p "$design_dir/src"
+    local src_dir="$design_dir/src"
+    mkdir -p "$src_dir"
 
-    # Copy RTL file to design source directory if it exists
+    # Copy RTL file to design source directory
     local input_rtl="../rtl/generators/generated/verilog_hierarchical_timed/${MODULE_NAME}.v"
+    local target_rtl="$src_dir/${MODULE_NAME}.v"
+    
     if [ -f "$input_rtl" ]; then
-        cp "$input_rtl" "$design_dir/src/${MODULE_NAME}.v"
-        print_success "RTL file copied to design directory"
+        cp "$input_rtl" "$target_rtl"
+        print_success "RTL file copied: $input_rtl -> $target_rtl"
     else
-        print_warning "RTL file not found: $input_rtl"
-        print_step "You may need to generate RTL first using the RTL generation scripts"
+        print_error "RTL file not found: $input_rtl. Please generate RTL first."
     fi
 
     # Copy constraint files if they exist
@@ -133,6 +135,12 @@ prepare_design_config() {
     echo "$MERGED_CONFIG" > "$design_dir/config.json"
 
     print_success "Design configuration prepared at: $design_dir"
+    
+    # Debug: Show the final config
+    if [ "$VERBOSE" = true ]; then
+        print_step "Final configuration:"
+        echo "$MERGED_CONFIG" | jq '.'
+    fi
 }
 
 validate_configuration() {
@@ -153,6 +161,12 @@ validate_configuration() {
         print_error "nix-shell not found - required for OpenLane2"
     fi
     
+    # Check RTL file exists
+    local input_rtl="../rtl/generators/generated/verilog_hierarchical_timed/${MODULE_NAME}.v"
+    if [ ! -f "$input_rtl" ]; then
+        print_error "RTL file not found: $input_rtl. Please generate RTL first using the RTL generation scripts."
+    fi
+    
     print_success "Configuration validated"
 }
 
@@ -170,11 +184,13 @@ run_openlane2_flow() {
     print_step "Design directory: $design_dir"
     print_step "Log file: $log_file"
 
-    cd "$OPENLANE2_PATH"
+    # Change to the design directory to run OpenLane2
+    cd "$design_dir"
+    
     if [ "$VERBOSE" = true ]; then
-        nix-shell --run "openlane $design_dir/config.json" 2>&1 | tee "$log_file"
+        nix-shell "$OPENLANE2_PATH" --run "openlane config.json" 2>&1 | tee "$log_file"
     else
-        nix-shell --run "openlane $design_dir/config.json" > "$log_file" 2>&1
+        nix-shell "$OPENLANE2_PATH" --run "openlane config.json" > "$log_file" 2>&1
     fi
 
     local exit_code=${PIPESTATUS[0]}
@@ -182,6 +198,9 @@ run_openlane2_flow() {
         print_error "OpenLane2 flow failed with exit code $exit_code. Check log: $log_file"
     fi
     print_success "OpenLane2 flow completed successfully."
+    
+    # Return to original directory
+    cd "$PHYSICAL_DESIGN_DIR"
 }
 
 generate_final_reports() {
