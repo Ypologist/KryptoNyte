@@ -180,6 +180,9 @@ class zeronyte(pluginTemplate):
         
         arch_test_env = os.path.join(arch_test_root, 'riscv-test-suite', 'env')
         
+        # Find our local working arch_test.h (not the problematic system one)
+        local_arch_test_env = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'riscv-arch-test', 'riscv-test-suite', 'env')
+        
         # Compilation command with assembler flags to handle macros
         cmd = [
             f"{self.prefix}gcc",
@@ -193,8 +196,8 @@ class zeronyte(pluginTemplate):
             "-Wa,-march=rv32imc",  # Pass march to assembler
             "-Wa,--no-warn",       # Suppress assembler warnings
             f"-T{self.archtest_env}/link.ld",
-            f"-I{self.archtest_env}",  # Use our local environment files FIRST
-            # Note: Removed problematic system arch_test_env include
+            f"-I{self.archtest_env}",  # Our local model_test.h and link.ld
+            f"-I{local_arch_test_env}",  # Our local working arch_test.h
             "-DRVTEST_E=1",        # Define test environment
             "-o", elf_file,
             test_path
