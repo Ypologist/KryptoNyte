@@ -106,6 +106,12 @@ while [[ $# -gt 0 ]]; do
             CLEAN_WORK=true
             shift
             ;;
+        --smoke-test)
+            TEST_SUITE="rv32i_m"
+            SPECIFIC_TESTS="addi-01"
+            RUN_ALL_TESTS=false
+            shift
+            ;;
         --quiet)
             VERBOSE=false
             shift
@@ -125,6 +131,7 @@ Options:
   --timeout <sec>       Test timeout in seconds (default: 300)
   --tests <list>        Run specific tests (comma-separated)
   --exclude <list>      Exclude specific tests (comma-separated)
+  --smoke-test          Run only the ADDI test for quick verification
   --clean               Clean work directory before running
   --quiet               Reduce output verbosity
   --help, -h            Show this help message
@@ -136,6 +143,9 @@ Test Suites:
   rv32imc_m             RV32IMC Machine mode tests
 
 Examples:
+  # Run smoke test (single ADDI test for quick verification)
+  $0 --smoke-test
+
   # Run all RV32I machine mode tests
   $0 --suite rv32i_m
 
@@ -319,12 +329,25 @@ run_riscof_tests() {
     riscof_cmd+=" --env=riscof/zeronyte/env"
     riscof_cmd+=" --work-dir=$WORK_DIR"
     
-    if [ "$RUN_ALL_TESTS" = false ] && [ -n "$SPECIFIC_TESTS" ]; then
-        riscof_cmd+=" --filter=$SPECIFIC_TESTS"
-    fi
-    
-    if [ -n "$EXCLUDE_TESTS" ]; then
-        riscof_cmd+=" --exclude=$EXCLUDE_TESTS"
+    # Handle smoke test - create a minimal test suite with just ADDI
+    if [ "$RUN_ALL_TESTS" = false ] && [ "$SPECIFIC_TESTS" = "addi-01" ]; then
+        print_step "Setting up smoke test (ADDI only)"
+        
+        # Create a temporary suite directory with just the ADDI test
+        local smoke_suite="$WORK_DIR/smoke_suite"
+        mkdir -p "$smoke_suite/I/src"
+        
+        # Copy the ADDI test to the smoke suite
+        cp "$ARCH_TEST_ROOT/riscv-test-suite/$TEST_SUITE/I/src/addi-01.S" "$smoke_suite/I/src/"
+        
+        # Update the suite path to use our smoke suite
+        riscof_cmd=" riscof run"
+        riscof_cmd+=" --config=riscof/config.ini"
+        riscof_cmd+=" --suite=$smoke_suite"
+        riscof_cmd+=" --env=riscof/zeronyte/env"
+        riscof_cmd+=" --work-dir=$WORK_DIR"
+        
+        print_step "Smoke test configured: Running ADDI test only"
     fi
     
     # Note: riscof run command doesn't support --verbose flag
