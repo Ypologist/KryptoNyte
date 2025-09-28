@@ -1,68 +1,10 @@
-# ZeroNyte RV32I Core Platform Specification
-# Defines platform-specific features and memory-mapped peripherals
-
-# Machine Timer (MTIME/MTIMECMP)
 mtime:
   implemented: true
-  address: 0x0200bff8      # Standard CLINT MTIME address
-  size: 8                  # 64-bit counter
-
+  address: 0xbff8
 mtimecmp:
-  implemented: true  
-  address: 0x02004000      # Standard CLINT MTIMECMP address
-  size: 8                  # 64-bit compare value
-
-# Non-Maskable Interrupt (NMI) Handler
+  implemented: true
+  address: 0x4000
 nmi:
-  implemented: true
   label: nmi_vector
-  address: 0x00000004      # NMI vector address
-
-# Reset Vector
 reset:
-  implemented: true
   label: reset_vector
-  address: 0x00000000      # Reset vector address
-
-# Machine Software Interrupt (MSIP)
-msip:
-  implemented: true
-  address: 0x02000000      # Standard CLINT MSIP address
-  size: 4                  # 32-bit register
-
-# UART for console I/O (optional)
-uart:
-  implemented: false       # Set to true if UART is implemented
-  base_address: 0x10000000
-  size: 0x1000
-  
-# GPIO (optional)
-gpio:
-  implemented: false       # Set to true if GPIO is implemented
-  base_address: 0x10001000
-  size: 0x1000
-
-# Memory regions
-memory_regions:
-  # Instruction memory
-  - name: "imem"
-    base: 0x00000000
-    size: 0x00010000       # 64KB instruction memory
-    permissions: "rx"      # Read + Execute
-    
-  # Data memory  
-  - name: "dmem"
-    base: 0x00010000
-    size: 0x00010000       # 64KB data memory
-    permissions: "rw"      # Read + Write
-    
-  # Stack region
-  - name: "stack"
-    base: 0x0001f000
-    size: 0x00001000       # 4KB stack
-    permissions: "rw"      # Read + Write
-
-# Test signature region
-signature:
-  base: 0x0001e000         # Signature output region
-  size: 0x00001000         # 4KB for test signatures

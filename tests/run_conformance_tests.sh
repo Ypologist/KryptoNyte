@@ -291,6 +291,7 @@ run_riscof_tests() {
     local riscof_cmd="riscof run"
     riscof_cmd+=" --config=$CONFIG_FILE"
     riscof_cmd+=" --suite=$TEST_SUITE"
+    riscof_cmd+=" --env=$RISCOF_ROOT/zeronyte/env"
     
     if [ "$RUN_ALL_TESTS" = false ] && [ -n "$SPECIFIC_TESTS" ]; then
         riscof_cmd+=" --filter=$SPECIFIC_TESTS"
@@ -300,9 +301,8 @@ run_riscof_tests() {
         riscof_cmd+=" --exclude=$EXCLUDE_TESTS"
     fi
     
-    if [ "$VERBOSE" = true ]; then
-        riscof_cmd+=" --verbose info"
-    fi
+    # Note: riscof run command doesn't support --verbose flag
+    # Verbose output is controlled by the global -v flag
     
     print_step "Running RISCOF command: $riscof_cmd"
     

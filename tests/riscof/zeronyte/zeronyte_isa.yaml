@@ -4,78 +4,31 @@ hart0:
   physical_addr_sz: 32
   User_Spec_Version: '2.3'
   supported_xlen: [32]
-  
-  # Machine ISA Register (MISA) Configuration
   misa:
-    reset-val: 0x40901104  # RV32IMC + Zicsr + Zifencei
-    rv32:
-      accessible: true
-      mxl:
-        implemented: true
-        type:
-          warl:
-            dependency_fields: []
-            legal:
-              - mxl[1:0] in [0x1]  # RV32 = 01
-            wr_illegal:
-              - Unchanged
-      extensions:
-        implemented: true
-        type:
-          warl:
-            dependency_fields: []
-            legal:
-              # I=0x100, M=0x1000, C=0x4, Zicsr=implied, Zifencei=implied
-              - extensions[25:0] bitmask [0x0901104, 0x0000000]
-            wr_illegal:
-              - Unchanged
+   reset-val: 0x40001104
+   rv32:
+     accessible: true
+     mxl:
+       implemented: true
+       type:
+           warl:
+              dependency_fields: []
+              legal:
+                - mxl[1:0] in [0x1]
+              wr_illegal:
+                - Unchanged
+     extensions:
+       implemented: true
+       type:
+           warl:
+              dependency_fields: []
+              legal:
+                - extensions[25:0] bitmask [0x0001104, 0x0000000]
+              wr_illegal:
+                - Unchanged
 
-  # Physical Memory Protection (PMP)
   PMP:
-    implemented: true
-    pmp-grain: 0      # Minimum granularity (4 bytes)
-    pmp-count: 16     # Number of PMP entries supported
-    
-  # Machine-level CSRs
-  machine_csr:
-    # Machine Status Register
-    mstatus:
-      implemented: true
-      reset-val: 0x00001800  # MPP=11 (Machine mode)
-      
-    # Machine Trap Vector Base Address
-    mtvec:
-      implemented: true
-      reset-val: 0x00000000
-      
-    # Machine Exception Program Counter
-    mepc:
-      implemented: true
-      reset-val: 0x00000000
-      
-    # Machine Cause Register
-    mcause:
-      implemented: true
-      reset-val: 0x00000000
-      
-    # Machine Trap Value Register
-    mtval:
-      implemented: true
-      reset-val: 0x00000000
-      
-    # Machine Scratch Register
-    mscratch:
-      implemented: true
-      reset-val: 0x00000000
-
-  # Memory Map Configuration
-  memory_map:
-    # Main memory region
-    - base: 0x00000000
-      size: 0x10000000  # 256MB
-      type: "main_memory"
-      
-    # Memory-mapped I/O region
-    - base: 0x10000000
-      size: 0x10000000  # 256MB
-      type: "io"
+    implemented: True
+    pmp-grain: 0
+    pmp-count: 16
+    pmp-writable: 7

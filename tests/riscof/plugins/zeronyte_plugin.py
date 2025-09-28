@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 import logging
 
-from riscof.utils import shell
+from riscof.utils import shellCommand
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
