@@ -128,15 +128,9 @@ class spike(pluginTemplate):
             else:
                 pmp_flags = ""
 
-            try:
-                sail_config = subprocess.run(["riscv_sim_rv64d", "--print-default-config"], check= True, text=True, capture_output=True)
-                sail_config = json.loads(sail_config.stdout)
-            except subprocess.CalledProcessError as e:
-                print("riscv_sim_rv64d --print-default-config failed:", e.stderr)
-                exit(1)
-            except json.JSONDecodeError:
-                print("riscv_sim_rv64d --print-default-config output is not valid JSON.")
-                exit(1)
+            # Skip config generation for Spike - not needed
+            # Spike doesn't have a --print-default-config option like SAIL
+            sail_config = {}
 
             sail_config["memory"]["pmp"]["grain"] = pmp_flags["pmp-grain"]
             sail_config["memory"]["pmp"]["count"] = pmp_flags["pmp-count"]
