@@ -63,7 +63,6 @@ lazy val zeroNyte = (project in file("ZeroNyte/rv32i"))
   )
 
 // ----------------- Generators Project -----------------
-// New project for the flexible RTL generation and physical design scripts
 lazy val generators = (project in file("generators"))
   .dependsOn(library, zeroNyte)
   .settings(
@@ -76,9 +75,7 @@ lazy val generators = (project in file("generators"))
       zeroNyte / Compile / compile
     ).value,
     
-    // Additional dependencies for RTL generation and physical design
-    // Note: scala-sys-process is part of Scala standard library since 2.13
-    // No need to add it as external dependency
+    // Additional dependencies for RTL generation 
     libraryDependencies ++= Seq(
       "com.typesafe" % "config" % "1.4.2"
     ),
