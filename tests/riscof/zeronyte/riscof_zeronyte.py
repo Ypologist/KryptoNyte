@@ -173,21 +173,18 @@ class zeronyte(pluginTemplate):
         elf_file = os.path.join(work_dir, f"{test_name}.elf")
         
         # Find the architecture test framework headers
-        # First try local installation, then fall back to system
+        # ALWAYS use our local working arch_test.h to avoid system macro issues
         local_arch_test_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'riscv-arch-test')
+        local_arch_test_env = os.path.join(local_arch_test_root, 'riscv-test-suite', 'env')
         
-        if os.path.exists(local_arch_test_root):
-            # Use local installation (development environment)
-            arch_test_env = os.path.join(local_arch_test_root, 'riscv-test-suite', 'env')
+        if os.path.exists(local_arch_test_env):
+            # Use our local working arch_test.h (compatible with our compilation flags)
+            arch_test_env = local_arch_test_env
+            logger.debug(f"Using local arch_test.h: {arch_test_env}")
         else:
-            # Use system installation (user environment)
-            system_arch_test_root = '/opt/riscv-conformance/riscv-arch-test'
-            if os.path.exists(system_arch_test_root):
-                arch_test_env = os.path.join(system_arch_test_root, 'riscv-test-suite', 'env')
-            else:
-                # Fallback to environment variable
-                arch_test_root = os.environ.get('RISCV_ARCH_TEST_ROOT', '')
-                arch_test_env = os.path.join(arch_test_root, 'riscv-test-suite', 'env') if arch_test_root else ''
+            # This should not happen in a properly set up environment
+            logger.warning("Local arch_test.h not found - this may cause compilation issues")
+            arch_test_env = ""
         
         # Compilation command with assembler flags to handle macros
         cmd = [
