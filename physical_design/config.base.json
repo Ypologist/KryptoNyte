@@ -13,17 +13,14 @@
   "FP_PDN_HOFFSET": 7.0,
   
   "SYNTH_STRATEGY": "AREA 0",
-  "SYNTH_READ_BLACKBOX_LIB": true,
-  "SYNTH_BUFFERING": true,
+  "SYNTH_ABC_BUFFERING": true,
   "SYNTH_SIZING": true,
+  "MAX_FANOUT_CONSTRAINT": 20,
   
-  "PL_TARGET_DENSITY": 0.6,
-  "PL_BASIC_PLACEMENT": true,
+  "PL_TARGET_DENSITY_PCT": 60,
   "PL_SKIP_INITIAL_PLACEMENT": false,
   
-  "RT_MAX_LAYER": 6,
-  "ROUTING_STRATEGY": "0",
-  "GLB_RT_ADJUSTMENT": 0.1,
+  "RT_MAX_LAYER": "met4",
   
   "RUN_KLAYOUT_STREAMOUT": true,
   "RUN_KLAYOUT_DRC": true,
@@ -32,12 +29,6 @@
   "ERROR_ON_MAGIC_DRC": false,
   "ERROR_ON_LVS_ERROR": false,
   "RUN_SPEF_EXTRACTION": true,
-  
-  "RUN_CVC": true,
-  "RUN_STA": true,
-  "RUN_ANTENNA_CHECK": true,
-  "QUIT_ON_TIMING_VIOLATIONS": false,
-  "QUIT_ON_HOLD_VIOLATIONS": false,
   
   "EXTRA_LEFS": [],
   "EXTRA_GDS_FILES": [],

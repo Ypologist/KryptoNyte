@@ -30,7 +30,7 @@ print_error() { echo -e "${RED}❌${NC} $1"; exit 1; }
 MODULE_NAME="ZeroNyteRV32ICore"
 CONFIG_BASE_FILE="config.base.json"
 CONFIG_MODULE_FILE=""
-OUTPUT_ROOT="physical_design_runs"
+OUTPUT_ROOT="_runs"
 OPENLANE2_PATH="${OPENLANE2_ROOT:-/opt/skywater-pdk/openlane2}"
 VERBOSE=true
 
@@ -66,7 +66,7 @@ Options:
   --module-name <name>    Module to process (default: ZeroNyteRV32ICore)
   --config-base <file>    Base JSON config (default: config.base.json)
   --config-module <file>  Module-specific JSON config (optional)
-  --output-root <path>    Output directory (default: physical_design_runs)
+  --output-root <path>    Output directory (default: _runs)
   --openlane2-path <path> OpenLane2 directory (default: /opt/skywater-pdk/openlane2)
   --clock-period <ns>     Clock period in nanoseconds (default: 10.0)
   --utilization <ratio>   Core utilization ratio (default: 0.7)
