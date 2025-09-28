@@ -54,8 +54,9 @@ generate_reference() {
     "${RISCV_PREFIX}gcc" -march=rv32i -mabi=ilp32 -static -mcmodel=medany \
         -fvisibility=hidden -nostdlib -nostartfiles \
         -I/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/env \
-        -I/opt/riscv-conformance/riscv-arch-test/riscv-target/spike/env \
-        -T/opt/riscv-conformance/riscv-arch-test/riscv-target/spike/env/link.ld \
+        -I/opt/riscv-conformance/riscv-arch-test/riscof-plugins/rv32/spike_simple/env \
+        -T/opt/riscv-conformance/riscv-arch-test/riscof-plugins/rv32/spike_simple/env/link.ld \
+        -DXLEN=32 -DTEST_CASE_1=True \
         "$test_file" -o "$elf_file"
     
     if [ $? -ne 0 ]; then
