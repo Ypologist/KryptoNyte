@@ -439,45 +439,30 @@ check_riscv_toolchain() {
     
     print_banner "Checking RISC-V Toolchain" "$BLUE"
     
-    # Check if RISC-V toolchain is already available
+    # First check for existing collab toolchain
+    if [ -d "/opt/riscv/collab/bin" ] && [ -f "/opt/riscv/collab/bin/riscv32-unknown-elf-gcc" ]; then
+        print_step "Found existing collab RISC-V toolchain at /opt/riscv/collab"
+        local version=$(/opt/riscv/collab/bin/riscv32-unknown-elf-gcc --version 2>/dev/null | head -1 || echo "Version check failed")
+        print_step "Collab toolchain: $version"
+        TOOLCHAIN_AVAILABLE=true
+        print_success "Using existing collab RISC-V toolchain"
+        return 0
+    fi
+    
+    # Check if RISC-V toolchain is already available in system PATH
     if [ "$UPGRADE_MODE" = false ] && check_riscv_toolchain_available >/dev/null 2>&1; then
         print_success "RISC-V toolchain already available - skipping"
         TOOLCHAIN_AVAILABLE=true
         return 0
     fi
     
-    if [ "$UPGRADE_MODE" = true ]; then
-        print_step "Upgrade mode: Reinstalling RISC-V toolchain"
-        # Remove existing toolchain installation
-        rm -rf "$INSTALL_DIR/riscv-gnu-toolchain" "$INSTALL_DIR/riscv-toolchain"
-    fi
-    
     print_warning "RISC-V toolchain not found"
-    print_step "Installing RISC-V GNU toolchain (this will take a while...)"
+    print_warning "Expected collab toolchain at /opt/riscv/collab/bin/riscv32-unknown-elf-gcc"
+    print_warning "Please ensure the collab toolchain is installed before running conformance tests"
     
-    local toolchain_dir="$INSTALL_DIR/riscv-gnu-toolchain"
-    local toolchain_install="$INSTALL_DIR/riscv-toolchain"
-    
-    if [ ! -d "$toolchain_dir" ]; then
-        print_step "Cloning RISC-V GNU toolchain repository"
-        git clone --recursive https://github.com/riscv/riscv-gnu-toolchain.git "$toolchain_dir"
-    fi
-    
-    cd "$toolchain_dir"
-    
-    print_step "Configuring RISC-V toolchain for RV32I and RV64I"
-    ./configure --prefix="$toolchain_install" --with-arch=rv32i --with-abi=ilp32
-    
-    print_step "Building RISC-V toolchain (this may take 1-2 hours...)"
-    make -j$(nproc)
-    
-    print_step "Building RV64I toolchain"
-    make clean
-    ./configure --prefix="$toolchain_install" --with-arch=rv64i --with-abi=lp64
-    make -j$(nproc)
-    
-    TOOLCHAIN_AVAILABLE=true
-    print_success "RISC-V toolchain installed"
+    # Don't build a new toolchain - just mark as unavailable
+    TOOLCHAIN_AVAILABLE=false
+    return 1
 }
 
 # Function to install RISC-V Architecture Tests
@@ -657,8 +642,15 @@ install_pk() {
     mkdir -p build
     cd build
     
-    # Set cross-compiler environment variables (use available toolchain)
-    if command -v riscv32-unknown-elf-gcc >/dev/null 2>&1; then
+    # Set cross-compiler environment variables (prefer collab toolchain)
+    if [ -f "/opt/riscv/collab/bin/riscv32-unknown-elf-gcc" ]; then
+        export CC=/opt/riscv/collab/bin/riscv32-unknown-elf-gcc
+        export CXX=/opt/riscv/collab/bin/riscv32-unknown-elf-g++
+        export AR=/opt/riscv/collab/bin/riscv32-unknown-elf-ar
+        export RANLIB=/opt/riscv/collab/bin/riscv32-unknown-elf-ranlib
+        export STRIP=/opt/riscv/collab/bin/riscv32-unknown-elf-strip
+        HOST_TRIPLET=riscv32-unknown-elf
+    elif command -v riscv32-unknown-elf-gcc >/dev/null 2>&1; then
         export CC=riscv32-unknown-elf-gcc
         export CXX=riscv32-unknown-elf-g++
         export AR=riscv32-unknown-elf-ar
@@ -711,17 +703,23 @@ export RISCV_ARCH_TEST_ROOT="$INSTALL_DIR/riscv-arch-test"
 # Simulator and Tools
 export SPIKE_ROOT="$INSTALL_DIR/spike"
 export PK_ROOT="$INSTALL_DIR/pk"
-export RISCV_TOOLCHAIN_ROOT="$INSTALL_DIR/riscv-toolchain"
+
+# RISC-V Toolchain - Use collab toolchain if available, fallback to built toolchain
+if [ -d "/opt/riscv/collab/bin" ] && [ -f "/opt/riscv/collab/bin/riscv32-unknown-elf-gcc" ]; then
+    export RISCV_TOOLCHAIN_ROOT="/opt/riscv/collab"
+    export RISCV="/opt/riscv/collab"
+    export RISCV_PREFIX="riscv32-unknown-elf-"
+else
+    export RISCV_TOOLCHAIN_ROOT="$INSTALL_DIR/riscv-toolchain"
+    export RISCV="\$RISCV_TOOLCHAIN_ROOT"
+    export RISCV_PREFIX="riscv64-unknown-elf-"
+fi
 
 # UV Python environment
 export UV_PYTHON_ENV="$INSTALL_DIR/.venv"
 
 # Add tools to PATH
 export PATH="\$SPIKE_ROOT/bin:\$PK_ROOT/bin:\$RISCV_TOOLCHAIN_ROOT/bin:\$HOME/.cargo/bin:\$PATH"
-
-# RISC-V specific environment variables
-export RISCV="\$RISCV_TOOLCHAIN_ROOT"
-export RISCV_PREFIX="riscv64-unknown-elf-"
 
 # Test framework configuration
 export RISCV_TARGET="spike"
