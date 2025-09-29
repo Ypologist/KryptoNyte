@@ -190,13 +190,13 @@ if [ -z "$CONFORMANCE_SUITE" ]; then
 fi
 
 # Run RISCOF with the selected tests
-# Note: We use --no-ref-run because we already have reference signatures
+# Note: We use --use-sig-dir to use pre-generated reference signatures
 riscof run \
     --config="$RISCOF_CONFIG" \
     --suite="$CONFORMANCE_SUITE" \
     --env="$CONFORMANCE_ENV" \
     --no-browser \
     --testfile="$TEST_LIST" \
-    --no-ref-run
+    --use-sig-dir="$REFERENCE_DIR/src"
 
 echo "✅ RISCOF tests completed"
