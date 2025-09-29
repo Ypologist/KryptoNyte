@@ -18,7 +18,6 @@ PK_VERSION="master"
 # Test suite configuration
 INSTALL_SPIKE=true
 INSTALL_PK=true
-INSTALL_TOOLCHAIN=true
 BUILD_TESTS=true
 
 # Installation status tracking
@@ -78,10 +77,6 @@ while [[ $# -gt 0 ]]; do
             INSTALL_PK=false
             shift
             ;;
-        --no-toolchain)
-            INSTALL_TOOLCHAIN=false
-            shift
-            ;;
         --no-build)
             BUILD_TESTS=false
             shift
@@ -101,7 +96,6 @@ while [[ $# -gt 0 ]]; do
             echo "  --pk-version V           Proxy kernel version/branch (default: master)"
             echo "  --no-spike               Skip Spike simulator installation"
             echo "  --no-pk                  Skip proxy kernel installation"
-            echo "  --no-toolchain           Skip RISC-V toolchain check/installation"
             echo "  --no-build               Skip building tests (just clone repositories)"
             echo "  --help, -h               Show this help message"
             echo ""
@@ -111,8 +105,10 @@ while [[ $# -gt 0 ]]; do
             echo "  - RISC-V Architecture Tests"
             echo "  - Spike RISC-V ISA Simulator"
             echo "  - RISC-V Proxy Kernel (pk)"
-            echo "  - RISC-V GNU Toolchain (if not present)"
             echo "  - Test framework and utilities"
+            echo ""
+            echo "This script checks for (but does not install):"
+            echo "  - RISC-V GNU Toolchain (expects existing collab toolchain)"
             echo ""
             echo "Tools are automatically detected and skipped if already installed"
             echo "unless --upgrade flag is used."
@@ -461,16 +457,11 @@ install_uv() {
     fi
 }
 
-# Function to check/install RISC-V toolchain
+# Function to check existing RISC-V toolchain (no installation)
 check_riscv_toolchain() {
-    if [ "$INSTALL_TOOLCHAIN" = false ]; then
-        print_step "Skipping RISC-V toolchain check"
-        return 0
-    fi
-    
     print_banner "Checking RISC-V Toolchain" "$BLUE"
     
-    # First check for existing collab toolchain
+    # Check for existing collab toolchain
     if [ -d "/opt/riscv/collab/bin" ] && [ -f "/opt/riscv/collab/bin/riscv32-unknown-elf-gcc" ]; then
         print_step "Found existing collab RISC-V toolchain at /opt/riscv/collab"
         local version=$(/opt/riscv/collab/bin/riscv32-unknown-elf-gcc --version 2>/dev/null | head -1 || echo "Version check failed")
@@ -480,9 +471,9 @@ check_riscv_toolchain() {
         return 0
     fi
     
-    # Check if RISC-V toolchain is already available in system PATH
-    if [ "$UPGRADE_MODE" = false ] && check_riscv_toolchain_available >/dev/null 2>&1; then
-        print_success "RISC-V toolchain already available - skipping"
+    # Check if RISC-V toolchain is available in system PATH
+    if check_riscv_toolchain_available >/dev/null 2>&1; then
+        print_success "RISC-V toolchain found in system PATH"
         TOOLCHAIN_AVAILABLE=true
         return 0
     fi
@@ -491,7 +482,6 @@ check_riscv_toolchain() {
     print_warning "Expected collab toolchain at /opt/riscv/collab/bin/riscv32-unknown-elf-gcc"
     print_warning "Please ensure the collab toolchain is installed before running conformance tests"
     
-    # Don't build a new toolchain - just mark as unavailable
     TOOLCHAIN_AVAILABLE=false
     return 1
 }
@@ -1038,7 +1028,6 @@ main() {
     echo -e "  Arch Test Version: ${WHITE}$ARCH_TEST_VERSION${NC}"
     echo -e "  Install Spike: ${WHITE}$INSTALL_SPIKE${NC}"
     echo -e "  Install PK: ${WHITE}$INSTALL_PK${NC}"
-    echo -e "  Install Toolchain: ${WHITE}$INSTALL_TOOLCHAIN${NC}"
     echo -e "  Build Tests: ${WHITE}$BUILD_TESTS${NC}"
     echo -e "  Use Sudo: ${WHITE}$USE_SUDO${NC}"
     echo -e "  Upgrade Mode: ${WHITE}$UPGRADE_MODE${NC}"
