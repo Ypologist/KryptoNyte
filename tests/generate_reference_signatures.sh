@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # Generate Reference Signatures for RISC-V Conformance Tests
-# This script runs Spike once to generate reference signatures that can be reused
+# This script generates reference signatures for all RISC-V extensions using Spike
+# Updated for new directory structure
 
 set -e
 
@@ -9,10 +10,8 @@ set -e
 cleanup() {
     echo ""
     echo "🛑 Script interrupted. Cleaning up..."
-    # Kill any running spike or riscv_isac processes
+    # Kill any running processes
     pkill -f spike 2>/dev/null || true
-    pkill -f riscv_isac 2>/dev/null || true
-    pkill -f riscv32-unknown-elf-gcc 2>/dev/null || true
     echo "✅ Cleanup completed"
     exit 1
 }
@@ -20,40 +19,37 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 # Parse command line arguments
-RUN_I=true
-RUN_M=true
-RUN_PRIVILEGE=true
+GENERATE_I=false
+GENERATE_M=false
+GENERATE_PRIVILEGE=false
+GENERATE_ALL=false
 
 # Process command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --no-m)
-            RUN_M=false
+        --i)
+            GENERATE_I=true
             shift
             ;;
-        --no-privilege)
-            RUN_PRIVILEGE=false
+        --m)
+            GENERATE_M=true
             shift
             ;;
-        --only-i)
-            RUN_I=true
-            RUN_M=false
-            RUN_PRIVILEGE=false
+        --privilege)
+            GENERATE_PRIVILEGE=true
             shift
             ;;
         --all)
-            RUN_I=true
-            RUN_M=true
-            RUN_PRIVILEGE=true
+            GENERATE_ALL=true
             shift
             ;;
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
-            echo "  --no-m             Exclude M extension tests"
-            echo "  --no-privilege     Exclude privilege tests"
-            echo "  --only-i           Only include I extension tests"
-            echo "  --all              Include all test suites (default)"
+            echo "  --i                Generate I extension reference signatures"
+            echo "  --m                Generate M extension reference signatures"
+            echo "  --privilege        Generate privilege reference signatures"
+            echo "  --all              Generate all reference signatures"
             echo "  --help             Show this help message"
             exit 0
             ;;
@@ -65,70 +61,47 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# If no specific extension is selected, default to all
+if [ "$GENERATE_I" = false ] && [ "$GENERATE_M" = false ] && [ "$GENERATE_PRIVILEGE" = false ] && [ "$GENERATE_ALL" = false ]; then
+    GENERATE_ALL=true
+fi
+
 # Set up paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-WORK_DIR="$SCRIPT_DIR/riscof/reference_signatures"
+RISCOF_DIR="$SCRIPT_DIR/riscof"
+WORK_DIR="$SCRIPT_DIR/riscof_work"
+REFERENCE_DIR="$WORK_DIR/reference_signatures"
+
+# Create directories
+mkdir -p "$REFERENCE_DIR"
+mkdir -p "$WORK_DIR"
 
 # Export KRYPTONYTE_ROOT for the plugins to use
 export KRYPTONYTE_ROOT="$REPO_ROOT"
 
-# Find spike binary
-SPIKE_PATHS=(
-    "/opt/riscv-conformance/spike/bin/spike"
-    "/opt/riscv/bin/spike"
-    "/usr/bin/spike"
-    "/usr/local/bin/spike"
-)
+echo "============================================================"
+echo "Generating RISC-V Reference Signatures using Spike"
+echo "============================================================"
 
-SPIKE_BIN=""
-for path in "${SPIKE_PATHS[@]}"; do
-    if [ -f "$path" ] && [ -x "$path" ]; then
-        SPIKE_BIN="$path"
-        break
-    fi
-done
-
-if [ -z "$SPIKE_BIN" ]; then
-    echo "❌ Spike binary not found in expected locations"
-    echo "Please install Spike or set the correct path"
+# Check if Spike is available
+if ! command -v spike &> /dev/null; then
+    echo "❌ Spike simulator not found"
+    echo "Please install Spike or ensure it's in your PATH"
     exit 1
 fi
 
-# Find RISC-V toolchain
-RISCV_PREFIXES=(
-    "/opt/riscv/collab/bin/riscv32-unknown-elf-"
-    "/opt/riscv/bin/riscv32-unknown-elf-"
-    "/usr/bin/riscv32-unknown-elf-"
-    "/usr/local/bin/riscv32-unknown-elf-"
-    "/opt/riscv/collab/bin/riscv64-unknown-elf-"
-    "/opt/riscv/bin/riscv64-unknown-elf-"
-    "/usr/bin/riscv64-unknown-elf-"
-    "/usr/local/bin/riscv64-unknown-elf-"
-)
-
-RISCV_PREFIX=""
-for prefix in "${RISCV_PREFIXES[@]}"; do
-    if [ -f "${prefix}gcc" ] && [ -x "${prefix}gcc" ]; then
-        RISCV_PREFIX="$prefix"
-        break
-    fi
-done
-
-if [ -z "$RISCV_PREFIX" ]; then
-    echo "❌ RISC-V toolchain not found in expected locations"
-    echo "Please install RISC-V toolchain or set the correct path"
-    exit 1
+# Check if RISC-V proxy kernel is available
+if ! command -v pk &> /dev/null; then
+    echo "⚠️  Warning: RISC-V proxy kernel (pk) not found"
+    echo "Some tests may not work without pk"
 fi
-
-# Test suites to generate references for (based on command line arguments)
-TEST_SUITES=()
 
 # Find RISC-V conformance test suite
 CONFORMANCE_PATHS=(
-    "/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/"
-    "/opt/riscv-arch-test/riscv-test-suite/"
-    "/usr/local/share/riscv-arch-test/riscv-test-suite/"
+    "/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/rv32i_m"
+    "/opt/riscv-arch-test/riscv-test-suite/rv32i_m"
+    "/usr/local/share/riscv-arch-test/riscv-test-suite/rv32i_m"
 )
 
 CONFORMANCE_SUITE=""
@@ -141,214 +114,123 @@ done
 
 if [ -z "$CONFORMANCE_SUITE" ]; then
     echo "❌ RISC-V conformance test suite not found in expected locations"
-    echo "Please install RISC-V conformance tests or set the correct path"
+    echo "Please install RISC-V conformance tests"
     exit 1
 fi
 
-# Add test suites based on command line arguments
-if [ "$RUN_I" = true ]; then
-    TEST_SUITES+=("${CONFORMANCE_SUITE}rv32i_m/I")
-fi
+echo "Using conformance suite: $CONFORMANCE_SUITE"
 
-if [ "$RUN_M" = true ]; then
-    TEST_SUITES+=("${CONFORMANCE_SUITE}rv32i_m/M")
-fi
-
-if [ "$RUN_PRIVILEGE" = true ]; then
-    TEST_SUITES+=("${CONFORMANCE_SUITE}rv32i_m/privilege")
-fi
-
-# Print selected test suites
-echo "Selected test suites:"
-for suite in "${TEST_SUITES[@]}"; do
-    echo "  - $(basename "$suite")"
-done
-
-echo "============================================================"
-echo "Generating RISC-V Conformance Test Reference Signatures"
-echo "============================================================"
-
-# Create work directory
-mkdir -p "$WORK_DIR"
-
-# Check prerequisites
-if [ ! -f "$SPIKE_BIN" ]; then
-    echo "❌ Spike not found at $SPIKE_BIN"
-    echo "Please install RISC-V conformance tests first"
-    exit 1
-fi
-
-if [ ! -f "${RISCV_PREFIX}gcc" ]; then
-    echo "❌ RISC-V toolchain not found at $RISCV_PREFIX"
-    echo "Please install RISC-V toolchain first"
-    exit 1
-fi
-
-echo "✅ Prerequisites check completed"
-
-# Function to run a command with timeout
-run_with_timeout() {
-    local timeout="$1"
-    local label="$2"
-    shift 2
-    
-    # Start the command in the background
-    "$@" &
-    local pid=$!
-    
-    # Wait for the command to finish or timeout
-    local counter=0
-    while kill -0 $pid 2>/dev/null; do
-        if [ $counter -ge $timeout ]; then
-            echo "❌ Timeout: $label took more than ${timeout}s"
-            kill -9 $pid 2>/dev/null || true
-            wait $pid 2>/dev/null || true
-            return 1
-        fi
-        sleep 1
-        counter=$((counter + 1))
-    done
-    
-    # Check if the command succeeded
-    wait $pid
-    return $?
-}
-
-# Function to compile a test with appropriate architecture flags
-compile_test() {
-    local test_path="$1"
-    local test_name="$(basename "$test_path" .S)"
-    local test_dir="$WORK_DIR/src"
-    local elf_file="$test_dir/${test_name}.elf"
-    
-    mkdir -p "$test_dir"
-    
-    # Determine the appropriate architecture flags based on the test path
-    local march_flags="rv32i"
-    if [[ "$test_path" == *"/M/"* ]]; then
-        march_flags="rv32im"
-    elif [[ "$test_path" == *"/privilege/"* ]]; then
-        march_flags="rv32i_zicsr"
-    fi
-    
-    echo "  Running: Compilation (timeout: 30s) with -march=$march_flags"
-    if ! run_with_timeout 30 "Compilation" \
-        "${RISCV_PREFIX}gcc" -march=$march_flags -mabi=ilp32 -static -mcmodel=medany \
-        -fvisibility=hidden -nostdlib -nostartfiles \
-        -I/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/env \
-        -I/opt/riscv-conformance/riscv-arch-test/riscof-plugins/rv32/spike_simple/env \
-        -T/opt/riscv-conformance/riscv-arch-test/riscof-plugins/rv32/spike_simple/env/link.ld \
-        -DXLEN=32 -DTEST_CASE_1=True \
-        "$test_path" \
-        -o "$elf_file"; then
-        echo "❌ Failed to compile $test_name"
-        return 1
-    fi
-    
-    return 0
-}
-
-# Function to generate reference signature for a test
-generate_reference() {
-    local test_file="$1"
-    local test_name="$(basename "$test_file" .S)"
-    local test_dir="$WORK_DIR/src"
-    local elf_file="$test_dir/${test_name}.elf"
-    
-    # Compile the test
-    if ! compile_test "$test_file"; then
-        return 1
-    fi
-    
-    # Create a temporary directory for riscv_isac
-    local isac_dir="$test_dir/isac"
-    mkdir -p "$isac_dir"
-    
-    # Create a log file
-    local log_file="$test_dir/${test_name}.log"
-    
-    echo "  Running: Generating signature with spike (timeout: 30s)"
-    
-    # Create output signature file
-    local sig_file="$test_dir/${test_name}.signature"
-    
-    # Use the direct ELF signature extraction method that's working
-    if ! run_with_timeout 30 "Signature extraction" \
-        "$SPIKE_BIN" --dump-dts "$elf_file" > "$sig_file" 2>/dev/null; then
-        echo "❌ Signature extraction failed for $test_name"
-        echo "# No signature data for this test" > "$sig_file"
-        return 1
-    fi
-    
-    # Verify the signature file exists and has content
-    if [ -f "$sig_file" ] && [ -s "$sig_file" ]; then
-        echo "✅ Generated reference signature for $test_name"
-        return 0
-    else
-        echo "⚠️  No signature generated for $test_name (test may not have signature)"
-        # Create empty signature file to indicate test was processed
-        echo "# No signature data for this test" > "$sig_file"
-    fi
-    return 0
-}
-
-# Generate references for all test suites
-total_tests=0
-total_processed=0
-total_failed=0
-
-for suite in "${TEST_SUITES[@]}"; do
-    suite_name=$(basename "$suite")
-    echo "▶ Processing test suite: $suite_name"
-    
-    # Find all tests in the suite
-    test_files=()
-    while IFS= read -r -d $'\0' file; do
-        test_files+=("$file")
-    done < <(find "$suite/src" -name "*.S" -type f -print0 | sort -z)
-    
-    num_tests=${#test_files[@]}
-    echo "  Found $num_tests tests in $suite_name"
-    
-    # Process each test
-    for ((i=0; i<num_tests; i++)); do
-        test_file="${test_files[$i]}"
-        test_name=$(basename "$test_file" .S)
-        total_tests=$((total_tests + 1))
-        total_processed=$((total_processed + 1))
-        
-        echo "  Progress: $((i+1))/$num_tests (Total: $total_processed)"
-        echo "▶ Generating reference for $test_name"
-        
-        if ! generate_reference "$test_file"; then
-            total_failed=$((total_failed + 1))
-            echo "  ⚠️  Continuing with next test..."
-        fi
-    done
-done
-
-echo ""
-echo "============================================================"
-echo "Reference Signature Generation Summary"
-echo "============================================================"
-echo "Total tests processed: $total_processed"
-echo "Successfully generated: $((total_processed - total_failed))"
-echo "Failed: $total_failed"
-echo ""
-
-if [ $total_failed -eq 0 ]; then
-    echo "✅ All reference signatures generated successfully"
+# Check if RISC-V toolchain is available
+RISCV_PREFIX=""
+if command -v riscv64-linux-gnu-gcc &> /dev/null; then
+    RISCV_PREFIX="riscv64-linux-gnu-"
+elif command -v riscv32-unknown-elf-gcc &> /dev/null; then
+    RISCV_PREFIX="riscv32-unknown-elf-"
 else
-    echo "⚠️  Some reference signatures failed to generate"
-    echo "   This is normal for tests requiring unsupported extensions"
+    echo "❌ RISC-V toolchain not found"
+    echo "Please install with: sudo apt install gcc-riscv64-linux-gnu"
+    exit 1
 fi
 
-echo ""
-echo "Reference signatures are available at:"
-echo "$WORK_DIR/src"
-echo ""
-echo "You can now run the conformance tests against your RTL implementation:"
-echo "./run_rtl_conformance.sh --only-i"
-echo ""
+echo "Using RISC-V toolchain: ${RISCV_PREFIX}gcc"
 
-exit 0
+# Function to generate reference signatures for a test suite
+generate_reference_signatures() {
+    local suite_name=$1
+    local suite_path="$CONFORMANCE_SUITE/$suite_name"
+    
+    if [ ! -d "$suite_path" ]; then
+        echo "⚠️  Warning: Test suite not found: $suite_path"
+        return
+    fi
+    
+    echo "▶ Generating reference signatures for $suite_name extension"
+    
+    # Find all test files
+    local test_files=($(find "$suite_path" -name "*.S" | sort))
+    
+    if [ ${#test_files[@]} -eq 0 ]; then
+        echo "⚠️  Warning: No test files found in $suite_path"
+        return
+    fi
+    
+    echo "Found ${#test_files[@]} test files"
+    
+    # Create suite-specific reference directory
+    local suite_ref_dir="$REFERENCE_DIR/$suite_name"
+    mkdir -p "$suite_ref_dir"
+    
+    # Process each test file
+    local success_count=0
+    local total_count=${#test_files[@]}
+    
+    for test_file in "${test_files[@]}"; do
+        local test_name=$(basename "$test_file" .S)
+        local ref_sig_file="$suite_ref_dir/${test_name}.reference_output"
+        
+        echo "  Processing: $test_name"
+        
+        # Create temporary work directory for this test
+        local temp_dir="$WORK_DIR/temp_ref_$test_name"
+        mkdir -p "$temp_dir"
+        
+        # Compile the test
+        local elf_file="$temp_dir/${test_name}.elf"
+        
+        # Use the same compilation flags as the DUT plugin
+        if ${RISCV_PREFIX}gcc \
+            -march=rv32imc \
+            -DXLEN=32 \
+            -mabi=ilp32 \
+            -static \
+            -mcmodel=medany \
+            -fvisibility=hidden \
+            -nostdlib \
+            -nostartfiles \
+            -Wa,-march=rv32imc \
+            -Wa,--no-warn \
+            -Ttext=0x80000000 \
+            -I"$RISCOF_DIR/zeronyte/env" \
+            -DRVTEST_E=1 \
+            -o "$elf_file" \
+            "$test_file" 2>/dev/null; then
+            
+            # Run with Spike to generate reference signature
+            if spike --isa=rv32imc "$elf_file" > "$ref_sig_file" 2>/dev/null; then
+                echo "    ✅ Generated reference signature"
+                ((success_count++))
+            else
+                echo "    ❌ Failed to run with Spike"
+                echo "# Failed to generate reference signature with Spike" > "$ref_sig_file"
+            fi
+        else
+            echo "    ❌ Failed to compile"
+            echo "# Failed to compile test" > "$ref_sig_file"
+        fi
+        
+        # Clean up temporary files
+        rm -rf "$temp_dir"
+    done
+    
+    echo "  Generated $success_count/$total_count reference signatures for $suite_name"
+    echo ""
+}
+
+# Generate reference signatures based on command line arguments
+if [ "$GENERATE_ALL" = true ] || [ "$GENERATE_I" = true ]; then
+    generate_reference_signatures "I"
+fi
+
+if [ "$GENERATE_ALL" = true ] || [ "$GENERATE_M" = true ]; then
+    generate_reference_signatures "M"
+fi
+
+if [ "$GENERATE_ALL" = true ] || [ "$GENERATE_PRIVILEGE" = true ]; then
+    generate_reference_signatures "privilege"
+fi
+
+echo "✅ Reference signature generation completed"
+echo "Reference signatures saved to: $REFERENCE_DIR"
+echo ""
+echo "You can now run conformance tests with:"
+echo "  ./run_rtl_conformance_fixed.sh --smoke-test"
