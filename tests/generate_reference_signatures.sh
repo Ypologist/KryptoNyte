@@ -98,16 +98,16 @@ generate_reference() {
         return 1
     fi
     
-    # Run Spike simulation with timeout and correct reset vector
+    # Run Spike simulation with timeout (starts at 0x0 by default)
     local log_file="$test_dir/${test_name}.log"
     if ! run_with_timeout 60 "Spike simulation" \
-        "$SPIKE_BIN" --isa=rv32i -m0x80000000:0x10000000 --pc=0x80000000 "$elf_file"; then
+        "$SPIKE_BIN" --isa=rv32i -m0x00000000:0x10000000 "$elf_file"; then
         echo "❌ Spike simulation failed for $test_name"
         return 1
     fi
     
-    # Redirect Spike output to log file with proper reset vector
-    if ! timeout 60 "$SPIKE_BIN" --isa=rv32i -m0x80000000:0x10000000 --pc=0x80000000 "$elf_file" > "$log_file" 2>&1; then
+    # Redirect Spike output to log file (Spike starts at 0x0 by default)
+    if ! timeout 60 "$SPIKE_BIN" --isa=rv32i -m0x00000000:0x10000000 "$elf_file" > "$log_file" 2>&1; then
         echo "❌ Spike simulation failed or timed out for $test_name"
         return 1
     fi
