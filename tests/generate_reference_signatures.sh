@@ -21,18 +21,24 @@ trap cleanup SIGINT SIGTERM
 
 # Parse command line arguments
 RUN_I=true
-RUN_M=false
-RUN_PRIVILEGE=false
+RUN_M=true
+RUN_PRIVILEGE=true
 
 # Process command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --with-m)
-            RUN_M=true
+        --no-m)
+            RUN_M=false
             shift
             ;;
-        --with-privilege)
-            RUN_PRIVILEGE=true
+        --no-privilege)
+            RUN_PRIVILEGE=false
+            shift
+            ;;
+        --only-i)
+            RUN_I=true
+            RUN_M=false
+            RUN_PRIVILEGE=false
             shift
             ;;
         --all)
@@ -44,9 +50,10 @@ while [[ $# -gt 0 ]]; do
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
-            echo "  --with-m           Include M extension tests (multiply/divide)"
-            echo "  --with-privilege   Include privilege tests"
-            echo "  --all              Include all test suites"
+            echo "  --no-m             Exclude M extension tests"
+            echo "  --no-privilege     Exclude privilege tests"
+            echo "  --only-i           Only include I extension tests"
+            echo "  --all              Include all test suites (default)"
             echo "  --help             Show this help message"
             exit 0
             ;;
