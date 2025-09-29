@@ -692,8 +692,10 @@ install_pk() {
     
     print_step "Using toolchain: $CC"
     
-    # Configure for the available toolchain - force 32-bit build for RV32 compatibility
-    ../configure --prefix="$pk_install" --host="$HOST_TRIPLET" --with-arch=rv32g
+    # Configure for the available toolchain - use rv32im with soft-float to avoid ABI conflicts
+    export CFLAGS="-march=rv32im -mabi=ilp32"
+    export CXXFLAGS="-march=rv32im -mabi=ilp32"
+    ../configure --prefix="$pk_install" --host="$HOST_TRIPLET" --with-arch=rv32im
     if make -j$(nproc) && make install; then
         PK_INSTALLED=true
         print_success "Proxy kernel installed"
@@ -703,7 +705,7 @@ install_pk() {
     fi
     
     # Reset environment variables
-    unset CC CXX AR RANLIB STRIP
+    unset CC CXX AR RANLIB STRIP CFLAGS CXXFLAGS
 }
 
 # Function to set up environment variables
