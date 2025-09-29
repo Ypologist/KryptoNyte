@@ -358,9 +358,8 @@ int main(int argc, char** argv) {{
             if (line.empty() || line[0] == '#') continue; // Skip empty lines and comments
             
             if (line[0] == '@') {{
-                // Address directive - convert from hex words to byte address
-                uint32_t word_addr = std::stoul(line.substr(1), nullptr, 16);
-                addr = word_addr * 4; // Convert word address to byte address
+                // Address directive - this is already a byte address
+                addr = std::stoul(line.substr(1), nullptr, 16);
                 std::cout << "Setting address to: 0x" << std::hex << addr << std::endl;
             }} else {{
                 // Data line - ensure address is within our memory range
