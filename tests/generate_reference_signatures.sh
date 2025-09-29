@@ -73,51 +73,64 @@ WORK_DIR="$SCRIPT_DIR/riscof/reference_signatures"
 # Export KRYPTONYTE_ROOT for the plugins to use
 export KRYPTONYTE_ROOT="$REPO_ROOT"
 
-# Find spike binary
+# Load native RISC-V toolchain environment if available
+if [ -f "$HOME/.riscv_native_env" ]; then
+    echo "🔧 Loading native RISC-V toolchain environment..."
+    source "$HOME/.riscv_native_env"
+fi
+
+# Find spike binary (prioritize native build)
 SPIKE_PATHS=(
-    "/opt/riscv-conformance/spike/bin/spike"
-    "/opt/riscv/bin/spike"
-    "/usr/bin/spike"
-    "/usr/local/bin/spike"
+    "/opt/riscv/bin/spike"                    # Native build location
+    "/opt/riscv-conformance/spike/bin/spike"  # Conformance test location
+    "/usr/bin/spike"                          # System package
+    "/usr/local/bin/spike"                    # Local build
 )
 
 SPIKE_BIN=""
 for path in "${SPIKE_PATHS[@]}"; do
     if [ -f "$path" ] && [ -x "$path" ]; then
         SPIKE_BIN="$path"
+        echo "✅ Found Spike at: $SPIKE_BIN"
         break
     fi
 done
 
 if [ -z "$SPIKE_BIN" ]; then
     echo "❌ Spike binary not found in expected locations"
-    echo "Please install Spike or set the correct path"
+    echo "Please build native RISC-V toolchain with: .devcontainer/install_native_riscv_toolchain.sh --with-sudo"
     exit 1
 fi
 
-# Find RISC-V toolchain
+# Find RISC-V toolchain (prioritize native build)
 RISCV_PREFIXES=(
-    "/opt/riscv/collab/bin/riscv32-unknown-elf-"
-    "/opt/riscv/bin/riscv32-unknown-elf-"
-    "/usr/bin/riscv32-unknown-elf-"
-    "/usr/local/bin/riscv32-unknown-elf-"
-    "/opt/riscv/collab/bin/riscv64-unknown-elf-"
-    "/opt/riscv/bin/riscv64-unknown-elf-"
-    "/usr/bin/riscv64-unknown-elf-"
-    "/usr/local/bin/riscv64-unknown-elf-"
+    "/opt/riscv/bin/riscv32-unknown-elf-"     # Native build 32-bit
+    "/opt/riscv/bin/riscv64-unknown-elf-"     # Native build 64-bit
+    "/opt/riscv/collab/bin/riscv32-unknown-elf-"  # Collab toolchain (fallback)
+    "/opt/riscv/collab/bin/riscv64-unknown-elf-"  # Collab toolchain (fallback)
+    "/usr/bin/riscv32-unknown-elf-"           # System package
+    "/usr/bin/riscv64-unknown-elf-"           # System package
+    "/usr/local/bin/riscv32-unknown-elf-"     # Local build
+    "/usr/local/bin/riscv64-unknown-elf-"     # Local build
 )
 
 RISCV_PREFIX=""
 for prefix in "${RISCV_PREFIXES[@]}"; do
     if [ -f "${prefix}gcc" ] && [ -x "${prefix}gcc" ]; then
-        RISCV_PREFIX="$prefix"
-        break
+        # Test if the toolchain actually works (avoid GLIBC issues)
+        if "${prefix}gcc" --version >/dev/null 2>&1; then
+            RISCV_PREFIX="$prefix"
+            echo "✅ Found working RISC-V toolchain at: $RISCV_PREFIX"
+            break
+        else
+            echo "⚠️  Found toolchain at ${prefix}gcc but it has compatibility issues (likely GLIBC)"
+        fi
     fi
 done
 
 if [ -z "$RISCV_PREFIX" ]; then
-    echo "❌ RISC-V toolchain not found in expected locations"
-    echo "Please install RISC-V toolchain or set the correct path"
+    echo "❌ Working RISC-V toolchain not found in expected locations"
+    echo "Please build native RISC-V toolchain with: .devcontainer/install_native_riscv_toolchain.sh --with-sudo"
     exit 1
 fi
 

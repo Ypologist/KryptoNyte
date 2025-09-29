@@ -101,6 +101,12 @@ RISCOF_CONFIG="$RISCOF_DIR/config.ini"
 # Export KRYPTONYTE_ROOT for the plugins to use
 export KRYPTONYTE_ROOT="$REPO_ROOT"
 
+# Load native RISC-V toolchain environment if available
+if [ -f "$HOME/.riscv_native_env" ]; then
+    echo "🔧 Loading native RISC-V toolchain environment..."
+    source "$HOME/.riscv_native_env"
+fi
+
 # Check if RTL file exists
 RTL_PATHS=(
     "$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v"
@@ -159,10 +165,33 @@ if [ ! -f "$RISCOF_CONFIG" ]; then
     exit 1
 fi
 
-# Check if RISC-V toolchain is available
-if ! command -v riscv64-linux-gnu-gcc &> /dev/null && ! command -v riscv32-unknown-elf-gcc &> /dev/null; then
-    echo "❌ RISC-V toolchain not found"
-    echo "Please install with: sudo apt install gcc-riscv64-linux-gnu"
+# Check if RISC-V toolchain is available (prioritize native build)
+RISCV_TOOLCHAIN_FOUND=false
+
+# Check for native build toolchain first
+if command -v riscv64-unknown-elf-gcc &> /dev/null; then
+    if riscv64-unknown-elf-gcc --version >/dev/null 2>&1; then
+        echo "✅ Found working native RISC-V toolchain (64-bit)"
+        RISCV_TOOLCHAIN_FOUND=true
+    else
+        echo "⚠️  Found riscv64-unknown-elf-gcc but it has compatibility issues"
+    fi
+elif command -v riscv32-unknown-elf-gcc &> /dev/null; then
+    if riscv32-unknown-elf-gcc --version >/dev/null 2>&1; then
+        echo "✅ Found working native RISC-V toolchain (32-bit)"
+        RISCV_TOOLCHAIN_FOUND=true
+    else
+        echo "⚠️  Found riscv32-unknown-elf-gcc but it has compatibility issues"
+    fi
+elif command -v riscv64-linux-gnu-gcc &> /dev/null; then
+    echo "✅ Found system RISC-V toolchain (Linux)"
+    RISCV_TOOLCHAIN_FOUND=true
+fi
+
+if [ "$RISCV_TOOLCHAIN_FOUND" = false ]; then
+    echo "❌ No working RISC-V toolchain found"
+    echo "Please build native RISC-V toolchain with: .devcontainer/install_native_riscv_toolchain.sh --with-sudo"
+    echo "Or install system toolchain with: sudo apt install gcc-riscv64-linux-gnu"
     exit 1
 fi
 
