@@ -120,15 +120,48 @@ fi
 
 echo "Using conformance suite: $CONFORMANCE_SUITE"
 
-# Check if RISC-V toolchain is available
+# Check if RISC-V toolchain is available and working
 RISCV_PREFIX=""
-if command -v riscv64-linux-gnu-gcc &> /dev/null; then
-    RISCV_PREFIX="riscv64-linux-gnu-"
-elif command -v riscv32-unknown-elf-gcc &> /dev/null; then
+
+# Test function to check if a toolchain works
+test_toolchain() {
+    local prefix=$1
+    local test_file=$(mktemp)
+    echo 'int main() { return 0; }' > "$test_file.c"
+    
+    # Try to compile a simple test with 32-bit flags
+    if ${prefix}gcc \
+        -march=rv32imc \
+        -DXLEN=32 \
+        -mabi=ilp32 \
+        -static \
+        -mcmodel=medany \
+        -fvisibility=hidden \
+        -nostdlib \
+        -nostartfiles \
+        -Ttext=0x80000000 \
+        -o "$test_file.elf" \
+        "$test_file.c" &>/dev/null; then
+        rm -f "$test_file"*
+        return 0
+    else
+        rm -f "$test_file"*
+        return 1
+    fi
+}
+
+# Try toolchains in order of preference
+if command -v riscv32-unknown-elf-gcc &> /dev/null && test_toolchain "riscv32-unknown-elf-"; then
     RISCV_PREFIX="riscv32-unknown-elf-"
+elif command -v riscv64-linux-gnu-gcc &> /dev/null && test_toolchain "riscv64-linux-gnu-"; then
+    RISCV_PREFIX="riscv64-linux-gnu-"
 else
-    echo "❌ RISC-V toolchain not found"
+    echo "❌ No working RISC-V toolchain found"
+    echo "Tried:"
+    echo "  - riscv32-unknown-elf-gcc (32-bit preferred)"
+    echo "  - riscv64-linux-gnu-gcc (64-bit fallback)"
     echo "Please install with: sudo apt install gcc-riscv64-linux-gnu"
+    echo "Or install a working 32-bit RISC-V toolchain"
     exit 1
 fi
 
