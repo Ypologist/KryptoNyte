@@ -584,7 +584,19 @@ install_spike() {
     
     if [ "$UPGRADE_MODE" = true ]; then
         print_step "Upgrade mode: Reinstalling Spike simulator"
-        rm -rf "$spike_dir" "$spike_install"
+        rm -rf "$spike_dir"
+        # Remove Spike-specific files from /opt/riscv (may need sudo)
+        if [ -f "/opt/riscv/bin/spike" ]; then
+            print_step "Removing existing Spike installation"
+            run_cmd rm -f "/opt/riscv/bin/spike"
+            run_cmd rm -f "/opt/riscv/lib/lib"*spike*
+            run_cmd rm -f "/opt/riscv/lib/libriscv.so"
+            run_cmd rm -f "/opt/riscv/lib/libfesvr.a"
+            run_cmd rm -f "/opt/riscv/lib/libdisasm.a"
+            run_cmd rm -f "/opt/riscv/lib/libsoftfloat.so"
+            run_cmd rm -f "/opt/riscv/lib/libcustomext.so"
+            run_cmd rm -rf "/opt/riscv/lib/pkgconfig/riscv-"*
+        fi
     fi
     
     print_step "Cloning Spike repository"
@@ -635,7 +647,19 @@ install_pk() {
     
     if [ "$UPGRADE_MODE" = true ]; then
         print_step "Upgrade mode: Reinstalling proxy kernel"
-        rm -rf "$pk_dir" "$pk_install"
+        rm -rf "$pk_dir"
+        # Remove pk-specific files from /opt/riscv (may need sudo)
+        if [ -f "/opt/riscv/bin/pk" ]; then
+            print_step "Removing existing proxy kernel installation"
+            run_cmd rm -f "/opt/riscv/bin/pk"
+            run_cmd rm -f "/opt/riscv/bin/bbl"
+            run_cmd rm -f "/opt/riscv/bin/dummy_payload"
+            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/include/riscv-pk"
+            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/lib/riscv-pk"
+            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/bin/pk"
+            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/bin/bbl"
+            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/bin/dummy_payload"
+        fi
     fi
     
     # Check if RISC-V toolchain is available
