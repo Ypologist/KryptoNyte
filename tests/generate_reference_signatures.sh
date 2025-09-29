@@ -98,16 +98,16 @@ generate_reference() {
         return 1
     fi
     
-    # Run Spike simulation with timeout (use higher memory address to avoid device overlap)
+    # Run Spike simulation with timeout (let Spike handle memory mapping automatically)
     local log_file="$test_dir/${test_name}.log"
     if ! run_with_timeout 60 "Spike simulation" \
-        "$SPIKE_BIN" --isa=rv32i -m0x10000000:0x10000000 "$elf_file"; then
+        "$SPIKE_BIN" --isa=rv32i "$elf_file"; then
         echo "❌ Spike simulation failed for $test_name"
         return 1
     fi
     
-    # Redirect Spike output to log file (use higher memory address to avoid device overlap)
-    if ! timeout 60 "$SPIKE_BIN" --isa=rv32i -m0x10000000:0x10000000 "$elf_file" > "$log_file" 2>&1; then
+    # Redirect Spike output to log file (let Spike handle memory mapping automatically)
+    if ! timeout 60 "$SPIKE_BIN" --isa=rv32i "$elf_file" > "$log_file" 2>&1; then
         echo "❌ Spike simulation failed or timed out for $test_name"
         return 1
     fi
