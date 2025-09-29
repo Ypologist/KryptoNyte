@@ -222,6 +222,9 @@ check_spike() {
         local version=$(spike --help 2>&1 | head -1)
         print_step "Found Spike: $version"
         return 0
+    elif [ -f "/opt/riscv/bin/spike" ]; then
+        print_step "Found Spike at: /opt/riscv/bin/spike"
+        return 0
     elif [ -f "$INSTALL_DIR/spike/bin/spike" ]; then
         print_step "Found Spike at: $INSTALL_DIR/spike/bin/spike"
         return 0
@@ -235,6 +238,9 @@ check_spike() {
 check_pk() {
     if command_exists pk; then
         print_step "Found Proxy Kernel in system PATH"
+        return 0
+    elif [ -f "/opt/riscv/bin/pk" ]; then
+        print_step "Found Proxy Kernel at: /opt/riscv/bin/pk"
         return 0
     elif [ -f "$INSTALL_DIR/pk/riscv64-unknown-elf/bin/pk" ] || [ -f "$INSTALL_DIR/pk/bin/pk" ]; then
         print_step "Found Proxy Kernel at: $INSTALL_DIR/pk"
@@ -346,6 +352,31 @@ check_requirements() {
     
     print_success "Critical build tools available"
     print_success "System requirements satisfied"
+}
+
+# Function to ensure /opt/riscv/bin exists and is in PATH
+setup_riscv_path() {
+    print_step "Setting up /opt/riscv/bin directory and PATH"
+    
+    # Create /opt/riscv/bin if it doesn't exist
+    if [ ! -d "/opt/riscv/bin" ]; then
+        print_step "Creating /opt/riscv/bin directory"
+        run_cmd mkdir -p "/opt/riscv/bin"
+        
+        # Fix ownership if using sudo
+        if [ "$USE_SUDO" = true ]; then
+            sudo chown -R $USER:$USER "/opt/riscv"
+        fi
+    fi
+    
+    # Check if /opt/riscv/bin is in PATH
+    if [[ ":$PATH:" != *":/opt/riscv/bin:"* ]]; then
+        print_step "Adding /opt/riscv/bin to PATH for current session"
+        export PATH="/opt/riscv/bin:$PATH"
+        print_success "/opt/riscv/bin added to PATH"
+    else
+        print_success "/opt/riscv/bin already in PATH"
+    fi
 }
 
 # Function to create installation directory
@@ -552,7 +583,7 @@ install_spike() {
     print_banner "Installing Spike RISC-V ISA Simulator" "$YELLOW"
     
     local spike_dir="$INSTALL_DIR/riscv-isa-sim"
-    local spike_install="$INSTALL_DIR/spike"
+    local spike_install="/opt/riscv"
     
     # Check if Spike is already installed
     if [ "$UPGRADE_MODE" = false ] && check_spike >/dev/null 2>&1; then
@@ -603,7 +634,7 @@ install_pk() {
     print_banner "Installing RISC-V Proxy Kernel" "$GREEN"
     
     local pk_dir="$INSTALL_DIR/riscv-pk"
-    local pk_install="$INSTALL_DIR/pk"
+    local pk_install="/opt/riscv"
     
     # Check if PK is already installed
     if [ "$UPGRADE_MODE" = false ] && check_pk >/dev/null 2>&1; then
@@ -700,9 +731,9 @@ setup_environment() {
 export RISCV_CONFORMANCE_ROOT="$INSTALL_DIR"
 export RISCV_ARCH_TEST_ROOT="$INSTALL_DIR/riscv-arch-test"
 
-# Simulator and Tools
-export SPIKE_ROOT="$INSTALL_DIR/spike"
-export PK_ROOT="$INSTALL_DIR/pk"
+# Simulator and Tools - Install to /opt/riscv to keep with collab toolchain
+export SPIKE_ROOT="/opt/riscv"
+export PK_ROOT="/opt/riscv"
 
 # RISC-V Toolchain - Use collab toolchain if available, fallback to built toolchain
 if [ -d "/opt/riscv/collab/bin" ] && [ -f "/opt/riscv/collab/bin/riscv32-unknown-elf-gcc" ]; then
@@ -717,6 +748,11 @@ fi
 
 # UV Python environment
 export UV_PYTHON_ENV="$INSTALL_DIR/.venv"
+
+# Add /opt/riscv/bin to PATH if it exists and isn't already there
+if [ -d "/opt/riscv/bin" ] && [[ ":\$PATH:" != *":/opt/riscv/bin:"* ]]; then
+    export PATH="/opt/riscv/bin:\$PATH"
+fi
 
 # Add tools to PATH
 export PATH="\$SPIKE_ROOT/bin:\$PK_ROOT/bin:\$RISCV_TOOLCHAIN_ROOT/bin:\$HOME/.cargo/bin:\$PATH"
@@ -1069,6 +1105,7 @@ main() {
     fi
     
     check_requirements
+    setup_riscv_path
     create_install_dir
     install_uv
     check_riscv_toolchain
