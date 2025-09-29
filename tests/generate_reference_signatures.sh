@@ -19,17 +19,71 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
+# Parse command line arguments
+RUN_I=true
+RUN_M=false
+RUN_PRIVILEGE=false
+
+# Process command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --with-m)
+            RUN_M=true
+            shift
+            ;;
+        --with-privilege)
+            RUN_PRIVILEGE=true
+            shift
+            ;;
+        --all)
+            RUN_I=true
+            RUN_M=true
+            RUN_PRIVILEGE=true
+            shift
+            ;;
+        --help)
+            echo "Usage: $0 [options]"
+            echo "Options:"
+            echo "  --with-m           Include M extension tests (multiply/divide)"
+            echo "  --with-privilege   Include privilege tests"
+            echo "  --all              Include all test suites"
+            echo "  --help             Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="$SCRIPT_DIR/riscof/reference_signatures"
 SPIKE_BIN="/opt/riscv-conformance/spike/bin/spike"
 RISCV_PREFIX="/opt/riscv/collab/bin/riscv32-unknown-elf-"
 
-# Test suites to generate references for
-TEST_SUITES=(
-    "/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/rv32i_m/I"
-    "/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/rv32i_m/M"
-    "/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/rv32i_m/privilege"
-)
+# Test suites to generate references for (based on command line arguments)
+TEST_SUITES=()
+
+# Add test suites based on command line arguments
+if [ "$RUN_I" = true ]; then
+    TEST_SUITES+=("/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/rv32i_m/I")
+fi
+
+if [ "$RUN_M" = true ]; then
+    TEST_SUITES+=("/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/rv32i_m/M")
+fi
+
+if [ "$RUN_PRIVILEGE" = true ]; then
+    TEST_SUITES+=("/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/rv32i_m/privilege")
+fi
+
+# Print selected test suites
+echo "Selected test suites:"
+for suite in "${TEST_SUITES[@]}"; do
+    echo "  - $(basename "$suite")"
+done
 
 echo "============================================================"
 echo "Generating RISC-V Conformance Test Reference Signatures"
