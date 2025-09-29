@@ -44,9 +44,27 @@ class zeronyte(pluginTemplate):
         self.pluginpath = os.path.abspath(config['pluginpath'])
 
         # Get RTL and toolchain paths
-        self.kryptonyte_root = os.environ.get('KRYPTONYTE_ROOT', os.path.abspath('../..'))
-        self.rtl_file = os.path.join(self.kryptonyte_root, 
-                                   'rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v')
+        # Use environment variable if set, otherwise derive from script location
+        script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.kryptonyte_root = os.environ.get('KRYPTONYTE_ROOT', os.path.dirname(script_dir))
+        
+        # Look for RTL file in multiple possible locations
+        rtl_paths = [
+            os.path.join(self.kryptonyte_root, 'rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v'),
+            os.path.join(self.kryptonyte_root, 'rtl/ZeroNyte/rv32i/generated/ZeroNyteRV32ICore.v'),
+            os.path.join(self.kryptonyte_root, 'rtl/generated/ZeroNyteRV32ICore.v')
+        ]
+        
+        # Find the first RTL file that exists
+        self.rtl_file = None
+        for path in rtl_paths:
+            if os.path.exists(path):
+                self.rtl_file = path
+                break
+                
+        if self.rtl_file is None:
+            logger.warning(f"RTL file not found in any of the expected locations: {rtl_paths}")
+            # We'll continue and let the test fail later if needed
         
         # RISC-V toolchain configuration - auto-detect
         try:

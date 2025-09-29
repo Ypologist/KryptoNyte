@@ -65,25 +65,97 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Set up paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK_DIR="$SCRIPT_DIR/riscof/reference_signatures"
-SPIKE_BIN="/opt/riscv-conformance/spike/bin/spike"
-RISCV_PREFIX="/opt/riscv/collab/bin/riscv32-unknown-elf-"
+
+# Export KRYPTONYTE_ROOT for the plugins to use
+export KRYPTONYTE_ROOT="$REPO_ROOT"
+
+# Find spike binary
+SPIKE_PATHS=(
+    "/opt/riscv-conformance/spike/bin/spike"
+    "/opt/riscv/bin/spike"
+    "/usr/bin/spike"
+    "/usr/local/bin/spike"
+)
+
+SPIKE_BIN=""
+for path in "${SPIKE_PATHS[@]}"; do
+    if [ -f "$path" ] && [ -x "$path" ]; then
+        SPIKE_BIN="$path"
+        break
+    fi
+done
+
+if [ -z "$SPIKE_BIN" ]; then
+    echo "❌ Spike binary not found in expected locations"
+    echo "Please install Spike or set the correct path"
+    exit 1
+fi
+
+# Find RISC-V toolchain
+RISCV_PREFIXES=(
+    "/opt/riscv/collab/bin/riscv32-unknown-elf-"
+    "/opt/riscv/bin/riscv32-unknown-elf-"
+    "/usr/bin/riscv32-unknown-elf-"
+    "/usr/local/bin/riscv32-unknown-elf-"
+    "/opt/riscv/collab/bin/riscv64-unknown-elf-"
+    "/opt/riscv/bin/riscv64-unknown-elf-"
+    "/usr/bin/riscv64-unknown-elf-"
+    "/usr/local/bin/riscv64-unknown-elf-"
+)
+
+RISCV_PREFIX=""
+for prefix in "${RISCV_PREFIXES[@]}"; do
+    if [ -f "${prefix}gcc" ] && [ -x "${prefix}gcc" ]; then
+        RISCV_PREFIX="$prefix"
+        break
+    fi
+done
+
+if [ -z "$RISCV_PREFIX" ]; then
+    echo "❌ RISC-V toolchain not found in expected locations"
+    echo "Please install RISC-V toolchain or set the correct path"
+    exit 1
+fi
 
 # Test suites to generate references for (based on command line arguments)
 TEST_SUITES=()
 
+# Find RISC-V conformance test suite
+CONFORMANCE_PATHS=(
+    "/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/"
+    "/opt/riscv-arch-test/riscv-test-suite/"
+    "/usr/local/share/riscv-arch-test/riscv-test-suite/"
+)
+
+CONFORMANCE_SUITE=""
+for path in "${CONFORMANCE_PATHS[@]}"; do
+    if [ -d "$path" ]; then
+        CONFORMANCE_SUITE="$path"
+        break
+    fi
+done
+
+if [ -z "$CONFORMANCE_SUITE" ]; then
+    echo "❌ RISC-V conformance test suite not found in expected locations"
+    echo "Please install RISC-V conformance tests or set the correct path"
+    exit 1
+fi
+
 # Add test suites based on command line arguments
 if [ "$RUN_I" = true ]; then
-    TEST_SUITES+=("/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/rv32i_m/I")
+    TEST_SUITES+=("${CONFORMANCE_SUITE}rv32i_m/I")
 fi
 
 if [ "$RUN_M" = true ]; then
-    TEST_SUITES+=("/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/rv32i_m/M")
+    TEST_SUITES+=("${CONFORMANCE_SUITE}rv32i_m/M")
 fi
 
 if [ "$RUN_PRIVILEGE" = true ]; then
-    TEST_SUITES+=("/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/rv32i_m/privilege")
+    TEST_SUITES+=("${CONFORMANCE_SUITE}rv32i_m/privilege")
 fi
 
 # Print selected test suites

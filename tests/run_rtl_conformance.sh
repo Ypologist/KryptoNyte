@@ -62,9 +62,37 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Set up paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RISCOF_CONFIG="$SCRIPT_DIR/riscof/config.ini"
 REFERENCE_DIR="$SCRIPT_DIR/riscof/reference_signatures"
+
+# Export KRYPTONYTE_ROOT for the plugins to use
+export KRYPTONYTE_ROOT="$REPO_ROOT"
+
+# Check if RTL file exists
+RTL_PATHS=(
+    "$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v"
+    "$REPO_ROOT/rtl/ZeroNyte/rv32i/generated/ZeroNyteRV32ICore.v"
+    "$REPO_ROOT/rtl/generated/ZeroNyteRV32ICore.v"
+)
+
+RTL_FILE=""
+for path in "${RTL_PATHS[@]}"; do
+    if [ -f "$path" ]; then
+        RTL_FILE="$path"
+        break
+    fi
+done
+
+if [ -z "$RTL_FILE" ]; then
+    echo "⚠️  Warning: RTL file not found in expected locations:"
+    for path in "${RTL_PATHS[@]}"; do
+        echo "  - $path"
+    done
+    echo "You may need to generate the RTL first with: cd $REPO_ROOT/rtl && sbt genZeroNyte"
+fi
 
 # Create test list file based on selected extensions
 TEST_LIST="$SCRIPT_DIR/riscof/test_list.yaml"
@@ -136,12 +164,34 @@ echo "  Using test list: $TEST_LIST"
 echo "  Using reference signatures from: $REFERENCE_DIR"
 echo ""
 
+# Find RISC-V conformance test suite
+CONFORMANCE_PATHS=(
+    "/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/"
+    "/opt/riscv-arch-test/riscv-test-suite/"
+    "/usr/local/share/riscv-arch-test/riscv-test-suite/"
+)
+
+CONFORMANCE_SUITE=""
+for path in "${CONFORMANCE_PATHS[@]}"; do
+    if [ -d "$path" ]; then
+        CONFORMANCE_SUITE="$path"
+        CONFORMANCE_ENV="$(dirname "$path")/riscv-test-suite/env"
+        break
+    fi
+done
+
+if [ -z "$CONFORMANCE_SUITE" ]; then
+    echo "❌ RISC-V conformance test suite not found in expected locations"
+    echo "Please install RISC-V conformance tests or set the correct path"
+    exit 1
+fi
+
 # Run RISCOF with the selected tests
 # Note: We use --no-ref-run because we already have reference signatures
 riscof run \
     --config="$RISCOF_CONFIG" \
-    --suite=/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/ \
-    --env=/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/env \
+    --suite="$CONFORMANCE_SUITE" \
+    --env="$CONFORMANCE_ENV" \
     --no-browser \
     --testfile="$TEST_LIST" \
     --no-ref-run
