@@ -61,7 +61,7 @@ class spike(pluginTemplate):
             pregenerated_sig = os.path.join(self.ref_sig_dir, f"{test_name}.signature")
             
             # Path where RISCOF expects the reference signature
-            ref_sig = os.path.join(ref_dir, f"Reference-{self.name[:-1]}.signature")
+            ref_sig = os.path.join(ref_dir, f"Reference-spike.signature")
             
             # Check if the pre-generated signature exists
             if os.path.exists(pregenerated_sig):

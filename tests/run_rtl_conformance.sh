@@ -242,7 +242,6 @@ run_test_subset() {
         --config="config.ini" \
         --work-dir="$subset_work_dir" \
         --testfile="$test_file" \
-        --no-ref-run \
         --no-browser \
         > "$subset_work_dir/riscof_$subset_id.log" 2>&1
     
@@ -276,7 +275,6 @@ if [ "$SMOKE_TEST" = true ] || [ "$PARALLEL_JOBS" -eq 1 ]; then
         --config="config.ini" \
         --work-dir="$WORK_DIR" \
         $TEST_ARG \
-        --no-ref-run \
         --no-browser
     
     echo "✅ RISCOF tests completed"
