@@ -293,11 +293,25 @@ import math
 with open('$DATABASE_FILE', 'r') as f:
     db = yaml.safe_load(f)
 
-# Convert to list of test entries
+# Handle RISCOF's ordered map format (list of tuples)
 tests = []
-for test_path, test_data in db.items():
-    test_entry = {test_path: test_data}
-    tests.append(test_entry)
+if isinstance(db, list):
+    # RISCOF 1.25.3 uses ordered map format (list of tuples)
+    for item in db:
+        if isinstance(item, tuple) and len(item) == 2:
+            test_path, test_data = item
+            test_entry = {test_path: test_data}
+            tests.append(test_entry)
+        elif isinstance(item, dict):
+            tests.append(item)
+elif isinstance(db, dict):
+    # Older format (dict)
+    for test_path, test_data in db.items():
+        test_entry = {test_path: test_data}
+        tests.append(test_entry)
+else:
+    print(f"Unexpected database format: {type(db)}")
+    sys.exit(1)
 
 total_tests = len(tests)
 jobs = $PARALLEL_JOBS
