@@ -501,7 +501,10 @@ install_arch_tests() {
     
     if [ "$UPGRADE_MODE" = true ]; then
         print_step "Upgrade mode: Reinstalling RISC-V Architecture Tests"
-        rm -rf "$arch_test_dir"
+        if [ -d "$arch_test_dir" ]; then
+            print_step "Removing existing architecture tests directory"
+            run_cmd rm -rf "$arch_test_dir"
+        fi
     fi
     
     print_step "Cloning RISC-V Architecture Test repository"
@@ -584,19 +587,22 @@ install_spike() {
     
     if [ "$UPGRADE_MODE" = true ]; then
         print_step "Upgrade mode: Completely removing and rebuilding Spike"
-        # Remove source directory completely
-        rm -rf "$spike_dir"
+        # Remove source directory completely (may need sudo)
+        if [ -d "$spike_dir" ]; then
+            print_step "Removing existing Spike source directory"
+            run_cmd rm -rf "$spike_dir"
+        fi
         # Remove Spike-specific files from /opt/riscv (may need sudo)
         if [ -f "/opt/riscv/bin/spike" ]; then
             print_step "Removing existing Spike installation"
             run_cmd rm -f "/opt/riscv/bin/spike"
-            run_cmd rm -f "/opt/riscv/lib/lib"*spike*
-            run_cmd rm -f "/opt/riscv/lib/libriscv.so"
-            run_cmd rm -f "/opt/riscv/lib/libfesvr.a"
-            run_cmd rm -f "/opt/riscv/lib/libdisasm.a"
-            run_cmd rm -f "/opt/riscv/lib/libsoftfloat.so"
-            run_cmd rm -f "/opt/riscv/lib/libcustomext.so"
-            run_cmd rm -rf "/opt/riscv/lib/pkgconfig/riscv-"*
+            run_cmd rm -f "/opt/riscv/lib/lib"*spike* 2>/dev/null || true
+            run_cmd rm -f "/opt/riscv/lib/libriscv.so" 2>/dev/null || true
+            run_cmd rm -f "/opt/riscv/lib/libfesvr.a" 2>/dev/null || true
+            run_cmd rm -f "/opt/riscv/lib/libdisasm.a" 2>/dev/null || true
+            run_cmd rm -f "/opt/riscv/lib/libsoftfloat.so" 2>/dev/null || true
+            run_cmd rm -f "/opt/riscv/lib/libcustomext.so" 2>/dev/null || true
+            run_cmd rm -rf "/opt/riscv/lib/pkgconfig/riscv-"* 2>/dev/null || true
         fi
     fi
     
@@ -652,19 +658,27 @@ install_pk() {
     
     if [ "$UPGRADE_MODE" = true ]; then
         print_step "Upgrade mode: Completely removing and rebuilding proxy kernel"
-        # Remove source directory completely
-        rm -rf "$pk_dir"
+        # Remove source directory completely (may need sudo)
+        if [ -d "$pk_dir" ]; then
+            print_step "Removing existing proxy kernel source directory"
+            run_cmd rm -rf "$pk_dir"
+        fi
         # Remove pk-specific files from /opt/riscv (may need sudo)
         if [ -f "/opt/riscv/bin/pk" ]; then
             print_step "Removing existing proxy kernel installation"
-            run_cmd rm -f "/opt/riscv/bin/pk"
-            run_cmd rm -f "/opt/riscv/bin/bbl"
-            run_cmd rm -f "/opt/riscv/bin/dummy_payload"
-            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/include/riscv-pk"
-            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/lib/riscv-pk"
-            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/bin/pk"
-            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/bin/bbl"
-            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/bin/dummy_payload"
+            run_cmd rm -f "/opt/riscv/bin/pk" 2>/dev/null || true
+            run_cmd rm -f "/opt/riscv/bin/bbl" 2>/dev/null || true
+            run_cmd rm -f "/opt/riscv/bin/dummy_payload" 2>/dev/null || true
+            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/include/riscv-pk" 2>/dev/null || true
+            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/lib/riscv-pk" 2>/dev/null || true
+            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/bin/pk" 2>/dev/null || true
+            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/bin/bbl" 2>/dev/null || true
+            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/bin/dummy_payload" 2>/dev/null || true
+            run_cmd rm -rf "/opt/riscv/riscv32-unknown-elf/include/riscv-pk" 2>/dev/null || true
+            run_cmd rm -rf "/opt/riscv/riscv32-unknown-elf/lib/riscv-pk" 2>/dev/null || true
+            run_cmd rm -rf "/opt/riscv/riscv32-unknown-elf/bin/pk" 2>/dev/null || true
+            run_cmd rm -rf "/opt/riscv/riscv32-unknown-elf/bin/bbl" 2>/dev/null || true
+            run_cmd rm -rf "/opt/riscv/riscv32-unknown-elf/bin/dummy_payload" 2>/dev/null || true
         fi
     fi
     
@@ -760,15 +774,27 @@ export RISCV_ARCH_TEST_ROOT="$INSTALL_DIR/riscv-arch-test"
 export SPIKE_ROOT="/opt/riscv"
 export PK_ROOT="/opt/riscv"
 
-# RISC-V Toolchain - Use collab toolchain if available, fallback to built toolchain
+# RISC-V Toolchain - Use collab toolchain (expected to be pre-installed)
 if [ -d "/opt/riscv/collab/bin" ] && [ -f "/opt/riscv/collab/bin/riscv32-unknown-elf-gcc" ]; then
     export RISCV_TOOLCHAIN_ROOT="/opt/riscv/collab"
     export RISCV="/opt/riscv/collab"
     export RISCV_PREFIX="riscv32-unknown-elf-"
-else
-    export RISCV_TOOLCHAIN_ROOT="$INSTALL_DIR/riscv-toolchain"
+    echo "Using collab RISC-V toolchain at /opt/riscv/collab"
+elif command -v riscv64-unknown-elf-gcc >/dev/null 2>&1; then
+    export RISCV_TOOLCHAIN_ROOT="\$(dirname \$(dirname \$(which riscv64-unknown-elf-gcc)))"
     export RISCV="\$RISCV_TOOLCHAIN_ROOT"
     export RISCV_PREFIX="riscv64-unknown-elf-"
+    echo "Using system RISC-V toolchain"
+elif command -v riscv32-unknown-elf-gcc >/dev/null 2>&1; then
+    export RISCV_TOOLCHAIN_ROOT="\$(dirname \$(dirname \$(which riscv32-unknown-elf-gcc)))"
+    export RISCV="\$RISCV_TOOLCHAIN_ROOT"
+    export RISCV_PREFIX="riscv32-unknown-elf-"
+    echo "Using system RISC-V toolchain"
+else
+    echo "Warning: No RISC-V toolchain found. Please install collab toolchain at /opt/riscv/collab/"
+    export RISCV_TOOLCHAIN_ROOT="/opt/riscv/collab"
+    export RISCV="/opt/riscv/collab"
+    export RISCV_PREFIX="riscv32-unknown-elf-"
 fi
 
 # UV Python environment
@@ -779,8 +805,12 @@ if [ -d "/opt/riscv/bin" ] && [[ ":\$PATH:" != *":/opt/riscv/bin:"* ]]; then
     export PATH="/opt/riscv/bin:\$PATH"
 fi
 
-# Add tools to PATH
-export PATH="\$SPIKE_ROOT/bin:\$PK_ROOT/bin:\$RISCV_TOOLCHAIN_ROOT/bin:\$HOME/.cargo/bin:\$PATH"
+# Add tools to PATH (prioritize collab toolchain)
+if [ -d "/opt/riscv/collab/bin" ]; then
+    export PATH="/opt/riscv/collab/bin:\$SPIKE_ROOT/bin:\$PK_ROOT/bin:\$HOME/.cargo/bin:\$PATH"
+else
+    export PATH="\$RISCV_TOOLCHAIN_ROOT/bin:\$SPIKE_ROOT/bin:\$PK_ROOT/bin:\$HOME/.cargo/bin:\$PATH"
+fi
 
 # Test framework configuration
 export RISCV_TARGET="spike"
@@ -966,18 +996,15 @@ verify_installation() {
         print_success "Proxy kernel installation skipped (as requested)"
     fi
     
-    # Check toolchain availability
-    if [ "$INSTALL_TOOLCHAIN" = true ]; then
-        if [ "$TOOLCHAIN_AVAILABLE" = true ] || check_riscv_toolchain_available >/dev/null 2>&1; then
-            TOOLCHAIN_AVAILABLE=true
-            print_success "RISC-V toolchain found and available"
-        else
-            print_warning "RISC-V toolchain not found in PATH"
-            print_warning "You may need to install it separately or add it to PATH"
-            ((warnings++))
-        fi
+    # Check toolchain availability (no installation, just verification)
+    if [ "$TOOLCHAIN_AVAILABLE" = true ] || check_riscv_toolchain_available >/dev/null 2>&1; then
+        TOOLCHAIN_AVAILABLE=true
+        print_success "RISC-V toolchain found and available"
     else
-        print_success "RISC-V toolchain check skipped (as requested)"
+        print_warning "RISC-V toolchain not found in PATH"
+        print_warning "Expected collab toolchain at /opt/riscv/collab/bin/"
+        print_warning "Please ensure the collab toolchain is installed before running conformance tests"
+        ((warnings++))
     fi
     
     # Check environment setup status
