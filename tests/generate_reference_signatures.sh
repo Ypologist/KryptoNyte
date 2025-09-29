@@ -114,21 +114,62 @@ fi
 
 echo "✅ Prerequisites check completed"
 
-# Function to run command with timeout
+# Function to run a command with timeout
 run_with_timeout() {
-    local timeout_duration="$1"
-    local description="$2"
+    local timeout="$1"
+    local label="$2"
     shift 2
     
-    echo "  Running: $description (timeout: ${timeout_duration}s)"
-    timeout "$timeout_duration" "$@"
-    local exit_code=$?
+    # Start the command in the background
+    "$@" &
+    local pid=$!
     
-    if [ $exit_code -eq 124 ]; then
-        echo "❌ Timeout: $description exceeded ${timeout_duration}s"
-        return 1
-    elif [ $exit_code -ne 0 ]; then
-        echo "❌ Failed: $description (exit code: $exit_code)"
+    # Wait for the command to finish or timeout
+    local counter=0
+    while kill -0 $pid 2>/dev/null; do
+        if [ $counter -ge $timeout ]; then
+            echo "❌ Timeout: $label took more than ${timeout}s"
+            kill -9 $pid 2>/dev/null || true
+            wait $pid 2>/dev/null || true
+            return 1
+        fi
+        sleep 1
+        counter=$((counter + 1))
+    done
+    
+    # Check if the command succeeded
+    wait $pid
+    return $?
+}
+
+# Function to compile a test with appropriate architecture flags
+compile_test() {
+    local test_path="$1"
+    local test_name="$(basename "$test_path" .S)"
+    local test_dir="$WORK_DIR/src"
+    local elf_file="$test_dir/${test_name}.elf"
+    
+    mkdir -p "$test_dir"
+    
+    # Determine the appropriate architecture flags based on the test path
+    local march_flags="rv32i"
+    if [[ "$test_path" == *"/M/"* ]]; then
+        march_flags="rv32im"
+    elif [[ "$test_path" == *"/privilege/"* ]]; then
+        march_flags="rv32i_zicsr"
+    fi
+    
+    echo "  Running: Compilation (timeout: 30s) with -march=$march_flags"
+    if ! run_with_timeout 30 "Compilation" \
+        "${RISCV_PREFIX}gcc" -march=$march_flags -mabi=ilp32 -static -mcmodel=medany \
+        -fvisibility=hidden -nostdlib -nostartfiles \
+        -I/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/env \
+        -I/opt/riscv-conformance/riscv-arch-test/riscof-plugins/rv32/spike_simple/env \
+        -T/opt/riscv-conformance/riscv-arch-test/riscof-plugins/rv32/spike_simple/env/link.ld \
+        -DXLEN=32 -DTEST_CASE_1=True \
+        "$test_path" \
+        -o "$elf_file"; then
+        echo "❌ Failed to compile $test_name"
         return 1
     fi
     
@@ -138,45 +179,14 @@ run_with_timeout() {
 # Function to generate reference signature for a test
 generate_reference() {
     local test_file="$1"
-    local test_name=$(basename "$test_file" .S)
-    local test_dir="$WORK_DIR/$(basename $(dirname "$test_file"))"
-    
-    mkdir -p "$test_dir"
-    
-    echo "▶ Generating reference for $test_name"
-    
-    # Compile test with timeout
+    local test_name="$(basename "$test_file" .S)"
+    local test_dir="$WORK_DIR/src"
     local elf_file="$test_dir/${test_name}.elf"
-    if ! run_with_timeout 30 "Compilation" \
-        "${RISCV_PREFIX}gcc" -march=rv32i -mabi=ilp32 -static -mcmodel=medany \
-        -fvisibility=hidden -nostdlib -nostartfiles \
-        -I/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/env \
-        -I/opt/riscv-conformance/riscv-arch-test/riscof-plugins/rv32/spike_simple/env \
-        -T/opt/riscv-conformance/riscv-arch-test/riscof-plugins/rv32/spike_simple/env/link.ld \
-        -DXLEN=32 -DTEST_CASE_1=True \
-        "$test_file" -o "$elf_file"; then
-        echo "❌ Failed to compile $test_name"
+    
+    # Compile the test
+    if ! compile_test "$test_file"; then
         return 1
     fi
-    
-    # Run Spike simulation with pk (proxy kernel) and timeout
-    local log_file="$test_dir/${test_name}.log"
-    local pk_bin="/opt/riscv-conformance/pk/riscv32-unknown-elf/bin/pk"
-    
-    # Check if pk exists, fallback to different locations
-    if [ ! -f "$pk_bin" ]; then
-        pk_bin="/opt/riscv-conformance/pk/riscv64-unknown-elf/bin/pk"
-    fi
-    if [ ! -f "$pk_bin" ]; then
-        pk_bin="/opt/riscv/bin/pk"
-    fi
-    if [ ! -f "$pk_bin" ]; then
-        echo "❌ Proxy kernel (pk) not found for $test_name"
-        return 1
-    fi
-    
-    # Use riscv_isac directly to generate the signature
-    # This is more reliable than running spike manually
     
     # Create a temporary directory for riscv_isac
     local isac_dir="$test_dir/isac"
@@ -212,56 +222,61 @@ generate_reference() {
 
 # Generate references for all test suites
 total_tests=0
-successful_tests=0
-failed_tests=0
+total_processed=0
+total_failed=0
 
 for suite in "${TEST_SUITES[@]}"; do
-    if [ -d "$suite/src" ]; then
-        echo "▶ Processing test suite: $(basename "$suite")"
+    suite_name=$(basename "$suite")
+    echo "▶ Processing test suite: $suite_name"
+    
+    # Find all tests in the suite
+    test_files=()
+    while IFS= read -r -d $'\0' file; do
+        test_files+=("$file")
+    done < <(find "$suite/src" -name "*.S" -type f -print0 | sort -z)
+    
+    num_tests=${#test_files[@]}
+    echo "  Found $num_tests tests in $suite_name"
+    
+    # Process each test
+    for ((i=0; i<num_tests; i++)); do
+        test_file="${test_files[$i]}"
+        test_name=$(basename "$test_file" .S)
+        total_tests=$((total_tests + 1))
+        total_processed=$((total_processed + 1))
         
-        # Count total tests first
-        suite_test_count=$(find "$suite/src" -name "*.S" | wc -l)
-        echo "  Found $suite_test_count tests in $(basename "$suite")"
+        echo "  Progress: $((i+1))/$num_tests (Total: $total_processed)"
+        echo "▶ Generating reference for $test_name"
         
-        # Find all .S test files
-        current_test=0
-        while IFS= read -r -d '' test_file; do
-            total_tests=$((total_tests + 1))
-            current_test=$((current_test + 1))
-            
-            echo "  Progress: $current_test/$suite_test_count (Total: $total_tests)"
-            
-            if generate_reference "$test_file"; then
-                successful_tests=$((successful_tests + 1))
-            else
-                failed_tests=$((failed_tests + 1))
-                echo "  ⚠️  Continuing with next test..."
-            fi
-            
-            # Show running totals every 10 tests
-            if [ $((total_tests % 10)) -eq 0 ]; then
-                echo "  📊 Running totals: $successful_tests successful, $failed_tests failed"
-            fi
-            
-        done < <(find "$suite/src" -name "*.S" -print0)
-    else
-        echo "⚠️  Test suite not found: $suite"
-    fi
+        if ! generate_reference "$test_file"; then
+            total_failed=$((total_failed + 1))
+            echo "  ⚠️  Continuing with next test..."
+        fi
+    done
 done
 
-echo "============================================================"
-echo "Reference Signature Generation Complete"
-echo "============================================================"
-echo "Total tests processed: $total_tests"
-echo "Successful signatures: $successful_tests"
-echo "Failed tests: $failed_tests"
-echo "Success rate: $(( (successful_tests * 100) / total_tests ))%"
-echo "Reference signatures stored in: $WORK_DIR"
 echo ""
-if [ $failed_tests -gt 0 ]; then
-    echo "⚠️  Some tests failed to generate signatures. This is normal for tests"
-    echo "   that don't produce signature data or have compilation issues."
+echo "============================================================"
+echo "Reference Signature Generation Summary"
+echo "============================================================"
+echo "Total tests processed: $total_processed"
+echo "Successfully generated: $((total_processed - total_failed))"
+echo "Failed: $total_failed"
+echo ""
+
+if [ $total_failed -eq 0 ]; then
+    echo "✅ All reference signatures generated successfully"
+else
+    echo "⚠️  Some reference signatures failed to generate"
+    echo "   This is normal for tests requiring unsupported extensions"
 fi
+
 echo ""
-echo "You can now run RISCOF tests using these pre-generated references"
-echo "by setting the reference directory in your RISCOF configuration."
+echo "Reference signatures are available at:"
+echo "$WORK_DIR/src"
+echo ""
+echo "You can now run the conformance tests against your RTL implementation:"
+echo "./run_rtl_conformance.sh --only-i"
+echo ""
+
+exit 0
