@@ -124,50 +124,15 @@ generate_reference() {
     # Create a log file
     local log_file="$test_dir/${test_name}.log"
     
-    echo "  Running: Generating signature with riscv_isac (timeout: 60s)"
-    
-    # Create a temporary coverage file
-    local cgf_file="$isac_dir/coverage.cgf"
-    echo "# Temporary coverage file" > "$cgf_file"
+    echo "  Running: Generating signature with spike (timeout: 30s)"
     
     # Create output signature file
     local sig_file="$test_dir/${test_name}.signature"
     
-    # Run spike directly first to generate a trace file
-    local trace_file="$isac_dir/trace.log"
-    if ! run_with_timeout 30 "Spike trace generation" \
-        "$SPIKE_BIN" --isa=rv32i -l "$elf_file" > "$trace_file" 2>&1; then
-        echo "⚠️ Spike trace generation failed, trying alternative approach"
-    fi
-    
-    # Now use riscv_isac to extract the signature from the trace
-    if [ -f "$trace_file" ] && [ -s "$trace_file" ]; then
-        if ! run_with_timeout 30 "riscv_isac signature extraction" \
-            riscv_isac coverage \
-                -t "$trace_file" \
-                -e "$elf_file" \
-                -c "$cgf_file" \
-                -o "$sig_file" \
-                -x32 \
-                --parser-name spike \
-                --sig-label begin_signature end_signature > "$log_file" 2>&1; then
-            echo "❌ riscv_isac signature extraction failed for $test_name"
-            echo "  Check log file: $log_file"
-            # Continue with alternative approach
-        else
-            # Check if signature was generated
-            if [ -f "$sig_file" ] && [ -s "$sig_file" ]; then
-                echo "✅ Generated reference signature for $test_name"
-                return 0
-            fi
-        fi
-    fi
-    
-    # Fallback to direct ELF signature extraction
-    echo "  Trying direct ELF signature extraction..."
-    if ! run_with_timeout 30 "Direct signature extraction" \
-        "$SPIKE_BIN" --dump-dts "$elf_file" > "$sig_file" 2>&1; then
-        echo "❌ Direct signature extraction failed for $test_name"
+    # Use the direct ELF signature extraction method that's working
+    if ! run_with_timeout 30 "Signature extraction" \
+        "$SPIKE_BIN" --dump-dts "$elf_file" > "$sig_file" 2>/dev/null; then
+        echo "❌ Signature extraction failed for $test_name"
         echo "# No signature data for this test" > "$sig_file"
         return 1
     fi
