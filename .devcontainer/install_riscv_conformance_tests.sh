@@ -628,7 +628,7 @@ install_spike() {
     mkdir -p build
     cd build
     ../configure --prefix="$spike_install"
-    if make -j$(nproc) && make install; then
+    if make -j$(nproc) && run_cmd make install; then
         SPIKE_INSTALLED=true
         print_success "Spike simulator installed"
     else
@@ -743,7 +743,7 @@ install_pk() {
     export CFLAGS="-march=rv32im -mabi=ilp32"
     export CXXFLAGS="-march=rv32im -mabi=ilp32"
     ../configure --prefix="$pk_install" --host="$HOST_TRIPLET" --with-arch=rv32im
-    if make -j$(nproc) && make install; then
+    if make -j$(nproc) && run_cmd make install; then
         PK_INSTALLED=true
         print_success "Proxy kernel installed"
     else
