@@ -1082,7 +1082,14 @@ main() {
     verify_installation
     
     print_banner "Installation Complete!" "$GREEN"
+    
+    # Reset terminal attributes to fix cursor echo issue
+    echo -e "\033[0m"  # Reset all attributes
+    stty echo          # Ensure terminal is echoing input
 }
+
+# Ensure terminal is reset even if script is interrupted
+trap 'echo -e "\033[0m"; stty echo' EXIT INT TERM
 
 # Run main function
 main "$@"
