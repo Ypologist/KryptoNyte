@@ -8,6 +8,9 @@
 **/project/target/
 **/project/project/
 
+# Convormance tests
+**/reference_signatures/
+
 
 # Generated Verilog files
 **/*.v
