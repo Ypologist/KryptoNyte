@@ -51,6 +51,7 @@ class zeronyte(pluginTemplate):
         # Look for RTL file in multiple possible locations
         rtl_paths = [
             os.path.join(self.kryptonyte_root, 'rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v'),
+            os.path.join(self.kryptonyte_root, 'rtl/generators/generated/verilog_hierarchical/ZeroNyteRV32ICore.v'),
             os.path.join(self.kryptonyte_root, 'rtl/ZeroNyte/rv32i/generated/ZeroNyteRV32ICore.v'),
             os.path.join(self.kryptonyte_root, 'rtl/generated/ZeroNyteRV32ICore.v')
         ]
@@ -70,8 +71,8 @@ class zeronyte(pluginTemplate):
         try:
             self.prefix = self._find_riscv_prefix()
         except RuntimeError:
-            # Fallback to default path
-            self.prefix = "/opt/riscv/collab/bin/riscv32-unknown-elf-"
+            # Fallback to system toolchain
+            self.prefix = "riscv64-linux-gnu-"
         
         # Verilator configuration
         self.verilator_cmd = 'verilator'
@@ -104,6 +105,8 @@ class zeronyte(pluginTemplate):
         ]
         
         prefixes = [
+            'riscv64-linux-gnu-',
+            'riscv32-linux-gnu-',
             'riscv32-unknown-elf-',
             'riscv64-unknown-elf-',
             'riscv32-unknown-linux-gnu-',
@@ -115,12 +118,26 @@ class zeronyte(pluginTemplate):
             for prefix in prefixes:
                 full_path = f"{path}{prefix}"
                 if os.path.exists(f"{full_path}gcc"):
-                    return full_path
+                    # Test if the toolchain actually works
+                    try:
+                        result = subprocess.run([f"{full_path}gcc", "--version"], 
+                                              capture_output=True, text=True, timeout=5)
+                        if result.returncode == 0:
+                            return full_path
+                    except:
+                        continue
         
         # Fallback to system PATH
         for prefix in prefixes:
             if shutil.which(f"{prefix}gcc"):
-                return prefix
+                # Test if the toolchain actually works
+                try:
+                    result = subprocess.run([f"{prefix}gcc", "--version"], 
+                                          capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0:
+                        return prefix
+                except:
+                    continue
                 
         raise RuntimeError("No RISC-V toolchain found. Please install riscv-gnu-toolchain.")
 
@@ -148,7 +165,7 @@ class zeronyte(pluginTemplate):
             return False
         
         # Check if RTL file exists
-        if not os.path.exists(self.rtl_file):
+        if self.rtl_file is None or not os.path.exists(self.rtl_file):
             logger.warning(f"RTL file not found: {self.rtl_file}")
             logger.info("You may need to generate RTL first using:")
             logger.info("cd rtl && sbt 'runMain generators.GenerateHierarchicalRTL'")
@@ -173,7 +190,7 @@ class zeronyte(pluginTemplate):
             # Get test details
             testentry = testList[testname]
             test_path = testentry['test_path']
-            test_dir = testentry['work_dir']
+            test_dir = testentry.get('work_dir', os.path.join(self.work_dir, testname, 'dut'))
             base_test_name = os.path.basename(test_path).replace('.S', '')
             
             # Create test-specific directory
@@ -268,8 +285,8 @@ class zeronyte(pluginTemplate):
             "-nostartfiles",
             "-Wa,-march=rv32imc",  # Pass march to assembler
             "-Wa,--no-warn",       # Suppress assembler warnings
-            f"-T{self.archtest_env}/link.ld",
-            f"-I{self.archtest_env}",  # Our local environment with working arch_test.h, model_test.h, and link.ld
+            f"-T{self.archtest_env}/link.ld" if self.archtest_env else "-Ttext=0x80000000",
+            f"-I{self.archtest_env}" if self.archtest_env else "-I.",  # Our local environment with working arch_test.h, model_test.h, and link.ld
             "-DRVTEST_E=1",        # Define test environment
             "-o", elf_file,
             test_path
@@ -498,7 +515,10 @@ int main(int argc, char** argv) {{
         """Run Verilator simulation"""
         # Copy RTL file to work directory
         local_rtl = os.path.join(test_dir, 'ZeroNyteRV32ICore.v')
-        shutil.copy2(self.rtl_file, local_rtl)
+        if self.rtl_file and os.path.exists(self.rtl_file):
+            shutil.copy2(self.rtl_file, local_rtl)
+        else:
+            raise RuntimeError(f"RTL file not found: {self.rtl_file}")
         
         # Build with Verilator
         cmd = [self.verilator_cmd] + self.verilator_args + [

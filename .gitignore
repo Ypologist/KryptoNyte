@@ -465,3 +465,4 @@
 
 _runs/
 tests/riscof/riscv-arch-test/
+tests/riscof_work/I/
