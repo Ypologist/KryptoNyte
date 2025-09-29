@@ -436,7 +436,15 @@ build_pk() {
     fi
     
     print_step "Building proxy kernel"
-    rm -rf build
+    
+    # Clean any previous build attempts
+    if [ "$UPGRADE_MODE" = true ] || [ -d "build" ]; then
+        print_step "Cleaning previous PK build"
+        rm -rf build
+        make clean 2>/dev/null || true
+        make distclean 2>/dev/null || true
+    fi
+    
     mkdir -p build
     cd build
     
@@ -450,16 +458,26 @@ build_pk() {
     print_step "Using toolchain: $CC"
     
     # Configure and build with proper ISA extensions
+    # Install directly to /opt/riscv/bin like Spike
     export CFLAGS="-march=rv64imac_zicsr_zifencei -mabi=lp64"
     export CXXFLAGS="-march=rv64imac_zicsr_zifencei -mabi=lp64"
     ../configure --prefix="$INSTALL_PREFIX" --host=riscv64-unknown-elf --with-arch=rv64imac_zicsr_zifencei
     if make -j"$JOBS" && run_cmd make install; then
+        # Copy pk binary to main bin directory for consistency with Spike
+        if [ -f "$INSTALL_PREFIX/riscv64-unknown-elf/bin/pk" ]; then
+            print_step "Copying PK to main bin directory"
+            run_cmd cp "$INSTALL_PREFIX/riscv64-unknown-elf/bin/pk" "$INSTALL_PREFIX/bin/pk"
+            run_cmd cp "$INSTALL_PREFIX/riscv64-unknown-elf/bin/bbl" "$INSTALL_PREFIX/bin/bbl" 2>/dev/null || true
+        fi
+        
         PK_BUILT=true
         print_success "Proxy kernel built successfully"
         
         # Verify installation
         if [ -f "$INSTALL_PREFIX/bin/pk" ]; then
             print_success "Proxy kernel installed at: $INSTALL_PREFIX/bin/pk"
+        else
+            print_warning "PK built but not found at expected location"
         fi
     else
         print_error "Proxy kernel build failed"
