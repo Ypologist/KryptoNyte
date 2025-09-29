@@ -114,16 +114,27 @@ generate_reference() {
         return 1
     fi
     
-    if ! run_with_timeout 60 "Spike simulation" \
-        "$SPIKE_BIN" --isa=rv32i "$pk_bin" "$elf_file"; then
-        echo "❌ Spike simulation failed for $test_name"
-        return 1
+    # For 32-bit tests, we need to use --isa=rv32i and may need to skip pk
+    # Try direct execution first (no pk)
+    if ! run_with_timeout 60 "Spike simulation (direct)" \
+        "$SPIKE_BIN" --isa=rv32i "$elf_file"; then
+        echo "⚠️ Direct spike execution failed, trying with pk..."
+        
+        # Try with pk as a fallback
+        if ! run_with_timeout 60 "Spike simulation (with pk)" \
+            "$SPIKE_BIN" --isa=rv64g "$pk_bin" "$elf_file"; then
+            echo "❌ Spike simulation failed for $test_name"
+            return 1
+        fi
     fi
     
-    # Redirect Spike output to log file (using pk)
-    if ! timeout 60 "$SPIKE_BIN" --isa=rv32i "$pk_bin" "$elf_file" > "$log_file" 2>&1; then
-        echo "❌ Spike simulation failed or timed out for $test_name"
-        return 1
+    # Redirect Spike output to log file (try direct first, then with pk)
+    if ! timeout 60 "$SPIKE_BIN" --isa=rv32i "$elf_file" > "$log_file" 2>&1; then
+        echo "⚠️ Direct spike execution failed for log, trying with pk..."
+        if ! timeout 60 "$SPIKE_BIN" --isa=rv64g "$pk_bin" "$elf_file" > "$log_file" 2>&1; then
+            echo "❌ Spike simulation failed or timed out for $test_name"
+            return 1
+        fi
     fi
     
     # Extract signature using riscv_isac with timeout

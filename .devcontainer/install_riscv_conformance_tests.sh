@@ -679,8 +679,8 @@ install_pk() {
     
     print_step "Using toolchain: $CC"
     
-    # Configure for the available toolchain
-    ../configure --prefix="$pk_install" --host="$HOST_TRIPLET"
+    # Configure for the available toolchain - force 32-bit build for RV32 compatibility
+    ../configure --prefix="$pk_install" --host="$HOST_TRIPLET" --with-arch=rv32g
     if make -j$(nproc) && make install; then
         PK_INSTALLED=true
         print_success "Proxy kernel installed"
