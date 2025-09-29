@@ -22,6 +22,9 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
+# Detect available processors early for argument parsing
+TOTAL_CORES=$(nproc)
+
 # Parse command line arguments
 RUN_I=true
 RUN_M=false
@@ -54,6 +57,14 @@ while [[ $# -gt 0 ]]; do
             PARALLEL_JOBS="$2"
             shift 2
             ;;
+        --parallel)
+            # Use half of available cores for parallel execution
+            PARALLEL_JOBS=$(( TOTAL_CORES / 2 ))
+            if [ $PARALLEL_JOBS -eq 0 ]; then
+                PARALLEL_JOBS=1
+            fi
+            shift
+            ;;
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
@@ -61,7 +72,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --with-privilege   Include privilege tests"
             echo "  --all              Include all test suites"
             echo "  --smoke-test       Run only a single test as a smoke test"
-            echo "  --jobs N           Number of parallel jobs (default: half of available cores)"
+            echo "  --parallel         Enable parallel execution (uses half of available cores)"
+            echo "  --jobs N           Number of parallel jobs (default: 1 for serial execution)"
             echo "  --help             Show this help message"
             exit 0
             ;;
@@ -73,14 +85,10 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Detect available processors and set parallel jobs
-TOTAL_CORES=$(nproc)
+# Set default parallel jobs if not specified
 if [ -z "$PARALLEL_JOBS" ]; then
-    PARALLEL_JOBS=$(( TOTAL_CORES / 2 ))
-    # Ensure at least 1 job
-    if [ $PARALLEL_JOBS -eq 0 ]; then
-        PARALLEL_JOBS=1
-    fi
+    # Default to serial execution (1 job) for better output visibility
+    PARALLEL_JOBS=1
 fi
 
 # Set up paths
