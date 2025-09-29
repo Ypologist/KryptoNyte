@@ -98,16 +98,30 @@ generate_reference() {
         return 1
     fi
     
-    # Run Spike simulation with timeout (let Spike handle memory mapping automatically)
+    # Run Spike simulation with pk (proxy kernel) and timeout
     local log_file="$test_dir/${test_name}.log"
+    local pk_bin="/opt/riscv-conformance/pk/riscv32-unknown-elf/bin/pk"
+    
+    # Check if pk exists, fallback to different locations
+    if [ ! -f "$pk_bin" ]; then
+        pk_bin="/opt/riscv-conformance/pk/riscv64-unknown-elf/bin/pk"
+    fi
+    if [ ! -f "$pk_bin" ]; then
+        pk_bin="/opt/riscv/bin/pk"
+    fi
+    if [ ! -f "$pk_bin" ]; then
+        echo "❌ Proxy kernel (pk) not found for $test_name"
+        return 1
+    fi
+    
     if ! run_with_timeout 60 "Spike simulation" \
-        "$SPIKE_BIN" --isa=rv32i "$elf_file"; then
+        "$SPIKE_BIN" --isa=rv32i "$pk_bin" "$elf_file"; then
         echo "❌ Spike simulation failed for $test_name"
         return 1
     fi
     
-    # Redirect Spike output to log file (let Spike handle memory mapping automatically)
-    if ! timeout 60 "$SPIKE_BIN" --isa=rv32i "$elf_file" > "$log_file" 2>&1; then
+    # Redirect Spike output to log file (using pk)
+    if ! timeout 60 "$SPIKE_BIN" --isa=rv32i "$pk_bin" "$elf_file" > "$log_file" 2>&1; then
         echo "❌ Spike simulation failed or timed out for $test_name"
         return 1
     fi

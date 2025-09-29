@@ -657,15 +657,30 @@ install_pk() {
     mkdir -p build
     cd build
     
-    # Set cross-compiler environment variables
-    export CC=riscv64-unknown-elf-gcc
-    export CXX=riscv64-unknown-elf-g++
-    export AR=riscv64-unknown-elf-ar
-    export RANLIB=riscv64-unknown-elf-ranlib
-    export STRIP=riscv64-unknown-elf-strip
+    # Set cross-compiler environment variables (use available toolchain)
+    if command -v riscv32-unknown-elf-gcc >/dev/null 2>&1; then
+        export CC=riscv32-unknown-elf-gcc
+        export CXX=riscv32-unknown-elf-g++
+        export AR=riscv32-unknown-elf-ar
+        export RANLIB=riscv32-unknown-elf-ranlib
+        export STRIP=riscv32-unknown-elf-strip
+        HOST_TRIPLET=riscv32-unknown-elf
+    elif command -v riscv64-unknown-elf-gcc >/dev/null 2>&1; then
+        export CC=riscv64-unknown-elf-gcc
+        export CXX=riscv64-unknown-elf-g++
+        export AR=riscv64-unknown-elf-ar
+        export RANLIB=riscv64-unknown-elf-ranlib
+        export STRIP=riscv64-unknown-elf-strip
+        HOST_TRIPLET=riscv64-unknown-elf
+    else
+        print_error "No RISC-V toolchain found"
+        return 1
+    fi
     
-    # Configure for both RV32 and RV64
-    ../configure --prefix="$pk_install" --host=riscv64-unknown-elf
+    print_step "Using toolchain: $CC"
+    
+    # Configure for the available toolchain
+    ../configure --prefix="$pk_install" --host="$HOST_TRIPLET"
     if make -j$(nproc) && make install; then
         PK_INSTALLED=true
         print_success "Proxy kernel installed"
