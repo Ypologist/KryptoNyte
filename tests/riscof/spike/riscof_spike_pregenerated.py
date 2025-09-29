@@ -32,11 +32,15 @@ class spike(pluginTemplate):
         # Check multiple possible locations for reference signatures and ELF files
         # Priority order: user's prebuilt signatures in riscof/reference_signatures/src/ first
         possible_ref_dirs = [
+            # User's actual location: tests/riscof/reference_signatures/src/
+            os.path.abspath(os.path.join(os.path.dirname(self.pluginpath), 'reference_signatures/src')),
+            # Alternative: from tests/ directory
+            os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(self.pluginpath)), 'riscof/reference_signatures/src')),
+            # Fallback locations
             os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(self.pluginpath)), 'reference_signatures/src')),
             os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(self.pluginpath))), 'riscof/reference_signatures/src')),
             os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(self.pluginpath)), 'riscof_work/reference_signatures')),
-            os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(self.pluginpath))), 'riscof_work/reference_signatures')),
-            os.path.abspath(os.path.join(os.path.dirname(self.pluginpath), 'reference_signatures/src'))
+            os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(self.pluginpath))), 'riscof_work/reference_signatures'))
         ]
         
         self.ref_sig_dir = None
