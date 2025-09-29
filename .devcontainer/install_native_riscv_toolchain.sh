@@ -449,8 +449,10 @@ build_pk() {
     
     print_step "Using toolchain: $CC"
     
-    # Configure and build
-    ../configure --prefix="$INSTALL_PREFIX" --host=riscv64-unknown-elf
+    # Configure and build with proper ISA extensions
+    export CFLAGS="-march=rv64imac_zicsr_zifencei -mabi=lp64"
+    export CXXFLAGS="-march=rv64imac_zicsr_zifencei -mabi=lp64"
+    ../configure --prefix="$INSTALL_PREFIX" --host=riscv64-unknown-elf --with-arch=rv64imac_zicsr_zifencei
     if make -j"$JOBS" && run_cmd make install; then
         PK_BUILT=true
         print_success "Proxy kernel built successfully"
