@@ -614,6 +614,8 @@ install_spike() {
     cd "$spike_dir"
     
     print_step "Building Spike simulator"
+    # Ensure completely clean build directory
+    rm -rf build
     mkdir -p build
     cd build
     ../configure --prefix="$spike_install"
@@ -684,6 +686,8 @@ install_pk() {
     cd "$pk_dir"
     
     print_step "Building proxy kernel"
+    # Ensure completely clean build directory
+    rm -rf build
     mkdir -p build
     cd build
     
