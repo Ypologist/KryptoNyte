@@ -583,7 +583,8 @@ install_spike() {
     fi
     
     if [ "$UPGRADE_MODE" = true ]; then
-        print_step "Upgrade mode: Reinstalling Spike simulator"
+        print_step "Upgrade mode: Completely removing and rebuilding Spike"
+        # Remove source directory completely
         rm -rf "$spike_dir"
         # Remove Spike-specific files from /opt/riscv (may need sudo)
         if [ -f "/opt/riscv/bin/spike" ]; then
@@ -600,15 +601,17 @@ install_spike() {
     fi
     
     print_step "Cloning Spike repository"
-    if [ -d "$spike_dir" ]; then
+    # Always clone fresh in upgrade mode, otherwise update existing
+    if [ "$UPGRADE_MODE" = true ] || [ ! -d "$spike_dir" ]; then
+        print_step "Cloning fresh Spike repository"
+        git clone --depth 1 --branch "$SPIKE_VERSION" \
+            https://github.com/riscv-software-src/riscv-isa-sim.git "$spike_dir"
+    else
         print_step "Updating existing Spike repository"
         cd "$spike_dir"
         git fetch origin
         git checkout "$SPIKE_VERSION"
         git pull origin "$SPIKE_VERSION"
-    else
-        git clone --depth 1 --branch "$SPIKE_VERSION" \
-            https://github.com/riscv-software-src/riscv-isa-sim.git "$spike_dir"
     fi
     
     cd "$spike_dir"
@@ -648,7 +651,8 @@ install_pk() {
     fi
     
     if [ "$UPGRADE_MODE" = true ]; then
-        print_step "Upgrade mode: Reinstalling proxy kernel"
+        print_step "Upgrade mode: Completely removing and rebuilding proxy kernel"
+        # Remove source directory completely
         rm -rf "$pk_dir"
         # Remove pk-specific files from /opt/riscv (may need sudo)
         if [ -f "/opt/riscv/bin/pk" ]; then
@@ -666,21 +670,22 @@ install_pk() {
     
     # Check if RISC-V toolchain is available
     if ! check_riscv_toolchain_available >/dev/null 2>&1; then
-        print_warning "RISC-V toolchain not found - proxy kernel requires cross-compiler"
-        print_warning "Skipping proxy kernel installation"
-        return 0
+        print_error "RISC-V toolchain not available"
+        return 1
     fi
     
     print_step "Cloning proxy kernel repository"
-    if [ -d "$pk_dir" ]; then
+    # Always clone fresh in upgrade mode, otherwise update existing
+    if [ "$UPGRADE_MODE" = true ] || [ ! -d "$pk_dir" ]; then
+        print_step "Cloning fresh proxy kernel repository"
+        git clone --depth 1 --branch "$PK_VERSION" \
+            https://github.com/riscv-software-src/riscv-pk.git "$pk_dir"
+    else
         print_step "Updating existing proxy kernel repository"
         cd "$pk_dir"
         git fetch origin
         git checkout "$PK_VERSION"
         git pull origin "$PK_VERSION"
-    else
-        git clone --depth 1 --branch "$PK_VERSION" \
-            https://github.com/riscv-software-src/riscv-pk.git "$pk_dir"
     fi
     
     cd "$pk_dir"
