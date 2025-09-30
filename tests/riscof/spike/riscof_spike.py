@@ -108,7 +108,10 @@ class spike(pluginTemplate):
             execute+=compile_cmd+";"
 
             execute += self.objdump_cmd.format(elf, self.xlen, 'ref.disass')
-            sig_file = os.path.join(test_dir, self.name[:-1] + ".signature")
+            # Create ref subdirectory and set correct signature path
+            ref_dir = os.path.join(test_dir, 'ref')
+            sig_file = os.path.join(ref_dir, "Reference-spike.signature")
+            execute += f"mkdir -p {ref_dir};"
 
             isa_yaml = utils.load_yaml(self.isa_yaml_path)
             # Verify the availability of PMP:
