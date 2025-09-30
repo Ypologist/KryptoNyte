@@ -31,6 +31,7 @@ RUN_M=false
 RUN_PRIVILEGE=false
 SMOKE_TEST=false
 PARALLEL_JOBS=""
+USE_PREGENERATED_SIGNATURES=false
 
 # Process command line arguments
 while [[ $# -gt 0 ]]; do
@@ -65,16 +66,21 @@ while [[ $# -gt 0 ]]; do
             fi
             shift
             ;;
+        --pregenerated-signatures)
+            USE_PREGENERATED_SIGNATURES=true
+            shift
+            ;;
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
-            echo "  --with-m           Include M extension tests (multiply/divide)"
-            echo "  --with-privilege   Include privilege tests"
-            echo "  --all              Include all test suites"
-            echo "  --smoke-test       Run only a single test as a smoke test"
-            echo "  --parallel         Enable parallel execution (uses half of available cores)"
-            echo "  --jobs N           Number of parallel jobs (default: 1 for serial execution)"
-            echo "  --help             Show this help message"
+            echo "  --with-m                   Include M extension tests (multiply/divide)"
+            echo "  --with-privilege           Include privilege tests"
+            echo "  --all                      Include all test suites"
+            echo "  --smoke-test               Run only a single test as a smoke test"
+            echo "  --parallel                 Enable parallel execution (uses half of available cores)"
+            echo "  --jobs N                   Number of parallel jobs (default: 1 for serial execution)"
+            echo "  --pregenerated-signatures  Use pregenerated reference signatures instead of running Spike"
+            echo "  --help                     Show this help message"
             exit 0
             ;;
         *)
@@ -225,6 +231,22 @@ fi
 
 # Change to RISCOF directory for proper plugin loading
 cd "$RISCOF_DIR"
+
+# Switch spike plugin based on pregenerated signatures flag
+if [ "$USE_PREGENERATED_SIGNATURES" = true ]; then
+    echo "▶ Using pregenerated reference signatures"
+    if [ -f "spike/riscof_spike_pregenerated.py" ]; then
+        # Backup current plugin and use pregenerated version
+        cp spike/riscof_spike.py spike/riscof_spike_backup.py
+        cp spike/riscof_spike_pregenerated.py spike/riscof_spike.py
+        echo "✅ Switched to pregenerated signatures plugin"
+    else
+        echo "⚠️  Pregenerated plugin not found, using normal Spike plugin"
+        USE_PREGENERATED_SIGNATURES=false
+    fi
+else
+    echo "▶ Using normal Spike reference model"
+fi
 
 # Generate database if it doesn't exist or if we want to refresh it
 DATABASE_FILE="$WORK_DIR/database.yaml"
@@ -424,6 +446,13 @@ EOF
     else
         echo "⚠️  $failed_jobs out of $PARALLEL_JOBS jobs failed"
     fi
+fi
+
+# Restore original spike plugin if we switched it
+if [ "$USE_PREGENERATED_SIGNATURES" = true ] && [ -f "$RISCOF_DIR/spike/riscof_spike_backup.py" ]; then
+    echo "▶ Restoring original Spike plugin"
+    mv "$RISCOF_DIR/spike/riscof_spike_backup.py" "$RISCOF_DIR/spike/riscof_spike.py"
+    echo "✅ Original plugin restored"
 fi
 
 echo ""
