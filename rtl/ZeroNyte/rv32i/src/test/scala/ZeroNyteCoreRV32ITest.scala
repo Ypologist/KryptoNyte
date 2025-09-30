@@ -12,30 +12,42 @@ class ZeroNyteRV32ICoreTest extends AnyFlatSpec {
       val printDebugInfo = true
       var cycle = 0 // cycle counter
 
-      // Helper to test a single instruction
-      def testInstruction(expectedInstr: BigInt, expectedPC: BigInt): Unit = {
-        val instr = dut.io.instr_out.peek().litValue
-        val pc = dut.io.pc_out.peek().litValue
+      val mask32 = 0xFFFFFFFFL
+      val basePC = dut.io.pc_out.peek().litValue.toLong & mask32
 
-        if (printDebugInfo) println(f"[Cycle $cycle%02d] PC: 0x${pc.toString(16)}, Instr: 0x${instr.toString(16)}")
+      // Helper to test a single instruction, providing instruction memory stimulus
+      def testInstruction(expectedInstr: Long, idx: Int): Unit = {
+        val expectedPC = (basePC + idx * 4L) & mask32
+        val pc = dut.io.pc_out.peek().litValue.toLong & mask32
+
+        // Drive instruction memory with expected word for the current PC
+        dut.io.imem_rdata.poke((expectedInstr & mask32).U(32.W))
+
+        val instr = dut.io.instr_out.peek().litValue.toLong & mask32
+
+        if (printDebugInfo) {
+          val pcHex = java.lang.Long.toHexString(pc)
+          val instrHex = java.lang.Long.toHexString(instr)
+          println(f"[Cycle $cycle%02d] PC: 0x$pcHex, Instr: 0x$instrHex")
+        }
 
         // Assertions
-        assert(instr == (expectedInstr & 0xFFFFFFFFL), s"Expected instruction 0x${expectedInstr.toString(16)}, got 0x${instr.toString(16)}")
-        assert(pc == (expectedPC & 0xFFFFFFFFL), s"Expected PC 0x${expectedPC.toString(16)}, got 0x${pc.toString(16)}")
+        assert(pc == expectedPC, s"Expected PC 0x${java.lang.Long.toHexString(expectedPC)}, got 0x${java.lang.Long.toHexString(pc)}")
+        assert(instr == (expectedInstr & mask32), s"Expected instruction 0x${java.lang.Long.toHexString(expectedInstr)}, got 0x${java.lang.Long.toHexString(instr)}")
 
         dut.clock.step(1)
         cycle += 1
       }
 
-      // Sequence of instructions with expected PC values
-      val instructionsAndPCs = Seq(
-        (0x00000013L, 0x0L), // NOP
-        (0x00100093L, 0x4L), // ADDI
-        (0x00208133L, 0x8L)  // ADD
+      // Sequence of instructions to exercise basic fetch/execute path
+      val program = Seq(
+        0x00000013L, // NOP
+        0x00100093L, // ADDI
+        0x00208133L  // ADD
       )
 
-      instructionsAndPCs.foreach { case (instr, pc) =>
-        testInstruction(instr, pc)
+      program.zipWithIndex.foreach { case (instr, idx) =>
+        testInstruction(instr, idx)
       }
     }
   }
