@@ -261,29 +261,59 @@ compile_test() {
     return 0
 }
 
+# Function to compile a test for RISCOF directory structure
+compile_test_for_riscof() {
+    local test_path="$1"
+    local elf_file="$2"
+    local test_name="$(basename "$test_path" .S)"
+    
+    # Determine the appropriate architecture flags based on the test path
+    local march_flags="rv32i"
+    if [[ "$test_path" == *"/M/"* ]]; then
+        march_flags="rv32im"
+    elif [[ "$test_path" == *"/privilege/"* ]]; then
+        march_flags="rv32i_zicsr"
+    fi
+    
+    echo "  Running: Compilation (timeout: 30s) with -march=$march_flags"
+    if ! run_with_timeout 30 "Compilation" \
+        "${RISCV_PREFIX}gcc" -march=$march_flags -mabi=ilp32 -static -mcmodel=medany \
+        -fvisibility=hidden -nostdlib -nostartfiles \
+        -I/opt/riscv-conformance/riscv-arch-test/riscv-test-suite/env \
+        -I/opt/riscv-conformance/riscv-arch-test/riscof-plugins/rv32/spike_simple/env \
+        -T/opt/riscv-conformance/riscv-arch-test/riscof-plugins/rv32/spike_simple/env/link.ld \
+        -DXLEN=32 -DTEST_CASE_1=True \
+        "$test_path" \
+        -o "$elf_file"; then
+        echo "❌ Failed to compile $test_name"
+        return 1
+    fi
+    
+    return 0
+}
+
 # Function to generate reference signature for a test
 generate_reference() {
     local test_file="$1"
     local test_name="$(basename "$test_file" .S)"
-    local test_dir="$WORK_DIR/src"
-    local elf_file="$test_dir/${test_name}.elf"
+    
+    # Create RISCOF-compatible directory structure
+    # Pattern: /path/to/riscof_work/I/src/test-name.S/dut/ref/Reference-spike.signature
+    local suite_name=$(basename "$(dirname "$(dirname "$test_file")")")  # Extract I, M, etc.
+    local riscof_test_dir="$WORK_DIR/../riscof_work/$suite_name/src/${test_name}.S/dut"
+    local ref_dir="$riscof_test_dir/ref"
+    local elf_file="$riscof_test_dir/${test_name}.elf"
+    local sig_file="$ref_dir/Reference-spike.signature"
+    
+    # Create directories
+    mkdir -p "$ref_dir"
     
     # Compile the test
-    if ! compile_test "$test_file"; then
+    if ! compile_test_for_riscof "$test_file" "$elf_file"; then
         return 1
     fi
     
-    # Create a temporary directory for riscv_isac
-    local isac_dir="$test_dir/isac"
-    mkdir -p "$isac_dir"
-    
-    # Create a log file
-    local log_file="$test_dir/${test_name}.log"
-    
     echo "  Running: Generating signature with spike (timeout: 30s)"
-    
-    # Create output signature file
-    local sig_file="$test_dir/${test_name}.signature"
     
     # Use the direct ELF signature extraction method that's working
     if ! run_with_timeout 30 "Signature extraction" \
@@ -295,7 +325,7 @@ generate_reference() {
     
     # Verify the signature file exists and has content
     if [ -f "$sig_file" ] && [ -s "$sig_file" ]; then
-        echo "✅ Generated reference signature for $test_name"
+        echo "✅ Generated reference signature for $test_name at $sig_file"
         return 0
     else
         echo "⚠️  No signature generated for $test_name (test may not have signature)"

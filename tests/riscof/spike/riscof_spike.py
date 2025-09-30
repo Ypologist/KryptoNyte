@@ -81,8 +81,7 @@ class spike(pluginTemplate):
             os.makedirs(ref_dir, exist_ok=True)
             
             # Path where RISCOF expects the reference signature
-            # Use the same naming convention as the original spike plugin
-            ref_sig = os.path.join(ref_dir, "spike.signature")
+            ref_sig = os.path.join(ref_dir, "Reference-spike.signature")
             
             # Check if reference signature already exists
             if os.path.exists(ref_sig):
