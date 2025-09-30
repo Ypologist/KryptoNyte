@@ -8,6 +8,11 @@
 **/project/target/
 **/project/project/
 
+# Convormance tests
+**/reference_signatures/
+**/riscof_work/
+
+
 # Generated Verilog files
 **/*.v
 **/*.sv
@@ -276,6 +281,9 @@
 **/env/
 **/.venv/
 
+# Exception for RISCOF environment directories
+!tests/riscof/*/env/
+
 #==============================================================================
 # Operating System
 #==============================================================================
@@ -456,3 +464,7 @@
 #==============================================================================
 
 
+_runs/
+tests/riscof/riscv-arch-test/
+tests/riscof_work/I/
+tests/riscof_work/
