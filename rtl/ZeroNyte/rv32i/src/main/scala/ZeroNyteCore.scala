@@ -6,24 +6,31 @@ import Decoders.RV32IDecode
 import ALUs.ALU32
 
 
-class ZeroNyteCore extends Module {
+class ZeroNyteRV32ICore extends Module {
   val io = IO(new Bundle {
+    // Instruction Memory Interface
+    val imem_addr = Output(UInt(32.W))
+    val imem_rdata = Input(UInt(32.W))
+
+    // Data Memory Interface
+    val dmem_addr = Output(UInt(32.W))
+    val dmem_rdata = Input(UInt(32.W))
+    val dmem_wdata = Output(UInt(32.W))
+    val dmem_wen = Output(Bool())
+
+    // Debug Outputs
     val pc_out    = Output(UInt(32.W))
     val instr_out = Output(UInt(32.W))
     val result    = Output(UInt(32.W))
   })
 
   // ---------- Program Counter ----------
-  val pc = RegInit(0.U(32.W))
+  val pc = RegInit("h80000000".U(32.W))  // Start at RISC-V reset vector
   io.pc_out := pc
 
   // ---------- Instruction Memory ----------
-  val initInstrs = VecInit(
-    0x00000013.U(32.W), // NOP
-    0x00100093.U(32.W), // ADDI
-    0x00208133.U(32.W)  // ADD
-  )
-  val instr = initInstrs(pc >> 2)
+  io.imem_addr := pc
+  val instr = io.imem_rdata
   io.instr_out := instr
 
   // ---------- Register File ----------
@@ -44,11 +51,17 @@ class ZeroNyteCore extends Module {
   alu.io.b := r2
   alu.io.opcode := dec.aluOp
 
+  // ---------- Data Memory Access ----------
+  io.dmem_addr := alu.io.result
+  io.dmem_wdata := r2
+  io.dmem_wen := dec.isStore
+
   // ---------- Write Back ----------
-  when(dec.isALU && rd =/= 0.U) {
-    regFile(rd) := alu.io.result
+  val write_data = Mux(dec.isLoad, io.dmem_rdata, alu.io.result)
+  when((dec.isALU || dec.isLoad) && rd =/= 0.U) {
+    regFile(rd) := write_data
   }
-  io.result := alu.io.result
+  io.result := write_data
 
   // ---------- PC Update ----------
   pc := pc + 4.U
