@@ -10,6 +10,7 @@
 
 # Convormance tests
 **/reference_signatures/
+**/riscof_work/
 
 
 # Generated Verilog files
