@@ -62,6 +62,15 @@ lazy val zeroNyte = (project in file("ZeroNyte/rv32i/rtl/chisel"))
     commonSettings 
   )
 
+  // ----------------- PipeNyte Project -----------------
+lazy val pipeNyte = (project in file("PipeNyte/rv32i/rtl/chisel"))
+  .dependsOn(library)
+  .settings(
+    name := "PipeNyte",
+    commonSettings 
+  )
+
+
 // ----------------- Root Project -----------------
 lazy val root = (project in file("."))
-  .aggregate(library, zeroNyte)
+  .aggregate(library, zeroNyte, pipeNyte)
