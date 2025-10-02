@@ -16,6 +16,7 @@ import scala.util.{Try, Success, Failure}
 
 // Import KryptoNyte modules
 import ALUs.ALU32
+import Decoders.RV32IDecodeModule
 
 // Explicit import for ZeroNyteRV32ICore
 // Since it has no package, we try importing it directly
@@ -269,6 +270,7 @@ Environment Variables:
       case "rv32i" => Seq(
         // Use both ALU32 and ZeroNyteRV32ICore
         ModuleSpec(() => new ALU32, "ALU32", "32-bit ALU", "ZeroNyte", "rv32i"),
+        ModuleSpec(() => new RV32IDecodeModule, "RV32IDecodeModule", "RV32I instruction decoder", "ZeroNyte", "rv32i"),
         ModuleSpec(() => new ZeroNyteRV32ICore, "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i")
         // Note: RV32IDecode is an object, not a Module class, so it can't be instantiated
       )
