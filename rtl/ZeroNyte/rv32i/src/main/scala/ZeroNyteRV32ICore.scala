@@ -62,7 +62,7 @@ class ZeroNyteRV32ICore extends Module {
   // ---------- Write Back ----------
   val pcPlus4 = pc + 4.U
   val auipcValue = pc + dec.imm
-  val jalrTarget = (r1 + dec.imm) & ~1.U(32.W)
+  val jalrTarget = ((r1.asSInt + dec.imm.asSInt).asUInt) & ~1.U(32.W)
 
   val write_data = Wire(UInt(32.W))
   val doWrite = Wire(Bool())
@@ -111,19 +111,17 @@ class ZeroNyteRV32ICore extends Module {
     }
   }
 
-  val branchTarget = pc + (dec.imm << 1)
+  val branchOffset = (dec.imm.asSInt << 1).asUInt
+  val branchTarget = (pc.asSInt + branchOffset.asSInt).asUInt
+  val jalTarget = (pc.asSInt + dec.imm.asSInt).asUInt
 
-  val nextPC = Wire(UInt(32.W))
-  nextPC := pcPlus4
-
+  val nextPC = WireDefault(pcPlus4)
   when(dec.isBranch && branchTaken) {
     nextPC := branchTarget
   }
-
   when(dec.isJAL) {
-    nextPC := pc + dec.imm
+    nextPC := jalTarget
   }
-
   when(dec.isJALR) {
     nextPC := jalrTarget
   }
