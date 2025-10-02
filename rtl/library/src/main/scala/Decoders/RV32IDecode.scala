@@ -168,3 +168,12 @@ object RV32IDecode {
     dec
   }
 }
+
+class RV32IDecodeModule extends Module {
+  val io = IO(new Bundle {
+    val instr = Input(UInt(32.W))
+    val signals = Output(new RV32IDecode.DecodeSignals)
+  })
+
+  io.signals := RV32IDecode.decodeInstr(io.instr)
+}

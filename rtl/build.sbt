@@ -50,24 +50,26 @@ lazy val commonSettings = Seq(
 // ----------------- Library Project -----------------
 lazy val library = (project in file("library"))
   .settings(
-    name := "Library",
-    commonSettings 
+    name := "Library"
   )
+  .settings(commonSettings: _*)
 
 // ----------------- ZeroNyte Project -----------------
 lazy val zeroNyte = (project in file("ZeroNyte/rv32i"))
   .dependsOn(library)
   .settings(
-    name := "ZeroNyte",
-    commonSettings 
+    name := "ZeroNyte"
   )
+  .settings(commonSettings: _*)
 
 // ----------------- Generators Project -----------------
 lazy val generators = (project in file("generators"))
   .dependsOn(library, zeroNyte)
   .settings(
-    name := "Generators",
-    commonSettings,
+    name := "Generators"
+  )
+  .settings(commonSettings: _*)
+  .settings(
     
     // Ensure dependencies are compiled before generators
     Compile / compile := (Compile / compile).dependsOn(
