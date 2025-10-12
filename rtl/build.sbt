@@ -62,9 +62,17 @@ lazy val zeroNyte = (project in file("ZeroNyte/rv32i"))
   )
   .settings(commonSettings: _*)
 
+// ----------------- PipeNyte Project -----------------
+lazy val tetraNyte = (project in file("TetraNyte/rv32i"))
+  .dependsOn(library)
+  .settings(
+    name := "TetraNyte"
+  )
+  .settings(commonSettings: _*)
+
 // ----------------- Generators Project -----------------
 lazy val generators = (project in file("generators"))
-  .dependsOn(library, zeroNyte)
+  .dependsOn(library, zeroNyte, tetraNyte)
   .settings(
     name := "Generators"
   )
@@ -74,7 +82,8 @@ lazy val generators = (project in file("generators"))
     // Ensure dependencies are compiled before generators
     Compile / compile := (Compile / compile).dependsOn(
       library / Compile / compile,
-      zeroNyte / Compile / compile
+      zeroNyte / Compile / compile,
+      tetraNyte / Compile / compile
     ).value,
     
     // Additional dependencies for RTL generation 
@@ -86,6 +95,7 @@ lazy val generators = (project in file("generators"))
     TaskKey[Unit]("generateRTL") := {
       (library / Compile / compile).value
       (zeroNyte / Compile / compile).value
+      (tetraNyte / Compile / compile).value
       (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL").value
     },
     
@@ -93,7 +103,7 @@ lazy val generators = (project in file("generators"))
 
 // ----------------- Root Project -----------------
 lazy val root = (project in file("."))
-  .aggregate(library, zeroNyte, generators)
+  .aggregate(library, zeroNyte, tetraNyte, generators)
   .settings(
     name := "KryptoNyte",
     
