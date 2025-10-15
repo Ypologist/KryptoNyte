@@ -16,10 +16,12 @@ import scala.util.{Try, Success, Failure}
 
 // Import KryptoNyte modules
 import ALUs.ALU32
+import BranchUnit.BranchUnit
 import Decoders.RV32IDecodeModule
-
-// Explicit import for ZeroNyteRV32ICore
-// Since it has no package, we try importing it directly
+import LoadUnit.LoadUnit
+import RegFiles.RegFileMT2R1WVec
+import StoreUnit.StoreUnit
+import TetraNyte.TetraNyteRV32ICore
 import ZeroNyte.ZeroNyteRV32ICore
 
 // Note: RV32IDecode is an object (not a Module class), so it's not imported for RTL generation
@@ -264,16 +266,21 @@ Environment Variables:
         getZeroNyteModules(config.coreVariant)
     }
   }
+
+  private def getRV32ILibraryModules(family: String): Seq[ModuleSpec] = Seq(
+    ModuleSpec(() => new ALU32, "ALU32", "32-bit ALU", family, "rv32i"),
+    ModuleSpec(() => new BranchUnit, "BranchUnit", "Branch decision unit", family, "rv32i"),
+    ModuleSpec(() => new LoadUnit, "LoadUnit", "Load unit for RV32I", family, "rv32i"),
+    ModuleSpec(() => new StoreUnit, "StoreUnit", "Store unit with mask generation", family, "rv32i"),
+    ModuleSpec(() => new RegFileMT2R1WVec(), "RegFileMT2R1WVec", "Multithreaded 2R1W register file", family, "rv32i"),
+    ModuleSpec(() => new RV32IDecodeModule, "RV32IDecodeModule", "RV32I instruction decoder", family, "rv32i")
+  )
   
   def getZeroNyteModules(variant: String): Seq[ModuleSpec] = {
     variant match {
-      case "rv32i" => Seq(
-        // Use both ALU32 and ZeroNyteRV32ICore
-        ModuleSpec(() => new ALU32, "ALU32", "32-bit ALU", "ZeroNyte", "rv32i"),
-        ModuleSpec(() => new RV32IDecodeModule, "RV32IDecodeModule", "RV32I instruction decoder", "ZeroNyte", "rv32i"),
-        ModuleSpec(() => new ZeroNyteRV32ICore, "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i")
-        // Note: RV32IDecode is an object, not a Module class, so it can't be instantiated
-      )
+      case "rv32i" =>
+        getRV32ILibraryModules("ZeroNyte") :+
+          ModuleSpec(() => new ZeroNyteRV32ICore, "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i")
       case _ => Seq.empty
     }
   }
@@ -284,8 +291,12 @@ Environment Variables:
   }
   
   def getTetraNyteModules(variant: String): Seq[ModuleSpec] = {
-    // Placeholder for TetraNyte modules
-    Seq.empty
+    variant match {
+      case "rv32i" =>
+        getRV32ILibraryModules("TetraNyte") :+
+          ModuleSpec(() => new TetraNyteRV32ICore, "TetraNyteRV32ICore", "Four-thread RV32I pipeline core", "TetraNyte", "rv32i")
+      case _ => Seq.empty
+    }
   }
   
   def getOctoNyteModules(variant: String): Seq[ModuleSpec] = {
