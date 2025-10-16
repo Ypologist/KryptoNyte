@@ -10,10 +10,16 @@ class ZeroNyteRV32ICoreTest extends AnyFlatSpec {
   "ZeroNyteCore" should "fetch and execute instructions correctly" in {
     simulate(new ZeroNyteRV32ICore) { dut =>
       val printDebugInfo = true
-      var cycle = 0 // cycle counter
-
       val mask32 = 0xFFFFFFFFL
+
+      // Apply reset to ensure deterministic starting state
+      dut.reset.poke(true.B)
+      dut.io.imem_rdata.poke(0.U)
+      dut.clock.step()
+      dut.reset.poke(false.B)
+
       val basePC = dut.io.pc_out.peek().litValue.toLong & mask32
+      var cycle = 0
 
       // Helper to test a single instruction, providing instruction memory stimulus
       def testInstruction(expectedInstr: Long, idx: Int): Unit = {
