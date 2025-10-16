@@ -4,6 +4,8 @@ import chisel3._
 import chisel3.simulator.EphemeralSimulator._
 import org.scalatest.flatspec.AnyFlatSpec
 import ZeroNyte.ZeroNyteRV32ICore
+import Decoders.RV32IDecode
+import ALUs.ALU32
 
 class ZeroNyteRV32ICoreTest extends AnyFlatSpec {
 
