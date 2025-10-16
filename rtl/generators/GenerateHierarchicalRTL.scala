@@ -257,6 +257,7 @@ Environment Variables:
   def getModulesToGenerate(config: RTLGeneratorConfig): Seq[ModuleSpec] = {
     // This would be expanded based on the core family and variant
     config.coreFamily match {
+      case "Library" => getLibraryModules(config.coreVariant)
       case "ZeroNyte" => getZeroNyteModules(config.coreVariant)
       case "PipeNyte" => getPipeNyteModules(config.coreVariant)
       case "TetraNyte" => getTetraNyteModules(config.coreVariant)
@@ -275,6 +276,13 @@ Environment Variables:
     ModuleSpec(() => new RegFileMT2R1WVec(), "RegFileMT2R1WVec", "Multithreaded 2R1W register file", family, "rv32i"),
     ModuleSpec(() => new RV32IDecodeModule, "RV32IDecodeModule", "RV32I instruction decoder", family, "rv32i")
   )
+  
+  def getLibraryModules(variant: String): Seq[ModuleSpec] = {
+    variant match {
+      case "rv32i" => getRV32ILibraryModules("Library")
+      case _ => Seq.empty
+    }
+  }
   
   def getZeroNyteModules(variant: String): Seq[ModuleSpec] = {
     variant match {
