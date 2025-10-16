@@ -9,6 +9,58 @@ PLUGIN_ROOT="$RISCV_ARCH_TEST_ROOT/riscof-plugins/rv32"
 SUITE_ROOT="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/rv32i_m/I"
 ENV_ROOT="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env"
 
+print_usage() {
+  cat <<EOF
+Usage: $(basename "$0") [--processor <zeronyte|tetranyte>]
+
+Runs RISCOF RV32I conformance for the requested processor. Defaults to ZeroNyte.
+EOF
+}
+
+PROCESSOR="zeronyte"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --processor|-p)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --processor requires an argument" >&2
+        exit 1
+      fi
+      PROCESSOR="$2"
+      shift 2
+      ;;
+    --help|-h)
+      print_usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      print_usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+case "$PROCESSOR" in
+  zeronyte)
+    DUT_NAME="zeronyte"
+    SIM_BUILD_SCRIPT="$SCRIPT_DIR/sim/build_zeronyte_sim.sh"
+    SIM_BINARY="zeronyte_sim"
+    ISA_FILE="zeronyte/zeronyte_isa.yaml"
+    PLATFORM_FILE="zeronyte/zeronyte_platform.yaml"
+    ;;
+  tetranyte)
+    DUT_NAME="tetranyte"
+    SIM_BUILD_SCRIPT="$SCRIPT_DIR/sim/build_tetranyte_sim.sh"
+    SIM_BINARY="tetranyte_sim"
+    ISA_FILE="tetranyte/tetranyte_isa.yaml"
+    PLATFORM_FILE="tetranyte/tetranyte_platform.yaml"
+    ;;
+  *)
+    echo "Unsupported processor: $PROCESSOR" >&2
+    exit 1
+    ;;
+esac
+
 if [[ ! -d "$RISCV_ARCH_TEST_ROOT" ]]; then
   echo "RISCV_ARCH_TEST_ROOT not found at $RISCV_ARCH_TEST_ROOT" >&2
   exit 1
@@ -19,13 +71,44 @@ if ! command -v riscof >/dev/null 2>&1; then
   exit 1
 fi
 
-"$SCRIPT_DIR/sim/build_zeronyte_sim.sh"
+if [[ ! -x "$SIM_BUILD_SCRIPT" ]]; then
+  echo "Simulation build script not found for $PROCESSOR: $SIM_BUILD_SCRIPT" >&2
+  exit 1
+fi
 
-CONFIG_TEMPLATE="$SCRIPT_DIR/riscof/config.ini"
-CONFIG_GENERATED="$SCRIPT_DIR/riscof/.config.rv32i.ini"
-sed "s|@RISCV_PLUGIN_ROOT@|$PLUGIN_ROOT|g" "$CONFIG_TEMPLATE" > "$CONFIG_GENERATED"
+"$SIM_BUILD_SCRIPT"
 
-OUTPUT_DIR="$SCRIPT_DIR/output/rv32i"
+PLUGIN_DIR="$SCRIPT_DIR/riscof/$DUT_NAME"
+if [[ ! -d "$PLUGIN_DIR" ]]; then
+  echo "RISCOF plugin directory not found for $PROCESSOR: $PLUGIN_DIR" >&2
+  exit 1
+fi
+
+CONFIG_GENERATED="$SCRIPT_DIR/riscof/.config.rv32i.${PROCESSOR}.ini"
+cat >"$CONFIG_GENERATED" <<EOF
+[RISCOF]
+ReferencePlugin=spike_simple
+ReferencePluginPath=$PLUGIN_ROOT/spike_simple
+DUTPlugin=$DUT_NAME
+DUTPluginPath=$DUT_NAME
+
+[$DUT_NAME]
+pluginpath=$DUT_NAME
+ispec=$ISA_FILE
+pspec=$PLATFORM_FILE
+PATH=../sim/build
+sim=$SIM_BINARY
+jobs=1
+
+[spike_simple]
+pluginpath=$PLUGIN_ROOT/spike_simple
+ispec=$PLUGIN_ROOT/spike_simple/spike_simple_isa.yaml
+pspec=$PLUGIN_ROOT/spike_simple/spike_simple_platform.yaml
+PATH=/opt/riscv/bin
+jobs=1
+EOF
+
+OUTPUT_DIR="$SCRIPT_DIR/output/rv32i/$PROCESSOR"
 mkdir -p "$OUTPUT_DIR"
 
 VENV_BIN="$REPO_ROOT/.venv/bin"
@@ -60,4 +143,4 @@ riscof run \
   --env "$ENV_ROOT"
 popd >/dev/null
 
-echo "RISCV RV32I conformance results available under $OUTPUT_DIR"
+echo "RISCV RV32I conformance results for $PROCESSOR available under $OUTPUT_DIR"
