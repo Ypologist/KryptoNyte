@@ -4,6 +4,11 @@ ThisBuild / organization := "%ORGANIZATION%"
 
 val chiselVersion = "6.6.0"
 
+lazy val generateLibraryRTL   = taskKey[Unit]("Generate RTL for standalone library modules")
+lazy val generateZeroNyteRTL  = taskKey[Unit]("Generate RTL for the ZeroNyte core")
+lazy val generateTetraNyteRTL = taskKey[Unit]("Generate RTL for the TetraNyte core")
+lazy val generateRTL          = taskKey[Unit]("Generate RTL for library, ZeroNyte, and TetraNyte")
+
 // ***************************
 // * COMMON SETTINGS
 // ***************************
@@ -50,29 +55,40 @@ lazy val commonSettings = Seq(
 // ----------------- Library Project -----------------
 lazy val library = (project in file("library"))
   .settings(
-    name := "Library",
-    commonSettings 
+    name := "Library"
   )
+  .settings(commonSettings: _*)
 
 // ----------------- ZeroNyte Project -----------------
 lazy val zeroNyte = (project in file("ZeroNyte/rv32i"))
   .dependsOn(library)
   .settings(
-    name := "ZeroNyte",
-    commonSettings 
+    name := "ZeroNyte"
   )
+  .settings(commonSettings: _*)
+
+// ----------------- PipeNyte Project -----------------
+lazy val tetraNyte = (project in file("TetraNyte/rv32i"))
+  .dependsOn(library)
+  .settings(
+    name := "TetraNyte"
+  )
+  .settings(commonSettings: _*)
 
 // ----------------- Generators Project -----------------
 lazy val generators = (project in file("generators"))
-  .dependsOn(library, zeroNyte)
+  .dependsOn(library, zeroNyte, tetraNyte)
   .settings(
-    name := "Generators",
-    commonSettings,
+    name := "Generators"
+  )
+  .settings(commonSettings: _*)
+  .settings(
     
     // Ensure dependencies are compiled before generators
     Compile / compile := (Compile / compile).dependsOn(
       library / Compile / compile,
-      zeroNyte / Compile / compile
+      zeroNyte / Compile / compile,
+      tetraNyte / Compile / compile
     ).value,
     
     // Additional dependencies for RTL generation 
@@ -81,24 +97,43 @@ lazy val generators = (project in file("generators"))
     ),
     
     // Custom tasks for convenience - ensure dependencies are compiled first
-    TaskKey[Unit]("generateRTL") := {
+    generateLibraryRTL := {
+      (library / Compile / compile).value
+      (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL --core-family Library --core-variant rv32i").value
+    },
+
+    generateZeroNyteRTL := {
       (library / Compile / compile).value
       (zeroNyte / Compile / compile).value
-      (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL").value
+      (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL --core-family ZeroNyte --core-variant rv32i").value
     },
+
+    generateTetraNyteRTL := {
+      (library / Compile / compile).value
+      (tetraNyte / Compile / compile).value
+      (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL --core-family TetraNyte --core-variant rv32i").value
+    },
+
+    generateRTL := Def.sequential(
+      generateLibraryRTL,
+      generateZeroNyteRTL,
+      generateTetraNyteRTL
+    ).value,
     
   )
 
 // ----------------- Root Project -----------------
 lazy val root = (project in file("."))
-  .aggregate(library, zeroNyte, generators)
+  .aggregate(library, zeroNyte, tetraNyte, generators)
   .settings(
     name := "KryptoNyte",
     
     // Custom command aliases for easy access
-    addCommandAlias("genZeroNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family ZeroNyte"),
+    addCommandAlias("genLibrary", "generators/generateLibraryRTL"),
+    addCommandAlias("genZeroNyte", "generators/generateZeroNyteRTL"),
     addCommandAlias("genPipeNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family PipeNyte"),
-    addCommandAlias("genTetraNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family TetraNyte"),
+    addCommandAlias("genTetraNyte", "generators/generateTetraNyteRTL"),
     addCommandAlias("genOctoNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family OctoNyte"),
+    addCommandAlias("genAllRtl", "generators/generateRTL"),
     
   )

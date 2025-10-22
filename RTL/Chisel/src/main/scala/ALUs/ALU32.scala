@@ -1,5 +1,7 @@
+// Licensed under the BSD 3-Clause License. 
+// See https://opensource.org/licenses/BSD-3-Clause for details.
 
-package ALUs
+package OctoNyte.ExecutionUnits
 
 import chisel3._
 import chisel3.util._
@@ -19,6 +21,7 @@ object ALU32 {
     val SRA  = "b01011".U
     val SLT  = "b00100".U  
     val SLTU = "b00110".U
+
   }
 }
 

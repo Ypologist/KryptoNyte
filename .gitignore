@@ -11,6 +11,11 @@
 # Convormance tests
 **/reference_signatures/
 **/riscof_work/
+tests/output/
+tests/toolchain/
+tests/sim/build/
+tests/riscof/.config*.ini
+rtl/.sbtboot/
 
 
 # Generated Verilog files

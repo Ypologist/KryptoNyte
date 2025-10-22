@@ -1,4 +1,4 @@
-package Decoders
+package RISCVOpcodes
 
 import chisel3._
 import chisel3.util._
@@ -40,7 +40,7 @@ object RV32IDecode {
     Cat(Fill(20, sign), value)
   }
   def signExt13(value: UInt): UInt = {
-    val sign = value(11)
+    val sign = value(12)
     Cat(Fill(19, sign), value)
   }
   def signExt20(value: UInt): UInt = {
@@ -167,13 +167,4 @@ object RV32IDecode {
 
     dec
   }
-}
-
-class RV32IDecodeModule extends Module {
-  val io = IO(new Bundle {
-    val instr = Input(UInt(32.W))
-    val signals = Output(new RV32IDecode.DecodeSignals)
-  })
-
-  io.signals := RV32IDecode.decodeInstr(io.instr)
 }
