@@ -2,6 +2,7 @@ package Decoders
 
 import chisel3._
 import chisel3.util._
+import ALUs.ALU32
 
 object RV32IDecode {
   // Common opcodes
@@ -67,23 +68,23 @@ object RV32IDecode {
         dec.isALU := true.B
         when(funct3 === "b000".U) {
           when(funct7 === "b0100000".U) {
-            dec.aluOp := 1.U // SUB
+            dec.aluOp := ALU32.Opcode.SUB
           }.otherwise {
-            dec.aluOp := 0.U // ADD
+            dec.aluOp := ALU32.Opcode.ADD
           }
-        }.elsewhen(funct3 === "b001".U) { dec.aluOp := 2.U } // SLL
-         .elsewhen(funct3 === "b010".U) { dec.aluOp := 3.U } // SLT
-         .elsewhen(funct3 === "b011".U) { dec.aluOp := 4.U } // SLTU
-         .elsewhen(funct3 === "b100".U) { dec.aluOp := 5.U } // XOR
+        }.elsewhen(funct3 === "b001".U) { dec.aluOp := ALU32.Opcode.SLL }
+         .elsewhen(funct3 === "b010".U) { dec.aluOp := ALU32.Opcode.SLT }
+         .elsewhen(funct3 === "b011".U) { dec.aluOp := ALU32.Opcode.SLTU }
+         .elsewhen(funct3 === "b100".U) { dec.aluOp := ALU32.Opcode.XOR }
          .elsewhen(funct3 === "b101".U) {
            when(funct7 === "b0100000".U) {
-             dec.aluOp := 7.U // SRA
+             dec.aluOp := ALU32.Opcode.SRA
            }.otherwise {
-             dec.aluOp := 6.U // SRL
+             dec.aluOp := ALU32.Opcode.SRL
            }
          }
-         .elsewhen(funct3 === "b110".U) { dec.aluOp := 8.U } // OR
-         .elsewhen(funct3 === "b111".U) { dec.aluOp := 9.U } // AND
+         .elsewhen(funct3 === "b110".U) { dec.aluOp := ALU32.Opcode.OR }
+         .elsewhen(funct3 === "b111".U) { dec.aluOp := ALU32.Opcode.AND }
       }
 
       // I-type ALU
@@ -92,18 +93,18 @@ object RV32IDecode {
         val immI = signExt12(instr(31,20))
         dec.imm := immI
         switch(funct3) {
-          is("b000".U) { dec.aluOp := 0.U } // ADDI
-          is("b010".U) { dec.aluOp := 3.U } // SLTI
-          is("b011".U) { dec.aluOp := 4.U } // SLTIU
-          is("b100".U) { dec.aluOp := 5.U } // XORI
-          is("b110".U) { dec.aluOp := 8.U } // ORI
-          is("b111".U) { dec.aluOp := 9.U } // ANDI
-          is("b001".U) { dec.aluOp := 2.U } // SLLI
+          is("b000".U) { dec.aluOp := ALU32.Opcode.ADD }
+          is("b010".U) { dec.aluOp := ALU32.Opcode.SLT }
+          is("b011".U) { dec.aluOp := ALU32.Opcode.SLTU }
+          is("b100".U) { dec.aluOp := ALU32.Opcode.XOR }
+          is("b110".U) { dec.aluOp := ALU32.Opcode.OR }
+          is("b111".U) { dec.aluOp := ALU32.Opcode.AND }
+          is("b001".U) { dec.aluOp := ALU32.Opcode.SLL }
           is("b101".U) {
             when(instr(30) === 1.U) {
-              dec.aluOp := 7.U // SRAI
+              dec.aluOp := ALU32.Opcode.SRA
             }.otherwise {
-              dec.aluOp := 6.U // SRLI
+              dec.aluOp := ALU32.Opcode.SRL
             }
           }
         }
