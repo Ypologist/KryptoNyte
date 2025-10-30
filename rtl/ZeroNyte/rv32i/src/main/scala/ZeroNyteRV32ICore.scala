@@ -55,8 +55,37 @@ class ZeroNyteRV32ICore extends Module {
   alu.io.opcode := dec.aluOp
 
   // ---------- Data Memory Access ----------
-  io.dmem_addr := alu.io.result
-  io.dmem_wdata := r2Reg
+  val effAddr    = alu.io.result
+  val addrBase   = Cat(effAddr(31, 2), 0.U(2.W))
+  val byteOffset = effAddr(1, 0)
+  val halfOffset = effAddr(1)
+  val storeFunct3 = instr(14, 12)
+
+  val dmemReadWord = io.dmem_rdata
+
+  val storeData = WireDefault(r2Reg)
+  when(dec.isStore) {
+    switch(storeFunct3) {
+      is("b000".U) { // SB
+        val byteVal = r2Reg(7, 0)
+        val byteMask = (0xff.U(32.W)) << (byteOffset << 3)
+        val byteShifted = (byteVal & 0xff.U) << (byteOffset << 3)
+        storeData := (dmemReadWord & ~byteMask) | byteShifted
+      }
+      is("b001".U) { // SH
+        val halfVal = r2Reg(15, 0)
+        val halfMask = (0xffff.U(32.W)) << (halfOffset << 4)
+        val halfShifted = (halfVal & 0xffff.U) << (halfOffset << 4)
+        storeData := (dmemReadWord & ~halfMask) | halfShifted
+      }
+      is("b010".U) { // SW
+        storeData := r2Reg
+      }
+    }
+  }
+
+  io.dmem_addr := addrBase
+  io.dmem_wdata := storeData
   io.dmem_wen := dec.isStore
 
   // ---------- Write Back ----------
@@ -70,8 +99,41 @@ class ZeroNyteRV32ICore extends Module {
   doWrite := dec.isALU
 
   when(dec.isLoad) {
-    write_data := io.dmem_rdata
+    val loadWord = io.dmem_rdata
+    val byteVec = VecInit(
+      loadWord(7, 0),
+      loadWord(15, 8),
+      loadWord(23, 16),
+      loadWord(31, 24)
+    )
+    val halfVec = VecInit(
+      loadWord(15, 0),
+      loadWord(31, 16)
+    )
+    val shiftedByte = byteVec(byteOffset)
+    val shiftedHalf = halfVec(halfOffset)
+    val loadFunct3 = instr(14, 12)
+
+    write_data := loadWord
     doWrite := true.B
+
+    switch(loadFunct3) {
+      is("b000".U) { // LB
+        write_data := Cat(Fill(24, shiftedByte(7)), shiftedByte)
+      }
+      is("b001".U) { // LH
+        write_data := Cat(Fill(16, shiftedHalf(15)), shiftedHalf)
+      }
+      is("b010".U) { // LW
+        write_data := loadWord
+      }
+      is("b100".U) { // LBU
+        write_data := Cat(0.U(24.W), shiftedByte)
+      }
+      is("b101".U) { // LHU
+        write_data := Cat(0.U(16.W), shiftedHalf)
+      }
+    }
   }
 
   when(dec.isLUI) {
