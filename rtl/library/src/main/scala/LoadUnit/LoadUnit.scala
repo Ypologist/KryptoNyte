@@ -21,32 +21,37 @@ class LoadUnit extends Module {
   val LHU = "b101".U  // Load Halfword (unsigned)
 
   // Parameterized width extraction
-  val loadWidth = Wire(UInt(2.W))
-  val isSigned = Wire(Bool())
+  val byteOffset = io.addr(1, 0)
+  val halfOffset = io.addr(1)
 
-  loadWidth := MuxCase(2.U, Seq(
-    (io.funct3 === LB || io.funct3 === LBU) -> 0.U,
-    (io.funct3 === LH || io.funct3 === LHU) -> 1.U,
-    (io.funct3 === LW) -> 2.U
-  ))
+  val bytes = VecInit(
+    io.dataIn(7, 0),
+    io.dataIn(15, 8),
+    io.dataIn(23, 16),
+    io.dataIn(31, 24)
+  )
+  val halfwords = VecInit(
+    io.dataIn(15, 0),
+    io.dataIn(31, 16)
+  )
 
-  isSigned := (io.funct3 === LB || io.funct3 === LH || io.funct3 === LW)
+  val selectedByte = bytes(byteOffset)
+  val selectedHalf = halfwords(halfOffset)
 
-  // Select the proper lane based on address offset (little endian).
-  val byteShift = io.addr(1, 0) << 3
-  val halfShift = io.addr(1) << 4
-  val byteLane = (io.dataIn >> byteShift)(7, 0)
-  val halfLane = (io.dataIn >> halfShift)(15, 0)
+  val loadWord = io.dataIn
+  val loadHalfSigned = Cat(Fill(16, selectedHalf(15)), selectedHalf)
+  val loadHalfUnsigned = Cat(0.U(16.W), selectedHalf)
+  val loadByteSigned = Cat(Fill(24, selectedByte(7)), selectedByte)
+  val loadByteUnsigned = Cat(0.U(24.W), selectedByte)
 
-  val signedData = MuxCase(io.dataIn, Seq(
-    (loadWidth === 0.U)  -> byteLane.asSInt.pad(32).asUInt,
-    (loadWidth === 1.U)  -> halfLane.asSInt.pad(32).asUInt
-  ))
+  val loadResult = WireDefault(loadWord)
+  switch(io.funct3) {
+    is(LB)  { loadResult := loadByteSigned }
+    is(LH)  { loadResult := loadHalfSigned }
+    is(LW)  { loadResult := loadWord }
+    is(LBU) { loadResult := loadByteUnsigned }
+    is(LHU) { loadResult := loadHalfUnsigned }
+  }
 
-  val unsignedData = MuxCase(io.dataIn, Seq(
-    (loadWidth === 0.U)  -> byteLane.zext.pad(32).asUInt,
-    (loadWidth === 1.U)  -> halfLane.zext.pad(32).asUInt
-  ))
-
-  io.dataOut := Mux(isSigned, signedData, unsignedData)
+  io.dataOut := loadResult
 }
