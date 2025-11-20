@@ -197,6 +197,33 @@ check_magic() {
     fi
 }
 
+get_magic_path() {
+    local bundled_magic="$INSTALL_DIR/magic-install/bin/magic"
+    local candidates=()
+    
+    # Prefer the locally built Magic from the PDK install (avoid system Magic if flaky).
+    if [ -x "$bundled_magic" ]; then
+        candidates+=("$bundled_magic")
+    fi
+
+    # Fall back to system Magic if local copy is missing.
+    if command_exists magic; then
+        candidates+=("$(command -v magic)")
+    fi
+
+    for magic_bin in "${candidates[@]}"; do
+        if "$magic_bin" --version >/dev/null 2>&1; then
+            echo "$magic_bin"
+            return 0
+        else
+            print_warning "Magic binary at $magic_bin failed version check, skipping"
+        fi
+    done
+    
+    echo ""
+    return 1
+}
+
 # Function to check if Open PDK is installed
 check_open_pdk() {
     local open_pdk_dir="$INSTALL_DIR/open_pdks"
@@ -554,12 +581,22 @@ install_open_pdk() {
     }
     
     print_step "Configuring Open PDK for SkyWater 130nm"
-    # Make sure Magic is in PATH for Open PDK configuration
-    export PATH="$INSTALL_DIR/magic-install/bin:$PATH"
+    # Determine the Magic binary to use for Open PDK configuration
+    local magic_binary
+    magic_binary="$(get_magic_path)"
+    
+    if [ -z "$magic_binary" ]; then
+        print_error "Magic executable not found - required for Open PDK build"
+        print_step "Install Magic using this script or ensure 'magic' is available in PATH"
+        return 1
+    fi
+    
+    print_step "Using Magic executable at: $magic_binary"
+    export PATH="$(dirname "$magic_binary"):$PATH"
     
     ./configure --enable-sky130-pdk="$INSTALL_DIR/skywater-pdk" \
                 --enable-alpha-sky130 \
-                --with-magic="$INSTALL_DIR/magic-install/bin/magic" \
+                --with-magic="$magic_binary" \
                 --prefix="$pdk_install_dir"
     
     print_step "Building Open PDK (this may take a while...)"
@@ -641,6 +678,8 @@ install_magic() {
         # Mark as successfully installed only if make install succeeded
         MAGIC_INSTALLED=true
         print_success "Magic VLSI Layout Tool installed"
+        # Prefer the freshly built Magic for subsequent steps in this run
+        export PATH="$magic_install_dir/bin:$PATH"
     else
         print_error "Magic VLSI Layout Tool installation failed"
         return 1
