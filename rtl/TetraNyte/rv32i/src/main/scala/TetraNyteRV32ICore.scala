@@ -9,7 +9,6 @@ import LoadUnit._
 import StoreUnit._
 import RegFiles._
 
-// Pipeline registers for each stage and thread
 class PipelineRegBundle extends Bundle {
   val valid = Bool()
   val pc = UInt(32.W)
@@ -25,6 +24,10 @@ class PipelineRegBundle extends Bundle {
   val isLoad = Bool()
   val isStore = Bool()
   val isBranch = Bool()
+  val isJAL = Bool()
+  val isJALR = Bool()
+  val isLUI = Bool()
+  val isAUIPC = Bool()
   val rs1Data = UInt(32.W)
   val rs2Data = UInt(32.W)
   val aluResult = UInt(32.W)
@@ -32,13 +35,14 @@ class PipelineRegBundle extends Bundle {
 }
 
 class TetraNyteRV32ICoreIO(val numThreads: Int) extends Bundle {
-  val instrMem = Input(Vec(numThreads, UInt(32.W)))
+  val instrMem = Input(UInt(32.W))
   val dataMemResp = Input(UInt(32.W))
   val memAddr = Output(UInt(32.W))
   val memWrite = Output(UInt(32.W))
   val memMask = Output(UInt(4.W))
   val memMisaligned = Output(Bool())
 
+  val fetchThread = Output(UInt(log2Ceil(numThreads).W))
   val if_pc = Output(Vec(numThreads, UInt(32.W)))
   val if_instr = Output(Vec(numThreads, UInt(32.W)))
   val id_rs1Data = Output(Vec(numThreads, UInt(32.W)))
@@ -51,161 +55,301 @@ class TetraNyteRV32ICore extends Module {
   val numThreads = 4
   val io = IO(new TetraNyteRV32ICoreIO(numThreads))
 
-  // Per-thread PC registers
-  val pcRegs = RegInit(VecInit(Seq.fill(numThreads)(0.U(32.W))))
+  // Per-thread PC registers and flush tracking
+  val pcRegs = RegInit(VecInit(Seq.fill(numThreads)("h80000000".U(32.W))))
+  val flushThread = RegInit(VecInit(Seq.fill(numThreads)(false.B)))
 
-  // Pipeline registers per thread
-  val if_id = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new PipelineRegBundle))))
-  val id_ex = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new PipelineRegBundle))))
-  val ex_mem = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new PipelineRegBundle))))
-  val mem_wb = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new PipelineRegBundle))))
+  // Round-robin thread scheduler
+  val threadSel = RegInit(0.U(log2Ceil(numThreads).W))
+  io.fetchThread := threadSel
 
-  // One Register file per thread
-  val regFiles = Seq.fill(numThreads)(Module(new RegFileMT2R1WVec(numThreads = 1)))
+  // Single pipeline registers (carry threadId with each instruction)
+  val if_id = RegInit(0.U.asTypeOf(new PipelineRegBundle))
+  val id_ex = RegInit(0.U.asTypeOf(new PipelineRegBundle))
+  val ex_mem = RegInit(0.U.asTypeOf(new PipelineRegBundle))
+  val mem_wb = RegInit(0.U.asTypeOf(new PipelineRegBundle))
 
-  // Default IO outputs for preventing uninitialized errors
+  // Shared multithreaded register file
+  val regFile = Module(new RegFileMT2R1WVec(numThreads = numThreads))
+
+  // Debug mirrors to expose last-seen per-thread stage values
+  val debugIfInstr = RegInit(VecInit(Seq.fill(numThreads)(0.U(32.W))))
+  val debugIdRs1 = RegInit(VecInit(Seq.fill(numThreads)(0.U(32.W))))
+  val debugIdRs2 = RegInit(VecInit(Seq.fill(numThreads)(0.U(32.W))))
+  val debugExAlu = RegInit(VecInit(Seq.fill(numThreads)(0.U(32.W))))
+  val debugMemLoad = RegInit(VecInit(Seq.fill(numThreads)(0.U(32.W))))
+
+  // Default IO outputs
   io.memAddr := 0.U
   io.memWrite := 0.U
   io.memMask := 0.U
   io.memMisaligned := false.B
 
-  // Wires for forwarding paths
-  val rs1DataVec = Wire(Vec(numThreads, UInt(32.W)))
-  val rs2DataVec = Wire(Vec(numThreads, UInt(32.W)))
-  rs1DataVec := VecInit(Seq.fill(numThreads)(0.U))
-  rs2DataVec := VecInit(Seq.fill(numThreads)(0.U))
+  // Reset state: force deterministic rotation start and PC base
+  when(reset.asBool) {
+    threadSel := 0.U
+    for (t <- 0 until numThreads) {
+      pcRegs(t) := "h80000000".U
+      flushThread(t) := false.B
+    }
+  }
 
   // ===================== Instruction Fetch (IF) =====================
-  for (t <- 0 until numThreads) {
-    if_id(t).pc := pcRegs(t)
-    if_id(t).instr := io.instrMem(t)
-    if_id(t).valid := true.B
-    if_id(t).threadId := t.U
-    if_id(t).rs1 := io.instrMem(t)(19, 15)
-    if_id(t).rs2 := io.instrMem(t)(24, 20)
-    if_id(t).rd := io.instrMem(t)(11, 7)
+  val currentThread = threadSel
+  val flushThisThread = flushThread(currentThread)
+  val currentPC = pcRegs(currentThread)
+
+  if_id.threadId := currentThread
+  if_id.pc := currentPC
+  if_id.instr := io.instrMem
+  if_id.rs1 := io.instrMem(19, 15)
+  if_id.rs2 := io.instrMem(24, 20)
+  if_id.rd := io.instrMem(11, 7)
+  if_id.valid := !flushThisThread
+
+  when(!reset.asBool) {
+    when(flushThisThread) {
+      flushThread(currentThread) := false.B
+    }.otherwise {
+      // Advance PC for this thread so the next time it is scheduled we fetch the next instruction.
+      pcRegs(currentThread) := currentPC + 4.U
+    }
+  }
+
+  when(if_id.valid) {
+    debugIfInstr(currentThread) := if_id.instr
+  }
+
+  // Advance round-robin selector
+  when(reset.asBool) {
+    threadSel := 0.U
+  }.otherwise {
+    threadSel := Mux(threadSel === (numThreads - 1).U, 0.U, threadSel + 1.U)
   }
 
   // ===================== Instruction Decode (ID) with Forwarding =====================
-  for (t <- 0 until numThreads) {
-    val decodeSignals = RV32IDecode.decodeInstr(if_id(t).instr)
+  val decodeSignals = RV32IDecode.decodeInstr(if_id.instr)
+  val rs1 = if_id.rs1
+  val rs2 = if_id.rs2
 
-    id_ex(t).pc := if_id(t).pc
-    id_ex(t).instr := if_id(t).instr
-    id_ex(t).threadId := if_id(t).threadId
-    id_ex(t).rs1 := if_id(t).rs1
-    id_ex(t).rs2 := if_id(t).rs2
-    id_ex(t).rd := if_id(t).rd
-    id_ex(t).imm := decodeSignals.imm
-    id_ex(t).aluOp := decodeSignals.aluOp
-    id_ex(t).isALU := decodeSignals.isALU
-    id_ex(t).isLoad := decodeSignals.isLoad
-    id_ex(t).isStore := decodeSignals.isStore
-    id_ex(t).isBranch := decodeSignals.isBranch
+  id_ex.pc := if_id.pc
+  id_ex.instr := if_id.instr
+  id_ex.threadId := if_id.threadId
+  id_ex.valid := if_id.valid && !flushThread(if_id.threadId)
+  id_ex.rs1 := rs1
+  id_ex.rs2 := rs2
+  id_ex.rd := if_id.rd
+  id_ex.imm := decodeSignals.imm
+  id_ex.aluOp := decodeSignals.aluOp
+  id_ex.isALU := decodeSignals.isALU
+  id_ex.isLoad := decodeSignals.isLoad
+  id_ex.isStore := decodeSignals.isStore
+  id_ex.isBranch := decodeSignals.isBranch
+  id_ex.isJAL := decodeSignals.isJAL
+  id_ex.isJALR := decodeSignals.isJALR
+  id_ex.isLUI := decodeSignals.isLUI
+  id_ex.isAUIPC := decodeSignals.isAUIPC
 
-    // Read from Registers with forwarding paths
-    val rf = regFiles(t)
-    rf.io.threadID := 0.U // single-thread regfile per instance
-    rf.io.src1 := id_ex(t).rs1
-    rf.io.src2 := id_ex(t).rs2
+  // Register file reads are tagged by threadId
+  regFile.io.readThreadID := if_id.threadId
+  regFile.io.writeThreadID := mem_wb.threadId
+  regFile.io.src1 := rs1
+  regFile.io.src2 := rs2
 
-    val rs1Raw = rf.io.src1data
-    val rs2Raw = rf.io.src2data
+  val rs1Raw = regFile.io.src1data
+  val rs2Raw = regFile.io.src2data
 
-    // Forward ALU results from EX or MEM stage
-    val rs1Fwd = Wire(UInt(32.W))
-    when(ex_mem(t).valid && ex_mem(t).rd =/= 0.U && ex_mem(t).rd === id_ex(t).rs1) {
-      rs1Fwd := ex_mem(t).aluResult
-    }.elsewhen(mem_wb(t).valid && mem_wb(t).rd =/= 0.U && mem_wb(t).rd === id_ex(t).rs1) {
-      rs1Fwd := Mux(mem_wb(t).isLoad, mem_wb(t).memRdata, mem_wb(t).aluResult)
-    }.otherwise {
-      rs1Fwd := rs1Raw
-    }
+  // Simple forwarding when the same thread is in later stages
+  val rs1Fwd = WireDefault(rs1Raw)
+  val rs2Fwd = WireDefault(rs2Raw)
 
-    val rs2Fwd = Wire(UInt(32.W))
-    when(ex_mem(t).valid && ex_mem(t).rd =/= 0.U && ex_mem(t).rd === id_ex(t).rs2) {
-      rs2Fwd := ex_mem(t).aluResult
-    }.elsewhen(mem_wb(t).valid && mem_wb(t).rd =/= 0.U && mem_wb(t).rd === id_ex(t).rs2) {
-      rs2Fwd := Mux(mem_wb(t).isLoad, mem_wb(t).memRdata, mem_wb(t).aluResult)
-    }.otherwise {
-      rs2Fwd := rs2Raw
-    }
+  when(ex_mem.valid && ex_mem.threadId === if_id.threadId && ex_mem.rd =/= 0.U && ex_mem.rd === rs1) {
+    rs1Fwd := ex_mem.aluResult
+  }.elsewhen(mem_wb.valid && mem_wb.threadId === if_id.threadId && mem_wb.rd =/= 0.U && mem_wb.rd === rs1) {
+    rs1Fwd := Mux(mem_wb.isLoad, mem_wb.memRdata, mem_wb.aluResult)
+  }
 
-    rs1DataVec(t) := rs1Fwd
-    rs2DataVec(t) := rs2Fwd
+  when(ex_mem.valid && ex_mem.threadId === if_id.threadId && ex_mem.rd =/= 0.U && ex_mem.rd === rs2) {
+    rs2Fwd := ex_mem.aluResult
+  }.elsewhen(mem_wb.valid && mem_wb.threadId === if_id.threadId && mem_wb.rd =/= 0.U && mem_wb.rd === rs2) {
+    rs2Fwd := Mux(mem_wb.isLoad, mem_wb.memRdata, mem_wb.aluResult)
+  }
 
-    id_ex(t).rs1Data := rs1Fwd
-    id_ex(t).rs2Data := rs2Fwd
+  id_ex.rs1Data := rs1Fwd
+  id_ex.rs2Data := rs2Fwd
+
+  when(id_ex.valid) {
+    debugIdRs1(id_ex.threadId) := rs1Fwd
+    debugIdRs2(id_ex.threadId) := rs2Fwd
   }
 
   // ===================== Execute (EX) Stage =====================
-  for (t <- 0 until numThreads) {
-    val alu = Module(new ALU32)
-    alu.io.a := id_ex(t).rs1Data
-    alu.io.b := id_ex(t).rs2Data
-    alu.io.opcode := id_ex(t).aluOp
-    ex_mem(t).aluResult := alu.io.result
-    ex_mem(t).rd := id_ex(t).rd
-    ex_mem(t).isALU := id_ex(t).isALU
-    ex_mem(t).isLoad := id_ex(t).isLoad
-    ex_mem(t).isStore := id_ex(t).isStore
-    ex_mem(t).valid := id_ex(t).valid
-    ex_mem(t).rs2Data := id_ex(t).rs2Data
+  val alu = Module(new ALU32)
+  val instr = id_ex.instr
+  val opcode = instr(6, 0)
+  val operandA = WireDefault(id_ex.rs1Data)
+  val operandB = WireDefault(id_ex.rs2Data)
+
+  when(opcode === RV32IDecode.OP_I || opcode === RV32IDecode.LOAD || opcode === RV32IDecode.STORE || opcode === RV32IDecode.JALR) {
+    operandB := id_ex.imm
+  }
+  when(opcode === RV32IDecode.LOAD || opcode === RV32IDecode.STORE || opcode === RV32IDecode.JALR) {
+    operandA := id_ex.rs1Data
+  }
+  when(opcode === RV32IDecode.LUI) {
+    operandA := 0.U
+    operandB := id_ex.imm
+  }
+  when(opcode === RV32IDecode.AUIPC) {
+    operandA := id_ex.pc
+    operandB := id_ex.imm
+  }
+
+  alu.io.a := operandA
+  alu.io.b := operandB
+  alu.io.opcode := id_ex.aluOp
+
+  ex_mem.aluResult := alu.io.result
+  ex_mem.instr := id_ex.instr
+  ex_mem.threadId := id_ex.threadId
+  ex_mem.rd := id_ex.rd
+  ex_mem.isALU := id_ex.isALU
+  ex_mem.isLoad := id_ex.isLoad
+  ex_mem.isStore := id_ex.isStore
+  ex_mem.isBranch := id_ex.isBranch
+  ex_mem.isJAL := id_ex.isJAL
+  ex_mem.isJALR := id_ex.isJALR
+  ex_mem.isLUI := id_ex.isLUI
+  ex_mem.isAUIPC := id_ex.isAUIPC
+  ex_mem.valid := id_ex.valid
+  ex_mem.rs1Data := id_ex.rs1Data
+  ex_mem.rs2Data := id_ex.rs2Data
+  ex_mem.pc := id_ex.pc
+  ex_mem.imm := id_ex.imm
+
+  when(ex_mem.valid) {
+    debugExAlu(ex_mem.threadId) := ex_mem.aluResult
   }
 
   // ===================== Memory (MEM) Stage =====================
-  for (t <- 0 until numThreads) {
-    val loadUnit = Module(new LoadUnit)
-    loadUnit.io.addr := ex_mem(t).aluResult
-    loadUnit.io.dataIn := io.dataMemResp
-    loadUnit.io.funct3 := ex_mem(t).instr(14, 12)
-    val loadData = loadUnit.io.dataOut
+  val loadUnit = Module(new LoadUnit)
+  loadUnit.io.addr := ex_mem.aluResult
+  loadUnit.io.dataIn := io.dataMemResp
+  loadUnit.io.funct3 := ex_mem.instr(14, 12)
+  val loadData = loadUnit.io.dataOut
 
-    val storeUnit = Module(new StoreUnit)
-    storeUnit.io.addr := ex_mem(t).aluResult
-    storeUnit.io.data := ex_mem(t).rs2Data
-    storeUnit.io.storeType := ex_mem(t).instr(13, 12)
+  val storeUnit = Module(new StoreUnit)
+  storeUnit.io.addr := ex_mem.aluResult
+  storeUnit.io.data := ex_mem.rs2Data
+  storeUnit.io.storeType := ex_mem.instr(14, 12)
 
-    // Drive shared memory signals from thread 0 for illustration:
-    if (t == 0) {
-      io.memAddr := ex_mem(t).aluResult
-      io.memWrite := storeUnit.io.memWrite
-      io.memMask := storeUnit.io.mask
-      io.memMisaligned := storeUnit.io.misaligned
-    }
+  // Shared memory interface driven by the single current MEM stage
+  val addrBase = Cat(ex_mem.aluResult(31, 2), 0.U(2.W))
+  io.memAddr := addrBase
+  io.memWrite := Mux(ex_mem.valid && ex_mem.isStore && !storeUnit.io.misaligned, storeUnit.io.memWrite, 0.U)
+  io.memMask := Mux(ex_mem.valid && ex_mem.isStore && !storeUnit.io.misaligned, storeUnit.io.mask, 0.U)
+  io.memMisaligned := ex_mem.valid && storeUnit.io.misaligned
 
-    mem_wb(t).aluResult := ex_mem(t).aluResult
-    mem_wb(t).memRdata := loadData
-    mem_wb(t).rd := ex_mem(t).rd
-    mem_wb(t).isALU := ex_mem(t).isALU
-    mem_wb(t).isLoad := ex_mem(t).isLoad
-    mem_wb(t).valid := ex_mem(t).valid
+  mem_wb.aluResult := ex_mem.aluResult
+  mem_wb.memRdata := loadData
+  mem_wb.instr := ex_mem.instr
+  mem_wb.threadId := ex_mem.threadId
+  mem_wb.rd := ex_mem.rd
+  mem_wb.isALU := ex_mem.isALU
+  mem_wb.isLoad := ex_mem.isLoad
+  mem_wb.isStore := ex_mem.isStore
+  mem_wb.isBranch := ex_mem.isBranch
+  mem_wb.isJAL := ex_mem.isJAL
+  mem_wb.isJALR := ex_mem.isJALR
+  mem_wb.isLUI := ex_mem.isLUI
+  mem_wb.isAUIPC := ex_mem.isAUIPC
+  mem_wb.valid := ex_mem.valid
+  mem_wb.pc := ex_mem.pc
+  mem_wb.imm := ex_mem.imm
+  mem_wb.rs1Data := ex_mem.rs1Data
+  mem_wb.rs2Data := ex_mem.rs2Data
+
+  when(mem_wb.valid) {
+    debugMemLoad(mem_wb.threadId) := mem_wb.memRdata
   }
 
   // ===================== Writeback (WB) Stage =====================
-  for (t <- 0 until numThreads) {
-    when(mem_wb(t).valid && mem_wb(t).rd =/= 0.U) {
-      regFiles(t).io.wen := true.B
-      regFiles(t).io.dst1 := mem_wb(t).rd
-      regFiles(t).io.dst1data := Mux(mem_wb(t).isLoad, mem_wb(t).memRdata, mem_wb(t).aluResult)
+  val pcPlus4 = mem_wb.pc + 4.U
+  val auipcValue = mem_wb.pc + mem_wb.imm
+  val wbData = Wire(UInt(32.W))
+  wbData := mem_wb.aluResult
+  when(mem_wb.isLoad) {
+    wbData := mem_wb.memRdata
+  }.elsewhen(mem_wb.isLUI) {
+    wbData := mem_wb.imm
+  }.elsewhen(mem_wb.isAUIPC) {
+    wbData := auipcValue
+  }.elsewhen(mem_wb.isJAL || mem_wb.isJALR) {
+    wbData := pcPlus4
+  }
+
+  val writeEnable = mem_wb.valid && mem_wb.rd =/= 0.U &&
+    (mem_wb.isALU || mem_wb.isLoad || mem_wb.isLUI ||
+      mem_wb.isAUIPC || mem_wb.isJAL || mem_wb.isJALR)
+
+  regFile.io.wen := writeEnable
+  regFile.io.dst1 := Mux(writeEnable, mem_wb.rd, 0.U)
+  regFile.io.dst1data := wbData
+
+  // Writes and reads are tagged with the WB thread ID
+  val wbThread = mem_wb.threadId
+
+  // ===================== PC Update & Control =====================
+  val branchOffset = (mem_wb.imm.asSInt << 1).asUInt
+  val branchTarget = (mem_wb.pc.asSInt + branchOffset.asSInt).asUInt
+  val jalTarget = (mem_wb.pc.asSInt + mem_wb.imm.asSInt).asUInt
+  val jalrTarget = ((mem_wb.rs1Data.asSInt + mem_wb.imm.asSInt).asUInt & ~1.U(32.W))
+
+  val rs1Val = mem_wb.rs1Data
+  val rs2Val = mem_wb.rs2Data
+  val funct3 = mem_wb.instr(14, 12)
+
+  val branchEq = rs1Val === rs2Val
+  val branchLT = rs1Val.asSInt < rs2Val.asSInt
+  val branchLTU = rs1Val < rs2Val
+
+  val branchCond = WireDefault(false.B)
+  switch(funct3) {
+    is("b000".U) { branchCond := branchEq }
+    is("b001".U) { branchCond := !branchEq }
+    is("b100".U) { branchCond := branchLT }
+    is("b101".U) { branchCond := !branchLT }
+    is("b110".U) { branchCond := branchLTU }
+    is("b111".U) { branchCond := !branchLTU }
+  }
+
+  val branchTaken = mem_wb.valid && mem_wb.isBranch && branchCond
+  val jalTaken = mem_wb.valid && mem_wb.isJAL
+  val jalrTaken = mem_wb.valid && mem_wb.isJALR
+
+  val nextPC = WireDefault(mem_wb.pc + 4.U)
+  when(mem_wb.valid) {
+    when(branchTaken) {
+      nextPC := branchTarget
+    }.elsewhen(jalTaken) {
+      nextPC := jalTarget
+    }.elsewhen(jalrTaken) {
+      nextPC := jalrTarget
     }.otherwise {
-      regFiles(t).io.wen := false.B
-      regFiles(t).io.dst1 := 0.U
-      regFiles(t).io.dst1data := 0.U
+      nextPC := pcPlus4
     }
   }
 
-  // ===================== PC Update =====================
-  for (t <- 0 until numThreads) {
-    pcRegs(t) := pcRegs(t) + 4.U
+  when(mem_wb.valid) {
+    pcRegs(wbThread) := nextPC
+    flushThread(wbThread) := branchTaken || jalTaken || jalrTaken
   }
 
   // ===================== Expose Pipeline State =====================
-  io.if_pc := VecInit(if_id.map(_.pc))
-  io.if_instr := VecInit(if_id.map(_.instr))
-  io.id_rs1Data := rs1DataVec
-  io.id_rs2Data := rs2DataVec
-  io.ex_aluResult := VecInit(ex_mem.map(_.aluResult))
-  io.mem_loadData := VecInit(mem_wb.map(_.memRdata))
-
+  io.if_pc := pcRegs
+  io.if_instr := debugIfInstr
+  io.id_rs1Data := debugIdRs1
+  io.id_rs2Data := debugIdRs2
+  io.ex_aluResult := debugExAlu
+  io.mem_loadData := debugMemLoad
 }

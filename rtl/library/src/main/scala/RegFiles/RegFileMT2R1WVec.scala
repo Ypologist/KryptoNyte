@@ -37,14 +37,15 @@ class RegFileMT2R1WVec(width: Int = 32, depth: Int = 32, numThreads: Int = 4) ex
   val effectiveAddrWidth = log2Ceil(effectiveDepth)
 
   val io = IO(new Bundle {
-    val threadID  = Input(UInt(threadWidth.W))   // Thread identifier
-    val src1      = Input(UInt(addrWidth.W))     // Read port 1 address (per-thread)
-    val src2      = Input(UInt(addrWidth.W))     // Read port 2 address (per-thread)
-    val dst1      = Input(UInt(addrWidth.W))     // Write port address (per-thread)
-    val wen       = Input(Bool())                // Write enable
-    val dst1data  = Input(UInt(width.W))         // Data to write
-    val src1data  = Output(UInt(width.W))        // Read port 1 data
-    val src2data  = Output(UInt(width.W))        // Read port 2 data
+    val readThreadID  = Input(UInt(threadWidth.W))   // Thread identifier for reads
+    val writeThreadID = Input(UInt(threadWidth.W))   // Thread identifier for writes
+    val src1          = Input(UInt(addrWidth.W))     // Read port 1 address (per-thread)
+    val src2          = Input(UInt(addrWidth.W))     // Read port 2 address (per-thread)
+    val dst1          = Input(UInt(addrWidth.W))     // Write port address (per-thread)
+    val wen           = Input(Bool())                // Write enable
+    val dst1data      = Input(UInt(width.W))         // Data to write
+    val src1data      = Output(UInt(width.W))        // Read port 1 data
+    val src2data      = Output(UInt(width.W))        // Read port 2 data
   })
 
   // Create the register file as a vector of registers.
@@ -52,9 +53,9 @@ class RegFileMT2R1WVec(width: Int = 32, depth: Int = 32, numThreads: Int = 4) ex
   val regs = RegInit(VecInit(Seq.fill(effectiveDepth)(0.U(width.W))))
 
   // Compute effective addresses by concatenating the thread ID (MSBs) with the register index.
-  val effectiveSrc1 = Cat(io.threadID, io.src1)  // Result is UInt(effectiveAddrWidth.W)
-  val effectiveSrc2 = Cat(io.threadID, io.src2)
-  val effectiveDst1 = Cat(io.threadID, io.dst1)
+  val effectiveSrc1 = Cat(io.readThreadID, io.src1)  // Result is UInt(effectiveAddrWidth.W)
+  val effectiveSrc2 = Cat(io.readThreadID, io.src2)
+  val effectiveDst1 = Cat(io.writeThreadID, io.dst1)
 
   // Write logic: write to the register file if write enable is high.
   when(io.wen) {
