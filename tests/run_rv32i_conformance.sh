@@ -12,12 +12,17 @@ ENV_ROOT="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env"
 print_usage() {
   cat <<EOF
 Usage: $(basename "$0") [--processor <zeronyte|tetranyte>]
+[--smoke-test] [--timeout <seconds>]
 
 Runs RISCOF RV32I conformance for the requested processor. Defaults to ZeroNyte.
+Use --smoke-test to run a minimal ADD-only test for quicker turnaround.
+Use --timeout to override the per-invocation timeout (default: 3600s).
 EOF
 }
 
 PROCESSOR="zeronyte"
+SMOKE_TEST=false
+TIMEOUT_SECS=3600
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --processor|-p)
@@ -31,6 +36,18 @@ while [[ $# -gt 0 ]]; do
     --help|-h)
       print_usage
       exit 0
+      ;;
+    --smoke-test)
+      SMOKE_TEST=true
+      shift
+      ;;
+    --timeout)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --timeout requires a value in seconds" >&2
+        exit 1
+      fi
+      TIMEOUT_SECS="$2"
+      shift 2
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -47,6 +64,8 @@ case "$PROCESSOR" in
     SIM_BINARY="zeronyte_sim"
     ISA_FILE="zeronyte/zeronyte_isa.yaml"
     PLATFORM_FILE="zeronyte/zeronyte_platform.yaml"
+    RTL_TOP="$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v"
+    RTL_GEN_TASK="generators/generateZeroNyteRTL"
     ;;
   tetranyte)
     DUT_NAME="tetranyte"
@@ -54,12 +73,22 @@ case "$PROCESSOR" in
     SIM_BINARY="tetranyte_sim"
     ISA_FILE="tetranyte/tetranyte_isa.yaml"
     PLATFORM_FILE="tetranyte/tetranyte_platform.yaml"
+    RTL_TOP="$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/TetraNyteRV32ICore.v"
+    RTL_GEN_TASK="generators/generateTetraNyteRTL"
     ;;
   *)
     echo "Unsupported processor: $PROCESSOR" >&2
     exit 1
     ;;
 esac
+
+# Prefer local virtualenv bins early so riscof check succeeds
+VENV_BIN="$REPO_ROOT/.venv/bin"
+if [[ -d "$VENV_BIN" ]]; then
+  export PATH="$VENV_BIN:$PATH"
+else
+  echo "Warning: expected virtual environment bin directory at $VENV_BIN" >&2
+fi
 
 if [[ ! -d "$RISCV_ARCH_TEST_ROOT" ]]; then
   echo "RISCV_ARCH_TEST_ROOT not found at $RISCV_ARCH_TEST_ROOT" >&2
@@ -76,12 +105,77 @@ if [[ ! -x "$SIM_BUILD_SCRIPT" ]]; then
   exit 1
 fi
 
+# Ensure timed hierarchical RTL exists; generate via sbt if missing
+if [[ ! -f "$RTL_TOP" ]]; then
+  echo "Timed RTL not found at $RTL_TOP. Attempting to generate via sbt $RTL_GEN_TASK ..."
+  pushd "$REPO_ROOT/rtl" >/dev/null
+  sbt "$RTL_GEN_TASK"
+  popd >/dev/null
+  if [[ ! -f "$RTL_TOP" ]]; then
+    echo "Failed to generate RTL for $PROCESSOR at $RTL_TOP" >&2
+    exit 1
+  fi
+fi
+
 "$SIM_BUILD_SCRIPT"
 
 PLUGIN_DIR="$SCRIPT_DIR/riscof/$DUT_NAME"
 if [[ ! -d "$PLUGIN_DIR" ]]; then
   echo "RISCOF plugin directory not found for $PROCESSOR: $PLUGIN_DIR" >&2
   exit 1
+fi
+
+OUTPUT_DIR="$SCRIPT_DIR/output/rv32i/$PROCESSOR"
+mkdir -p "$OUTPUT_DIR"
+
+SUITE_PATH="$SUITE_ROOT"
+if $SMOKE_TEST; then
+  SMOKE_DIR="$SCRIPT_DIR/smoke_suite"
+  mkdir -p "$SMOKE_DIR"
+  rm -rf "$SMOKE_DIR/src"
+  mkdir -p "$SMOKE_DIR/src"
+  # Minimal representative set (short runtime): ADD (R), ADDI (I), LW (load)
+  COPIED=()
+  add_candidates=(add-01.S ADD-01.S I-ADD-01.S)
+  addi_candidates=(addi-01.S ADDI-01.S I-ADDI-01.S)
+  lw_candidates=(lw-01.S LW-01.S I-LW-01.S lw-align-01.S LW-ALIGN-01.S)
+  beq_candidates=(beq-01.S BEQ-01.S I-BEQ-01.S)
+  sw_candidates=(sw-01.S SW-01.S I-SW-01.S sw-align-01.S SW-ALIGN-01.S)
+  jal_candidates=(jal-01.S JAL-01.S)
+  jalr_candidates=(jalr-01.S JALR-01.S)
+  auipc_candidates=(auipc-01.S AUIPC-01.S)
+
+  pick_and_copy() {
+    local -n cand=$1
+    local found=""
+    for fname in "${cand[@]}"; do
+      if [[ -f "$SUITE_ROOT/src/$fname" ]]; then
+        cp "$SUITE_ROOT/src/$fname" "$SMOKE_DIR/src/"
+        found="$fname"
+        break
+      fi
+    done
+    if [[ -n "$found" ]]; then
+      COPIED+=("$found")
+    else
+      echo "Warning: smoke test (${cand[*]}) not found under $SUITE_ROOT/src" >&2
+    fi
+  }
+
+  pick_and_copy add_candidates
+  pick_and_copy addi_candidates
+  pick_and_copy lw_candidates
+  pick_and_copy beq_candidates
+  pick_and_copy sw_candidates
+  pick_and_copy jal_candidates
+  pick_and_copy jalr_candidates
+  pick_and_copy auipc_candidates
+  if [[ ${#COPIED[@]} -eq 0 ]]; then
+    echo "Smoke tests not found; nothing copied to $SMOKE_DIR/src" >&2
+    exit 1
+  fi
+  SUITE_PATH="$SMOKE_DIR"
+  echo "Smoke test enabled: running ${#COPIED[@]} tests: ${COPIED[*]}"
 fi
 
 CONFIG_GENERATED="$SCRIPT_DIR/riscof/.config.rv32i.${PROCESSOR}.ini"
@@ -108,14 +202,6 @@ PATH=/opt/riscv/bin
 jobs=1
 EOF
 
-OUTPUT_DIR="$SCRIPT_DIR/output/rv32i/$PROCESSOR"
-mkdir -p "$OUTPUT_DIR"
-
-VENV_BIN="$REPO_ROOT/.venv/bin"
-if [[ ! -d "$VENV_BIN" ]]; then
-  echo "Warning: expected virtual environment bin directory at $VENV_BIN" >&2
-fi
-
 TOOLCHAIN_DIR="$SCRIPT_DIR/toolchain"
 mkdir -p "$TOOLCHAIN_DIR"
 create_wrapper() {
@@ -136,11 +222,64 @@ export PYTHONPATH="$VENV_BIN:${PYTHONPATH:-}"
 export PYTHONPATH="$SCRIPT_DIR/riscof:$PLUGIN_ROOT:$PYTHONPATH"
 
 pushd "$SCRIPT_DIR/riscof" >/dev/null
-riscof run \
+RISCOF_TIMEOUT=${TIMEOUT_SECS} \
+TIMEOUT=${TIMEOUT_SECS} \
+  riscof run \
   --config "$CONFIG_GENERATED" \
   --work-dir "$OUTPUT_DIR" \
-  --suite "$SUITE_ROOT" \
+  --suite "$SUITE_PATH" \
   --env "$ENV_ROOT"
 popd >/dev/null
 
 echo "RISCV RV32I conformance results for $PROCESSOR available under $OUTPUT_DIR"
+if $SMOKE_TEST; then
+  echo "[INFO] Smoke artifacts under $OUTPUT_DIR (signatures/logs):"
+  find "$OUTPUT_DIR" -type f \( -name "*.signature" -o -name "*.log" -o -name "*.elf" \) | sed 's|^|  |'
+  echo "[INFO] Smoke tests executed:"
+  find "$OUTPUT_DIR/src" -maxdepth 3 -mindepth 3 -type d | sed 's|^|  |'
+fi
+
+if $SMOKE_TEST && [[ "$PROCESSOR" == "tetranyte" ]]; then
+  for test_name in "${COPIED[@]}"; do
+    ELF_PATH=$(find "$OUTPUT_DIR/src" -path "*${test_name}/dut/*.elf" | head -n1 || true)
+    REF_SIG=$(find "$OUTPUT_DIR/src" -path "*${test_name}/ref/Reference-spike.signature" | head -n1 || true)
+    if [[ -z "$ELF_PATH" || ! -f "$ELF_PATH" ]]; then
+      echo "Could not locate ELF for $test_name under $OUTPUT_DIR/src" >&2
+      continue
+    fi
+    echo "Running per-thread smoke comparisons using $ELF_PATH"
+    declare -a THREAD_SIGS=()
+    for tid in 0 1 2 3; do
+      SIG_PATH="$OUTPUT_DIR/src/${test_name}/dut/DUT-tetranyte-rv32i.thread${tid}.signature"
+      LOG_PATH="$OUTPUT_DIR/src/${test_name}/dut/DUT-tetranyte-rv32i.thread${tid}.log"
+      THREAD_MASK=$((1 << tid))
+      "$SCRIPT_DIR/sim/build/tetranyte_obj/VTetraNyteRV32ICore" \
+        --elf "$ELF_PATH" \
+        --signature "$SIG_PATH" \
+        --log "$LOG_PATH" \
+        --max-cycles 2000000 \
+        --thread-mask "$THREAD_MASK" \
+        --trace-pc || { echo "Thread $tid simulation failed for $test_name" >&2; exit 1; }
+      echo "[INFO] Thread $tid simulation done for $test_name. Signature: $SIG_PATH"
+      THREAD_SIGS+=("$SIG_PATH")
+    done
+    BASE_SIG="${THREAD_SIGS[0]}"
+    for sig in "${THREAD_SIGS[@]:1}"; do
+      if ! cmp -s "$BASE_SIG" "$sig"; then
+        echo "Thread signature mismatch for $test_name: $BASE_SIG vs $sig" >&2
+        exit 1
+      fi
+    done
+    echo "[INFO] All thread signatures match each other for $test_name."
+    if [[ -n "$REF_SIG" && -f "$REF_SIG" ]]; then
+      if cmp -s "$BASE_SIG" "$REF_SIG"; then
+        echo "[INFO] Thread signatures match spike reference for $test_name."
+      else
+        echo "Thread signatures do not match spike reference for $test_name: $REF_SIG" >&2
+        exit 1
+      fi
+    else
+      echo "Reference spike signature not found for $test_name; skipped reference compare."
+    fi
+  done
+fi

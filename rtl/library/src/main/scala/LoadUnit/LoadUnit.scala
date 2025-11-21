@@ -32,12 +32,21 @@ class LoadUnit extends Module {
 
   isSigned := (io.funct3 === LB || io.funct3 === LH || io.funct3 === LW)
 
-  val extractedData = Wire(UInt(32.W))
-  extractedData := MuxCase(io.dataIn, Seq(
-    (loadWidth === 0.U)  -> io.dataIn(7, 0).asUInt,
-    (loadWidth === 1.U)  -> io.dataIn(15, 0).asUInt,
-    (loadWidth === 2.U)  -> io.dataIn(31, 0).asUInt
+  // Select the proper lane based on address offset (little endian).
+  val byteShift = io.addr(1, 0) << 3
+  val halfShift = io.addr(1) << 4
+  val byteLane = (io.dataIn >> byteShift)(7, 0)
+  val halfLane = (io.dataIn >> halfShift)(15, 0)
+
+  val signedData = MuxCase(io.dataIn, Seq(
+    (loadWidth === 0.U)  -> byteLane.asSInt.pad(32).asUInt,
+    (loadWidth === 1.U)  -> halfLane.asSInt.pad(32).asUInt
   ))
 
-  io.dataOut := Mux(isSigned, extractedData.asSInt.pad(32).asUInt, extractedData.zext.pad(32).asUInt)
+  val unsignedData = MuxCase(io.dataIn, Seq(
+    (loadWidth === 0.U)  -> byteLane.zext.pad(32).asUInt,
+    (loadWidth === 1.U)  -> halfLane.zext.pad(32).asUInt
+  ))
+
+  io.dataOut := Mux(isSigned, signedData, unsignedData)
 }

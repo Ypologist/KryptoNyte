@@ -28,8 +28,9 @@ class RegFileMT2R1WVecTest extends AnyFlatSpec {
         regIdx: BigInt,
         writeData: BigInt
       ): Unit = {
-        // Set the current thread for the write
-        dut.io.threadID.poke(thread.U)
+        // Set the current thread for the write and reads
+        dut.io.writeThreadID.poke(thread.U)
+        dut.io.readThreadID.poke(thread.U)
         // Set the destination register index and data, and enable the write.
         dut.io.dst1.poke(regIdx.U)
         dut.io.dst1data.poke(writeData.U)
@@ -64,7 +65,8 @@ class RegFileMT2R1WVecTest extends AnyFlatSpec {
       writeAndRead(3, 7, 101112)
       
       // Additionally, verify that registers that were not written in a given thread are still 0.
-      dut.io.threadID.poke(0.U)
+      dut.io.readThreadID.poke(0.U)
+      dut.io.writeThreadID.poke(0.U)
       dut.io.src1.poke(8.U)
       dut.io.src2.poke(8.U)
       val zeroVal1 = dut.io.src1data.peek().litValue

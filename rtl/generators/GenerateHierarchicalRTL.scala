@@ -301,8 +301,10 @@ Environment Variables:
   def getTetraNyteModules(variant: String): Seq[ModuleSpec] = {
     variant match {
       case "rv32i" =>
-        getRV32ILibraryModules("TetraNyte") :+
-          ModuleSpec(() => new TetraNyteRV32ICore, "TetraNyteRV32ICore", "Four-thread RV32I pipeline core", "TetraNyte", "rv32i")
+        // Generate all building blocks plus the threaded core itself
+        val libraryBlocks = getRV32ILibraryModules("TetraNyte")
+        libraryBlocks :+
+          ModuleSpec(() => new TetraNyteRV32ICore, "TetraNyteRV32ICore", "Four-thread barrel-threaded RV32I core", "TetraNyte", "rv32i")
       case _ => Seq.empty
     }
   }
@@ -373,7 +375,22 @@ Environment Variables:
       return
     }
     
-    val firFile = new File(s"${config.fullFirrtlPath}/${moduleSpec.name}.fir")
+    // Prefer the moduleSpec-provided name, but fall back to the most recently generated FIR
+    val preferredFir = new File(s"${config.fullFirrtlPath}/${moduleSpec.name}.fir")
+    val firFile = if (preferredFir.exists()) {
+      preferredFir
+    } else {
+      val firs = Option(new File(config.fullFirrtlPath).listFiles())
+        .getOrElse(Array.empty)
+        .filter(f => f.getName.endsWith(".fir"))
+        .sortBy(_.lastModified())
+        .reverse
+      firs.headOption.getOrElse(preferredFir)
+    }
+    if (!firFile.exists()) {
+      throw new RuntimeException(s"FIRRTL file not found for ${moduleSpec.name} in ${config.fullFirrtlPath}")
+    }
+
     val svFile = new File(s"${config.fullSystemVerilogPath}/${moduleSpec.name}.sv")
     val annotationFile = new File(s"${config.fullAnnotationsPath}/${moduleSpec.name}_annotations.txt")
     
