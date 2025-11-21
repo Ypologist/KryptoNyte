@@ -142,6 +142,8 @@ if $SMOKE_TEST; then
   beq_candidates=(beq-01.S BEQ-01.S I-BEQ-01.S)
   sw_candidates=(sw-01.S SW-01.S I-SW-01.S sw-align-01.S SW-ALIGN-01.S)
   jal_candidates=(jal-01.S JAL-01.S)
+  jalr_candidates=(jalr-01.S JALR-01.S)
+  auipc_candidates=(auipc-01.S AUIPC-01.S)
 
   pick_and_copy() {
     local -n cand=$1
@@ -166,6 +168,8 @@ if $SMOKE_TEST; then
   pick_and_copy beq_candidates
   pick_and_copy sw_candidates
   pick_and_copy jal_candidates
+  pick_and_copy jalr_candidates
+  pick_and_copy auipc_candidates
   if [[ ${#COPIED[@]} -eq 0 ]]; then
     echo "Smoke tests not found; nothing copied to $SMOKE_DIR/src" >&2
     exit 1
