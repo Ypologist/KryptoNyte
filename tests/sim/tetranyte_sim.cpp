@@ -16,6 +16,7 @@ struct Options {
   std::string signature;
   std::string log;
   uint64_t max_cycles = 1'000'000;
+  bool trace_pc = false;
 };
 
 Options parseArgs(int argc, char** argv) {
@@ -30,6 +31,8 @@ Options parseArgs(int argc, char** argv) {
       opts.log = argv[++i];
     } else if (arg == "--max-cycles" && i + 1 < argc) {
       opts.max_cycles = std::stoull(argv[++i]);
+    } else if (arg == "--trace-pc") {
+      opts.trace_pc = true;
     } else {
       throw std::invalid_argument("unknown or incomplete argument: " + arg);
     }
@@ -93,19 +96,13 @@ int main(int argc, char** argv) {
     thread_pcs[3] = dut.io_if_pc_3;
   };
 
-  auto setInstr = [&](int idx, uint32_t value) {
-    switch (idx) {
-      case 0: dut.io_instrMem_0 = value; break;
-      case 1: dut.io_instrMem_1 = value; break;
-      case 2: dut.io_instrMem_2 = value; break;
-      case 3: dut.io_instrMem_3 = value; break;
-      default: break;
-    }
-  };
-
   auto driveMemory = [&]() {
-    for (int t = 0; t < kNumThreads; ++t) {
-      setInstr(t, memory.read32(thread_pcs[t]));
+    // Barrel fetch: only thread 0 runs the test program; other threads get NOPs
+    uint32_t ft = dut.io_fetchThread & 0x3;
+    if (ft == 0) {
+      dut.io_instrMem = memory.read32(thread_pcs[0]);
+    } else {
+      dut.io_instrMem = 0x00000013;  // NOP for non-test threads
     }
     dut.io_dataMemResp = memory.read32(dut.io_memAddr);
   };
@@ -156,8 +153,15 @@ int main(int argc, char** argv) {
           << "cycle=0x" << cycle
           << " memAddr=0x" << addr
           << " mask=0x" << mask
-          << " tohost=0x" << symbols.tohost
-          << std::dec << '\n';
+          << " tohost=0x" << symbols.tohost;
+      if (options.trace_pc) {
+        log << " pc0=0x" << thread_pcs[0]
+            << " pc1=0x" << thread_pcs[1]
+            << " pc2=0x" << thread_pcs[2]
+            << " pc3=0x" << thread_pcs[3]
+            << " ft=" << static_cast<unsigned>(dut.io_fetchThread);
+      }
+      log << std::dec << '\n';
     }
 
     if (completed) {

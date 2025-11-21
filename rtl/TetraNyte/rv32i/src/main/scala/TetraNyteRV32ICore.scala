@@ -56,7 +56,9 @@ class TetraNyteRV32ICore extends Module {
   val io = IO(new TetraNyteRV32ICoreIO(numThreads))
 
   // Per-thread PC registers and flush tracking
-  val pcRegs = RegInit(VecInit(Seq.fill(numThreads)("h80000000".U(32.W))))
+  val pcResetVec = VecInit(Seq.fill(numThreads)("h80000000".U(32.W)))
+  val flushResetVec = VecInit(Seq.fill(numThreads)(false.B))
+  val pcRegs = Reg(Vec(numThreads, UInt(32.W)))
   val flushThread = RegInit(VecInit(Seq.fill(numThreads)(false.B)))
 
   // Round-robin thread scheduler
@@ -85,15 +87,6 @@ class TetraNyteRV32ICore extends Module {
   io.memMask := 0.U
   io.memMisaligned := false.B
 
-  // Reset state: force deterministic rotation start and PC base
-  when(reset.asBool) {
-    threadSel := 0.U
-    for (t <- 0 until numThreads) {
-      pcRegs(t) := "h80000000".U
-      flushThread(t) := false.B
-    }
-  }
-
   // ===================== Instruction Fetch (IF) =====================
   val currentThread = threadSel
   val flushThisThread = flushThread(currentThread)
@@ -106,15 +99,6 @@ class TetraNyteRV32ICore extends Module {
   if_id.rs2 := io.instrMem(24, 20)
   if_id.rd := io.instrMem(11, 7)
   if_id.valid := !flushThisThread
-
-  when(!reset.asBool) {
-    when(flushThisThread) {
-      flushThread(currentThread) := false.B
-    }.otherwise {
-      // Advance PC for this thread so the next time it is scheduled we fetch the next instruction.
-      pcRegs(currentThread) := currentPC + 4.U
-    }
-  }
 
   when(if_id.valid) {
     debugIfInstr(currentThread) := if_id.instr
@@ -327,7 +311,7 @@ class TetraNyteRV32ICore extends Module {
   val jalTaken = mem_wb.valid && mem_wb.isJAL
   val jalrTaken = mem_wb.valid && mem_wb.isJALR
 
-  val nextPC = WireDefault(mem_wb.pc + 4.U)
+  val nextPC = WireDefault(pcRegs(wbThread))
   when(mem_wb.valid) {
     when(branchTaken) {
       nextPC := branchTarget
@@ -335,14 +319,35 @@ class TetraNyteRV32ICore extends Module {
       nextPC := jalTarget
     }.elsewhen(jalrTaken) {
       nextPC := jalrTarget
-    }.otherwise {
-      nextPC := pcPlus4
     }
   }
 
-  when(mem_wb.valid) {
+  when(mem_wb.valid && (branchTaken || jalTaken || jalrTaken)) {
     pcRegs(wbThread) := nextPC
-    flushThread(wbThread) := branchTaken || jalTaken || jalrTaken
+    flushThread(wbThread) := true.B
+  }.elsewhen(mem_wb.valid) {
+    flushThread(wbThread) := false.B
+  }
+
+  // Default sequential advance for the currently fetched thread unless a control transfer just wrote it.
+  when(!reset.asBool && !flushThisThread) {
+    when(!(mem_wb.valid && (branchTaken || jalTaken || jalrTaken) && wbThread === currentThread)) {
+      pcRegs(currentThread) := currentPC + 4.U
+    }
+    flushThread(currentThread) := false.B
+  }.elsewhen(!reset.asBool && flushThisThread) {
+    // Clear one-shot flush after it has been observed at fetch when no new branch update happens.
+    when(!(mem_wb.valid && (branchTaken || jalTaken || jalrTaken) && wbThread === currentThread)) {
+      flushThread(currentThread) := false.B
+    }
+  }
+
+  // Commit next-state values
+  when(reset.asBool) {
+    pcRegs := pcResetVec
+  }
+  when(reset.asBool) {
+    flushThread := flushResetVec
   }
 
   // ===================== Expose Pipeline State =====================

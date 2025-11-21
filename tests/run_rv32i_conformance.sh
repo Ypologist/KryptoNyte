@@ -12,12 +12,15 @@ ENV_ROOT="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env"
 print_usage() {
   cat <<EOF
 Usage: $(basename "$0") [--processor <zeronyte|tetranyte>]
+[--smoke-test]
 
 Runs RISCOF RV32I conformance for the requested processor. Defaults to ZeroNyte.
+Use --smoke-test to run a minimal ADD-only test for quicker turnaround.
 EOF
 }
 
 PROCESSOR="zeronyte"
+SMOKE_TEST=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --processor|-p)
@@ -31,6 +34,10 @@ while [[ $# -gt 0 ]]; do
     --help|-h)
       print_usage
       exit 0
+      ;;
+    --smoke-test)
+      SMOKE_TEST=true
+      shift
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -47,6 +54,8 @@ case "$PROCESSOR" in
     SIM_BINARY="zeronyte_sim"
     ISA_FILE="zeronyte/zeronyte_isa.yaml"
     PLATFORM_FILE="zeronyte/zeronyte_platform.yaml"
+    RTL_TOP="$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v"
+    RTL_GEN_TASK="generators/generateZeroNyteRTL"
     ;;
   tetranyte)
     DUT_NAME="tetranyte"
@@ -54,12 +63,22 @@ case "$PROCESSOR" in
     SIM_BINARY="tetranyte_sim"
     ISA_FILE="tetranyte/tetranyte_isa.yaml"
     PLATFORM_FILE="tetranyte/tetranyte_platform.yaml"
+    RTL_TOP="$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/TetraNyteRV32ICore.v"
+    RTL_GEN_TASK="generators/generateTetraNyteRTL"
     ;;
   *)
     echo "Unsupported processor: $PROCESSOR" >&2
     exit 1
     ;;
 esac
+
+# Prefer local virtualenv bins early so riscof check succeeds
+VENV_BIN="$REPO_ROOT/.venv/bin"
+if [[ -d "$VENV_BIN" ]]; then
+  export PATH="$VENV_BIN:$PATH"
+else
+  echo "Warning: expected virtual environment bin directory at $VENV_BIN" >&2
+fi
 
 if [[ ! -d "$RISCV_ARCH_TEST_ROOT" ]]; then
   echo "RISCV_ARCH_TEST_ROOT not found at $RISCV_ARCH_TEST_ROOT" >&2
@@ -76,12 +95,57 @@ if [[ ! -x "$SIM_BUILD_SCRIPT" ]]; then
   exit 1
 fi
 
+# Ensure timed hierarchical RTL exists; generate via sbt if missing
+if [[ ! -f "$RTL_TOP" ]]; then
+  echo "Timed RTL not found at $RTL_TOP. Attempting to generate via sbt $RTL_GEN_TASK ..."
+  pushd "$REPO_ROOT/rtl" >/dev/null
+  sbt "$RTL_GEN_TASK"
+  popd >/dev/null
+  if [[ ! -f "$RTL_TOP" ]]; then
+    echo "Failed to generate RTL for $PROCESSOR at $RTL_TOP" >&2
+    exit 1
+  fi
+fi
+
 "$SIM_BUILD_SCRIPT"
 
 PLUGIN_DIR="$SCRIPT_DIR/riscof/$DUT_NAME"
 if [[ ! -d "$PLUGIN_DIR" ]]; then
   echo "RISCOF plugin directory not found for $PROCESSOR: $PLUGIN_DIR" >&2
   exit 1
+fi
+
+OUTPUT_DIR="$SCRIPT_DIR/output/rv32i/$PROCESSOR"
+mkdir -p "$OUTPUT_DIR"
+
+SUITE_PATH="$SUITE_ROOT"
+if $SMOKE_TEST; then
+  SMOKE_DIR="$SCRIPT_DIR/smoke_suite"
+  mkdir -p "$SMOKE_DIR"
+  if [[ ! -d "$SMOKE_DIR/.git" ]]; then
+    git -C "$SMOKE_DIR" init -q
+  fi
+  if ! git -C "$SMOKE_DIR" rev-parse --verify HEAD >/dev/null 2>&1; then
+    GIT_AUTHOR_NAME=smoke GIT_AUTHOR_EMAIL=smoke@example.com \
+    GIT_COMMITTER_NAME=smoke GIT_COMMITTER_EMAIL=smoke@example.com \
+      git -C "$SMOKE_DIR" commit --allow-empty -m "init" -q
+  fi
+  if ! git -C "$SMOKE_DIR" remote | grep -q "^origin$"; then
+    git -C "$SMOKE_DIR" remote add origin "$SMOKE_DIR" >/dev/null
+  fi
+  rm -rf "$SMOKE_DIR/src"
+  mkdir -p "$SMOKE_DIR/src"
+  SMOKE_TEST_FILE="$SUITE_ROOT/src/add-01.S"
+  if [[ ! -f "$SMOKE_TEST_FILE" ]]; then
+    SMOKE_TEST_FILE="$SUITE_ROOT/src/ADD-01.S"
+  fi
+  if [[ ! -f "$SMOKE_TEST_FILE" ]]; then
+    echo "Smoke test add-01.S not found under $SUITE_ROOT" >&2
+    exit 1
+  fi
+  cp "$SMOKE_TEST_FILE" "$SMOKE_DIR/src/"
+  SUITE_PATH="$SMOKE_DIR"
+  echo "Smoke test enabled: running only $(basename "$SMOKE_TEST_FILE")"
 fi
 
 CONFIG_GENERATED="$SCRIPT_DIR/riscof/.config.rv32i.${PROCESSOR}.ini"
@@ -108,14 +172,6 @@ PATH=/opt/riscv/bin
 jobs=1
 EOF
 
-OUTPUT_DIR="$SCRIPT_DIR/output/rv32i/$PROCESSOR"
-mkdir -p "$OUTPUT_DIR"
-
-VENV_BIN="$REPO_ROOT/.venv/bin"
-if [[ ! -d "$VENV_BIN" ]]; then
-  echo "Warning: expected virtual environment bin directory at $VENV_BIN" >&2
-fi
-
 TOOLCHAIN_DIR="$SCRIPT_DIR/toolchain"
 mkdir -p "$TOOLCHAIN_DIR"
 create_wrapper() {
@@ -136,10 +192,11 @@ export PYTHONPATH="$VENV_BIN:${PYTHONPATH:-}"
 export PYTHONPATH="$SCRIPT_DIR/riscof:$PLUGIN_ROOT:$PYTHONPATH"
 
 pushd "$SCRIPT_DIR/riscof" >/dev/null
-riscof run \
+RISCOF_TIMEOUT=${RISCOF_TIMEOUT:-1800} \
+  riscof run \
   --config "$CONFIG_GENERATED" \
   --work-dir "$OUTPUT_DIR" \
-  --suite "$SUITE_ROOT" \
+  --suite "$SUITE_PATH" \
   --env "$ENV_ROOT"
 popd >/dev/null
 
