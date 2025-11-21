@@ -122,17 +122,6 @@ SUITE_PATH="$SUITE_ROOT"
 if $SMOKE_TEST; then
   SMOKE_DIR="$SCRIPT_DIR/smoke_suite"
   mkdir -p "$SMOKE_DIR"
-  if [[ ! -d "$SMOKE_DIR/.git" ]]; then
-    git -C "$SMOKE_DIR" init -q
-  fi
-  if ! git -C "$SMOKE_DIR" rev-parse --verify HEAD >/dev/null 2>&1; then
-    GIT_AUTHOR_NAME=smoke GIT_AUTHOR_EMAIL=smoke@example.com \
-    GIT_COMMITTER_NAME=smoke GIT_COMMITTER_EMAIL=smoke@example.com \
-      git -C "$SMOKE_DIR" commit --allow-empty -m "init" -q
-  fi
-  if ! git -C "$SMOKE_DIR" remote | grep -q "^origin$"; then
-    git -C "$SMOKE_DIR" remote add origin "$SMOKE_DIR" >/dev/null
-  fi
   rm -rf "$SMOKE_DIR/src"
   mkdir -p "$SMOKE_DIR/src"
   SMOKE_TEST_FILE="$SUITE_ROOT/src/add-01.S"
@@ -201,3 +190,46 @@ RISCOF_TIMEOUT=${RISCOF_TIMEOUT:-1800} \
 popd >/dev/null
 
 echo "RISCV RV32I conformance results for $PROCESSOR available under $OUTPUT_DIR"
+
+if $SMOKE_TEST && [[ "$PROCESSOR" == "tetranyte" ]]; then
+  ELF_PATH=$(find "$OUTPUT_DIR/src" -path "*add-01.S/dut/*.elf" | head -n1 || true)
+  REF_SIG=$(find "$OUTPUT_DIR/src" -path "*add-01.S/ref/Reference-spike.signature" | head -n1 || true)
+  if [[ -z "$ELF_PATH" || ! -f "$ELF_PATH" ]]; then
+    echo "Could not locate smoke test ELF under $OUTPUT_DIR/src" >&2
+    exit 1
+  fi
+  echo "Running per-thread smoke comparisons using $ELF_PATH"
+  declare -a THREAD_SIGS=()
+  for tid in 0 1 2 3; do
+    SIG_PATH="$OUTPUT_DIR/src/add-01.S/dut/DUT-tetranyte-rv32i.thread${tid}.signature"
+    LOG_PATH="$OUTPUT_DIR/src/add-01.S/dut/DUT-tetranyte-rv32i.thread${tid}.log"
+    THREAD_MASK=$((1 << tid))
+    "$SCRIPT_DIR/sim/build/tetranyte_obj/VTetraNyteRV32ICore" \
+      --elf "$ELF_PATH" \
+      --signature "$SIG_PATH" \
+      --log "$LOG_PATH" \
+      --max-cycles 2000000 \
+      --thread-mask "$THREAD_MASK" \
+      --trace-pc || { echo "Thread $tid simulation failed" >&2; exit 1; }
+    echo "[INFO] Thread $tid simulation done. Signature: $SIG_PATH"
+    THREAD_SIGS+=("$SIG_PATH")
+  done
+  BASE_SIG="${THREAD_SIGS[0]}"
+  for sig in "${THREAD_SIGS[@]:1}"; do
+    if ! cmp -s "$BASE_SIG" "$sig"; then
+      echo "Thread signature mismatch: $BASE_SIG vs $sig" >&2
+      exit 1
+    fi
+  done
+  echo "[INFO] All thread signatures match each other."
+  if [[ -n "$REF_SIG" && -f "$REF_SIG" ]]; then
+    if cmp -s "$BASE_SIG" "$REF_SIG"; then
+      echo "[INFO] Thread signatures match spike reference."
+    else
+      echo "Thread signatures do not match spike reference: $REF_SIG" >&2
+      exit 1
+    fi
+  else
+    echo "Reference spike signature not found; skipped reference compare."
+  fi
+fi

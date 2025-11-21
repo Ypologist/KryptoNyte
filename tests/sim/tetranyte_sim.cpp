@@ -17,6 +17,7 @@ struct Options {
   std::string log;
   uint64_t max_cycles = 1'000'000;
   bool trace_pc = false;
+  uint32_t thread_mask = 0x1;  // bit per thread; default only thread 0 enabled
 };
 
 Options parseArgs(int argc, char** argv) {
@@ -31,6 +32,8 @@ Options parseArgs(int argc, char** argv) {
       opts.log = argv[++i];
     } else if (arg == "--max-cycles" && i + 1 < argc) {
       opts.max_cycles = std::stoull(argv[++i]);
+    } else if (arg == "--thread-mask" && i + 1 < argc) {
+      opts.thread_mask = static_cast<uint32_t>(std::stoul(argv[++i], nullptr, 0));
     } else if (arg == "--trace-pc") {
       opts.trace_pc = true;
     } else {
@@ -97,12 +100,12 @@ int main(int argc, char** argv) {
   };
 
   auto driveMemory = [&]() {
-    // Barrel fetch: only thread 0 runs the test program; other threads get NOPs
+    // Barrel fetch: feed each thread from its own PC if enabled; otherwise feed NOP.
     uint32_t ft = dut.io_fetchThread & 0x3;
-    if (ft == 0) {
-      dut.io_instrMem = memory.read32(thread_pcs[0]);
+    if ((options.thread_mask >> ft) & 0x1) {
+      dut.io_instrMem = memory.read32(thread_pcs[ft]);
     } else {
-      dut.io_instrMem = 0x00000013;  // NOP for non-test threads
+      dut.io_instrMem = 0x00000013;  // NOP
     }
     dut.io_dataMemResp = memory.read32(dut.io_memAddr);
   };
@@ -136,6 +139,13 @@ int main(int argc, char** argv) {
     driveMemory();
     dut.eval();
     captureThreadPcs();
+    if (log.is_open()) {
+      log << std::hex << "pcs post-eval: "
+          << "pc0=0x" << dut.io_if_pc_0 << " "
+          << "pc1=0x" << dut.io_if_pc_1 << " "
+          << "pc2=0x" << dut.io_if_pc_2 << " "
+          << "pc3=0x" << dut.io_if_pc_3 << std::dec << '\n';
+    }
 
     const uint32_t addr = dut.io_memAddr;
     const uint32_t data = dut.io_memWrite;
