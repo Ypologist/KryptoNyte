@@ -168,6 +168,17 @@ int main(int argc, char** argv) {
           << static_cast<unsigned>(dut.io_threadEnable_2)
           << static_cast<unsigned>(dut.io_threadEnable_3) << "]"
           << std::dec << '\n';
+
+      if (dut.io_ctrlTaken) {
+        log << std::hex << "ctrl: taken=1 "
+            << "thread=" << static_cast<unsigned>(dut.io_ctrlThread)
+            << " from=0x" << dut.io_ctrlFromPC
+            << " target=0x" << dut.io_ctrlTarget
+            << " branch=" << static_cast<unsigned>(dut.io_ctrlIsBranch)
+            << " jal=" << static_cast<unsigned>(dut.io_ctrlIsJal)
+            << " jalr=" << static_cast<unsigned>(dut.io_ctrlIsJalr)
+            << std::dec << '\n';
+      }
     }
 
     const uint32_t addr = dut.io_memAddr;

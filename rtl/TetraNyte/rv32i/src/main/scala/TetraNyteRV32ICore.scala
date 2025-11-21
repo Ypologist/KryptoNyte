@@ -289,7 +289,7 @@ class TetraNyteRV32ICore extends Module {
   }
 
   val writeEnable = mem_wb.valid && mem_wb.rd =/= 0.U &&
-    io.threadEnable(mem_wb.threadId) && !flushThread(mem_wb.threadId) &&
+    io.threadEnable(mem_wb.threadId) &&
     (mem_wb.isALU || mem_wb.isLoad || mem_wb.isLUI ||
       mem_wb.isAUIPC || mem_wb.isJAL || mem_wb.isJALR)
 
@@ -347,10 +347,10 @@ class TetraNyteRV32ICore extends Module {
     flushThread(wbThread) := false.B
   }
 
-  // Flush in-flight instructions from the taken-control-transfer thread so fall-through work is discarded.
+  // Flush younger in-flight instructions from the taken-control-transfer thread so fall-through work is discarded.
+  // Only IF/ID need clearing; older stages must be preserved to retire results.
   when((branchTakenEx || jalTakenEx || jalrTakenEx) && io.threadEnable(id_ex.threadId)) {
     when(if_id.threadId === id_ex.threadId) { if_id.valid := false.B }
-    when(ex_mem.threadId === id_ex.threadId) { ex_mem.valid := false.B }
   }
 
   // Default sequential advance for the currently fetched thread unless a control transfer just wrote it.
