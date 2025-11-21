@@ -156,6 +156,9 @@ int main(int argc, char** argv) {
           << "cycle=0x" << cycle
           << " memAddr=0x" << addr
           << " mask=0x" << mask
+          << " pc0=0x" << thread_pcs[0]
+          << " rs1=0x" << dut.io_id_rs1Data_0
+          << " rs2=0x" << dut.io_id_rs2Data_0
           << " tohost=0x" << symbols.tohost
           << std::dec << '\n';
     }

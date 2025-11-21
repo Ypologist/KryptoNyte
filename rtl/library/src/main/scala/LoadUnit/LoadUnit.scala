@@ -21,23 +21,37 @@ class LoadUnit extends Module {
   val LHU = "b101".U  // Load Halfword (unsigned)
 
   // Parameterized width extraction
-  val loadWidth = Wire(UInt(2.W))
-  val isSigned = Wire(Bool())
+  val byteOffset = io.addr(1, 0)
+  val halfOffset = io.addr(1)
 
-  loadWidth := MuxCase(2.U, Seq(
-    (io.funct3 === LB || io.funct3 === LBU) -> 0.U,
-    (io.funct3 === LH || io.funct3 === LHU) -> 1.U,
-    (io.funct3 === LW) -> 2.U
-  ))
+  val bytes = VecInit(
+    io.dataIn(7, 0),
+    io.dataIn(15, 8),
+    io.dataIn(23, 16),
+    io.dataIn(31, 24)
+  )
+  val halfwords = VecInit(
+    io.dataIn(15, 0),
+    io.dataIn(31, 16)
+  )
 
-  isSigned := (io.funct3 === LB || io.funct3 === LH || io.funct3 === LW)
+  val selectedByte = bytes(byteOffset)
+  val selectedHalf = halfwords(halfOffset)
 
-  val extractedData = Wire(UInt(32.W))
-  extractedData := MuxCase(io.dataIn, Seq(
-    (loadWidth === 0.U)  -> io.dataIn(7, 0).asUInt,
-    (loadWidth === 1.U)  -> io.dataIn(15, 0).asUInt,
-    (loadWidth === 2.U)  -> io.dataIn(31, 0).asUInt
-  ))
+  val loadWord = io.dataIn
+  val loadHalfSigned = Cat(Fill(16, selectedHalf(15)), selectedHalf)
+  val loadHalfUnsigned = Cat(0.U(16.W), selectedHalf)
+  val loadByteSigned = Cat(Fill(24, selectedByte(7)), selectedByte)
+  val loadByteUnsigned = Cat(0.U(24.W), selectedByte)
 
-  io.dataOut := Mux(isSigned, extractedData.asSInt.pad(32).asUInt, extractedData.zext.pad(32).asUInt)
+  val loadResult = WireDefault(loadWord)
+  switch(io.funct3) {
+    is(LB)  { loadResult := loadByteSigned }
+    is(LH)  { loadResult := loadHalfSigned }
+    is(LW)  { loadResult := loadWord }
+    is(LBU) { loadResult := loadByteUnsigned }
+    is(LHU) { loadResult := loadHalfUnsigned }
+  }
+
+  io.dataOut := loadResult
 }

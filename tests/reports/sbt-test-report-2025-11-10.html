@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SBT Test Report – 2025-11-10</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    body {
+      margin: 2rem auto 4rem;
+      max-width: 960px;
+      padding: 0 1.5rem;
+      line-height: 1.6;
+    }
+    header {
+      border-bottom: 3px solid #4a90e2;
+      margin-bottom: 1.5rem;
+    }
+    h1 {
+      margin-bottom: 0.25rem;
+    }
+    .meta {
+      font-size: 0.95rem;
+      color: #666;
+    }
+    pre {
+      background: rgba(74, 144, 226, 0.1);
+      border-left: 4px solid #4a90e2;
+      padding: 0.75rem 1rem;
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+    }
+    th {
+      background: rgba(0, 0, 0, 0.05);
+    }
+    .status-pass {
+      color: #1b5e20;
+      font-weight: 600;
+    }
+    section {
+      margin-bottom: 1.75rem;
+    }
+    .tips ol {
+      padding-left: 1.25rem;
+    }
+    footer {
+      font-size: 0.9rem;
+      color: #777;
+      border-top: 1px solid #ddd;
+      padding-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SBT Test Report – 2025‑11‑10</h1>
+    <div class="meta">
+      Generated from <code>rtl/</code> at approximately 18:32&nbsp;UTC · duration ~2m13s
+    </div>
+  </header>
+
+  <section>
+    <h2>Command</h2>
+    <pre>XDG_RUNTIME_DIR=/home/kryptonyte/KryptoNyte/.xdg-runtime \
+TMPDIR=/home/kryptonyte/KryptoNyte/.tmp \
+sbt \
+  -Dsbt.boot.directory=/home/kryptonyte/KryptoNyte/.sbtboot \
+  -Dsbt.global.base=/home/kryptonyte/KryptoNyte/.sbt-global \
+  -Dsbt.ivy.home=/home/kryptonyte/KryptoNyte/.ivy2 \
+  -Dsbt.coursier.home=/home/kryptonyte/KryptoNyte/.coursier \
+  test</pre>
+  </section>
+
+  <section>
+    <h2>Outcome</h2>
+    <ul>
+      <li>Dependency resolution succeeded after redirecting sbt caches into the workspace.</li>
+      <li>All shared library, ZeroNyte, and TetraNyte unit tests passed.</li>
+      <li>No failures, cancellations, or pending tests were reported.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Suite Breakdown</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Module</th>
+          <th>Suite/Test</th>
+          <th>Status</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>library</code></td>
+          <td><code>ALU32Test</code></td>
+          <td class="status-pass">Pass</td>
+          <td>Arithmetic, logical, and shift ops across all opcodes.</td>
+        </tr>
+        <tr>
+          <td><code>library</code></td>
+          <td><code>ALU_LogicTest</code></td>
+          <td class="status-pass">Pass</td>
+          <td>AND/OR/XOR coverage.</td>
+        </tr>
+        <tr>
+          <td><code>library</code></td>
+          <td><code>ALU_CompareTest</code></td>
+          <td class="status-pass">Pass</td>
+          <td>Signed and unsigned comparisons.</td>
+        </tr>
+        <tr>
+          <td><code>library</code></td>
+          <td><code>ALU_ShiftTest</code></td>
+          <td class="status-pass">Pass</td>
+          <td>Logical + arithmetic shifts.</td>
+        </tr>
+        <tr>
+          <td><code>library</code></td>
+          <td><code>BranchUnitTest</code></td>
+          <td class="status-pass">Pass</td>
+          <td>Branch conditions and target calculation.</td>
+        </tr>
+        <tr>
+          <td><code>library</code></td>
+          <td><code>LoadUnitTester</code></td>
+          <td class="status-pass">Pass</td>
+          <td>Signed/unsigned load path.</td>
+        </tr>
+        <tr>
+          <td><code>library</code></td>
+          <td><code>StoreUnitTest</code></td>
+          <td class="status-pass">Pass</td>
+          <td>Store data/address alignment.</td>
+        </tr>
+        <tr>
+          <td><code>library</code></td>
+          <td><code>RegFileMT2R1WVecTest</code></td>
+          <td class="status-pass">Pass</td>
+          <td>Multi-thread reg-file accesses.</td>
+        </tr>
+        <tr>
+          <td><code>ZeroNyte</code></td>
+          <td><code>ZeroNyteRV32ICoreTest</code></td>
+          <td class="status-pass">Pass</td>
+          <td>Fetch/execute trace at 0x8000_0000.</td>
+        </tr>
+        <tr>
+          <td><code>ZeroNyte</code></td>
+          <td><code>ZeroNyteRV32IAndTest</code></td>
+          <td class="status-pass">Pass</td>
+          <td>Focused AND/ANDI regression.</td>
+        </tr>
+        <tr>
+          <td><code>TetraNyte</code></td>
+          <td><code>TetraNyteRV32ICoreTest</code></td>
+          <td class="status-pass">Pass</td>
+          <td>4-thread execution trace (cycles 00–11).</td>
+        </tr>
+      </tbody>
+    </table>
+    <p><em>sbt emitted multiple “Run completed … All tests passed.” lines across aggregated projects; no warnings followed.</em></p>
+  </section>
+
+  <section>
+    <h2>Trace Excerpts</h2>
+    <ul>
+      <li><strong>TetraNyteRV32ICoreTest</strong>
+        <ul>
+          <li>[Cycle 00][Thread 0] PC: 0x00000014 instr: 0x00000013 …</li>
+          <li>[Cycle 05][Thread 1] PC: 0x00000028 instr: 0x00308133 …</li>
+        </ul>
+      </li>
+      <li><strong>ZeroNyteRV32ICoreTest</strong>
+        <ul>
+          <li>[Cycle 00] PC: 0x80000000, Instr: 0x13</li>
+          <li>[Cycle 02] PC: 0x80000008, Instr: 0x208133</li>
+        </ul>
+      </li>
+    </ul>
+  </section>
+
+  <section class="tips">
+    <h2>Follow-ups / Tips</h2>
+    <ol>
+      <li>Targeted rerun: <code>sbt "zeroNyteRv32i/test"</code> or <code>sbt "tetraNyteRv32i/test"</code>.</li>
+      <li>Archive logs via <code>sbt … test | tee tests/reports/sbt-test-$(date +%F-%H%M).log</code>.</li>
+    </ol>
+  </section>
+
+  <footer>
+    Generated by Codex on 2025‑11‑10. Share this HTML file directly or open it in any browser for download/printing.
+  </footer>
+</body>
+</html>

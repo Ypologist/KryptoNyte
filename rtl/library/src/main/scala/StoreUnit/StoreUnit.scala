@@ -9,26 +9,39 @@ class StoreUnit extends Module {
   val io = IO(new Bundle {
     val addr = Input(UInt(32.W))    // Address to store data
     val data = Input(UInt(32.W))    // Data to be stored
-    val storeType = Input(UInt(2.W)) // 00: Byte, 01: Halfword, 10: Word
+    val storeType = Input(UInt(3.W)) // funct3 encoding for SB/SH/SW
     val memWrite = Output(UInt(32.W)) // Output memory write data
     val mask = Output(UInt(4.W))     // Write mask for memory
     val misaligned = Output(Bool())  // Alignment check flag
   })
 
-  // Address Alignment Checks
-  val halfwordAligned = io.addr(0) === 0.U
-  val wordAligned = io.addr(1,0) === 0.U
+  val byteOffset = io.addr(1, 0)
+  val halfOffset = io.addr(1)
 
-  io.misaligned := Mux(io.storeType === 1.U, !halfwordAligned,
-                     Mux(io.storeType === 2.U, !wordAligned, false.B))
+  val isByte = io.storeType === "b000".U
+  val isHalf = io.storeType === "b001".U
+  val isWord = io.storeType === "b010".U
 
-  // Store Mask Generation
-  io.mask := Mux(io.storeType === 0.U, (1.U(4.W) << io.addr(1, 0)), // SB: Store single byte
-              Mux(io.storeType === 1.U, (3.U(4.W) << io.addr(1, 0)), // SH: Store two bytes
-              Mux(io.storeType === 2.U, 15.U(4.W), 0.U(4.W)))) // SW: Store four bytes
+  val misalignedHalf = isHalf && (io.addr(0) =/= 0.U)
+  val misalignedWord = isWord && (io.addr(1, 0) =/= 0.U)
+  io.misaligned := misalignedHalf || misalignedWord
 
-  // Data Manipulation Based on Alignment
-  io.memWrite := Mux(io.storeType === 0.U, (io.data(7, 0) << (io.addr(1, 0) * 8.U)), // SB
-                Mux(io.storeType === 1.U, (io.data(15, 0) << (io.addr(1) * 16.U)), // SH
-                Mux(io.storeType === 2.U, io.data, 0.U(32.W)))) // SW
+  val byteMask = (1.U(4.W) << byteOffset)
+  val halfMask = Mux(halfOffset === 0.U, "b0011".U(4.W), "b1100".U(4.W))
+  val wordMask = "b1111".U(4.W)
+
+  io.mask := MuxCase(0.U, Seq(
+    isByte -> byteMask,
+    isHalf -> halfMask,
+    isWord -> wordMask
+  ))
+
+  val byteData = (io.data(7, 0) << (byteOffset << 3)).asUInt
+  val halfData = (io.data(15, 0) << (halfOffset << 4)).asUInt
+
+  io.memWrite := MuxCase(0.U, Seq(
+    isByte -> byteData,
+    isHalf -> halfData,
+    isWord -> io.data
+  ))
 }
