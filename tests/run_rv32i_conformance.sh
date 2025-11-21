@@ -12,15 +12,17 @@ ENV_ROOT="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env"
 print_usage() {
   cat <<EOF
 Usage: $(basename "$0") [--processor <zeronyte|tetranyte>]
-[--smoke-test]
+[--smoke-test] [--timeout <seconds>]
 
 Runs RISCOF RV32I conformance for the requested processor. Defaults to ZeroNyte.
 Use --smoke-test to run a minimal ADD-only test for quicker turnaround.
+Use --timeout to override the per-invocation timeout (default: 3600s).
 EOF
 }
 
 PROCESSOR="zeronyte"
 SMOKE_TEST=false
+TIMEOUT_SECS=3600
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --processor|-p)
@@ -38,6 +40,14 @@ while [[ $# -gt 0 ]]; do
     --smoke-test)
       SMOKE_TEST=true
       shift
+      ;;
+    --timeout)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --timeout requires a value in seconds" >&2
+        exit 1
+      fi
+      TIMEOUT_SECS="$2"
+      shift 2
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -124,17 +134,40 @@ if $SMOKE_TEST; then
   mkdir -p "$SMOKE_DIR"
   rm -rf "$SMOKE_DIR/src"
   mkdir -p "$SMOKE_DIR/src"
-  SMOKE_TEST_FILE="$SUITE_ROOT/src/add-01.S"
-  if [[ ! -f "$SMOKE_TEST_FILE" ]]; then
-    SMOKE_TEST_FILE="$SUITE_ROOT/src/ADD-01.S"
-  fi
-  if [[ ! -f "$SMOKE_TEST_FILE" ]]; then
-    echo "Smoke test add-01.S not found under $SUITE_ROOT" >&2
+  # Minimal representative set (short runtime): ADD (R), ADDI (I), LW (load)
+  COPIED=()
+  add_candidates=(add-01.S ADD-01.S I-ADD-01.S)
+  addi_candidates=(addi-01.S ADDI-01.S I-ADDI-01.S)
+  lw_candidates=(lw-01.S LW-01.S I-LW-01.S lw-align-01.S LW-ALIGN-01.S)
+  beq_candidates=(beq-01.S BEQ-01.S I-BEQ-01.S)
+
+  pick_and_copy() {
+    local -n cand=$1
+    local found=""
+    for fname in "${cand[@]}"; do
+      if [[ -f "$SUITE_ROOT/src/$fname" ]]; then
+        cp "$SUITE_ROOT/src/$fname" "$SMOKE_DIR/src/"
+        found="$fname"
+        break
+      fi
+    done
+    if [[ -n "$found" ]]; then
+      COPIED+=("$found")
+    else
+      echo "Warning: smoke test (${cand[*]}) not found under $SUITE_ROOT/src" >&2
+    fi
+  }
+
+  pick_and_copy add_candidates
+  pick_and_copy addi_candidates
+  pick_and_copy lw_candidates
+  pick_and_copy beq_candidates
+  if [[ ${#COPIED[@]} -eq 0 ]]; then
+    echo "Smoke tests not found; nothing copied to $SMOKE_DIR/src" >&2
     exit 1
   fi
-  cp "$SMOKE_TEST_FILE" "$SMOKE_DIR/src/"
   SUITE_PATH="$SMOKE_DIR"
-  echo "Smoke test enabled: running only $(basename "$SMOKE_TEST_FILE")"
+  echo "Smoke test enabled: running ${#COPIED[@]} tests: ${COPIED[*]}"
 fi
 
 CONFIG_GENERATED="$SCRIPT_DIR/riscof/.config.rv32i.${PROCESSOR}.ini"
@@ -181,7 +214,8 @@ export PYTHONPATH="$VENV_BIN:${PYTHONPATH:-}"
 export PYTHONPATH="$SCRIPT_DIR/riscof:$PLUGIN_ROOT:$PYTHONPATH"
 
 pushd "$SCRIPT_DIR/riscof" >/dev/null
-RISCOF_TIMEOUT=${RISCOF_TIMEOUT:-1800} \
+RISCOF_TIMEOUT=${TIMEOUT_SECS} \
+TIMEOUT=${TIMEOUT_SECS} \
   riscof run \
   --config "$CONFIG_GENERATED" \
   --work-dir "$OUTPUT_DIR" \
@@ -190,46 +224,54 @@ RISCOF_TIMEOUT=${RISCOF_TIMEOUT:-1800} \
 popd >/dev/null
 
 echo "RISCV RV32I conformance results for $PROCESSOR available under $OUTPUT_DIR"
+if $SMOKE_TEST; then
+  echo "[INFO] Smoke artifacts under $OUTPUT_DIR (signatures/logs):"
+  find "$OUTPUT_DIR" -type f \( -name "*.signature" -o -name "*.log" -o -name "*.elf" \) | sed 's|^|  |'
+  echo "[INFO] Smoke tests executed:"
+  find "$OUTPUT_DIR/src" -maxdepth 3 -mindepth 3 -type d | sed 's|^|  |'
+fi
 
 if $SMOKE_TEST && [[ "$PROCESSOR" == "tetranyte" ]]; then
-  ELF_PATH=$(find "$OUTPUT_DIR/src" -path "*add-01.S/dut/*.elf" | head -n1 || true)
-  REF_SIG=$(find "$OUTPUT_DIR/src" -path "*add-01.S/ref/Reference-spike.signature" | head -n1 || true)
-  if [[ -z "$ELF_PATH" || ! -f "$ELF_PATH" ]]; then
-    echo "Could not locate smoke test ELF under $OUTPUT_DIR/src" >&2
-    exit 1
-  fi
-  echo "Running per-thread smoke comparisons using $ELF_PATH"
-  declare -a THREAD_SIGS=()
-  for tid in 0 1 2 3; do
-    SIG_PATH="$OUTPUT_DIR/src/add-01.S/dut/DUT-tetranyte-rv32i.thread${tid}.signature"
-    LOG_PATH="$OUTPUT_DIR/src/add-01.S/dut/DUT-tetranyte-rv32i.thread${tid}.log"
-    THREAD_MASK=$((1 << tid))
-    "$SCRIPT_DIR/sim/build/tetranyte_obj/VTetraNyteRV32ICore" \
-      --elf "$ELF_PATH" \
-      --signature "$SIG_PATH" \
-      --log "$LOG_PATH" \
-      --max-cycles 2000000 \
-      --thread-mask "$THREAD_MASK" \
-      --trace-pc || { echo "Thread $tid simulation failed" >&2; exit 1; }
-    echo "[INFO] Thread $tid simulation done. Signature: $SIG_PATH"
-    THREAD_SIGS+=("$SIG_PATH")
-  done
-  BASE_SIG="${THREAD_SIGS[0]}"
-  for sig in "${THREAD_SIGS[@]:1}"; do
-    if ! cmp -s "$BASE_SIG" "$sig"; then
-      echo "Thread signature mismatch: $BASE_SIG vs $sig" >&2
-      exit 1
+  for test_name in "${COPIED[@]}"; do
+    ELF_PATH=$(find "$OUTPUT_DIR/src" -path "*${test_name}/dut/*.elf" | head -n1 || true)
+    REF_SIG=$(find "$OUTPUT_DIR/src" -path "*${test_name}/ref/Reference-spike.signature" | head -n1 || true)
+    if [[ -z "$ELF_PATH" || ! -f "$ELF_PATH" ]]; then
+      echo "Could not locate ELF for $test_name under $OUTPUT_DIR/src" >&2
+      continue
     fi
-  done
-  echo "[INFO] All thread signatures match each other."
-  if [[ -n "$REF_SIG" && -f "$REF_SIG" ]]; then
-    if cmp -s "$BASE_SIG" "$REF_SIG"; then
-      echo "[INFO] Thread signatures match spike reference."
+    echo "Running per-thread smoke comparisons using $ELF_PATH"
+    declare -a THREAD_SIGS=()
+    for tid in 0 1 2 3; do
+      SIG_PATH="$OUTPUT_DIR/src/${test_name}/dut/DUT-tetranyte-rv32i.thread${tid}.signature"
+      LOG_PATH="$OUTPUT_DIR/src/${test_name}/dut/DUT-tetranyte-rv32i.thread${tid}.log"
+      THREAD_MASK=$((1 << tid))
+      "$SCRIPT_DIR/sim/build/tetranyte_obj/VTetraNyteRV32ICore" \
+        --elf "$ELF_PATH" \
+        --signature "$SIG_PATH" \
+        --log "$LOG_PATH" \
+        --max-cycles 2000000 \
+        --thread-mask "$THREAD_MASK" \
+        --trace-pc || { echo "Thread $tid simulation failed for $test_name" >&2; exit 1; }
+      echo "[INFO] Thread $tid simulation done for $test_name. Signature: $SIG_PATH"
+      THREAD_SIGS+=("$SIG_PATH")
+    done
+    BASE_SIG="${THREAD_SIGS[0]}"
+    for sig in "${THREAD_SIGS[@]:1}"; do
+      if ! cmp -s "$BASE_SIG" "$sig"; then
+        echo "Thread signature mismatch for $test_name: $BASE_SIG vs $sig" >&2
+        exit 1
+      fi
+    done
+    echo "[INFO] All thread signatures match each other for $test_name."
+    if [[ -n "$REF_SIG" && -f "$REF_SIG" ]]; then
+      if cmp -s "$BASE_SIG" "$REF_SIG"; then
+        echo "[INFO] Thread signatures match spike reference for $test_name."
+      else
+        echo "Thread signatures do not match spike reference for $test_name: $REF_SIG" >&2
+        exit 1
+      fi
     else
-      echo "Thread signatures do not match spike reference: $REF_SIG" >&2
-      exit 1
+      echo "Reference spike signature not found for $test_name; skipped reference compare."
     fi
-  else
-    echo "Reference spike signature not found; skipped reference compare."
-  fi
+  done
 fi

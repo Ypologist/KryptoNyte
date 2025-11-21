@@ -92,6 +92,14 @@ int main(int argc, char** argv) {
   std::array<uint32_t, kNumThreads> thread_pcs{};
   thread_pcs.fill(kMemBase);
 
+  // Apply thread mask to the DUT (bit i enables thread i)
+  auto driveThreadMask = [&]() {
+    dut.io_threadEnable_0 = (options.thread_mask >> 0) & 0x1;
+    dut.io_threadEnable_1 = (options.thread_mask >> 1) & 0x1;
+    dut.io_threadEnable_2 = (options.thread_mask >> 2) & 0x1;
+    dut.io_threadEnable_3 = (options.thread_mask >> 3) & 0x1;
+  };
+
   auto captureThreadPcs = [&]() {
     thread_pcs[0] = dut.io_if_pc_0;
     thread_pcs[1] = dut.io_if_pc_1;
@@ -100,6 +108,7 @@ int main(int argc, char** argv) {
   };
 
   auto driveMemory = [&]() {
+    driveThreadMask();
     // Barrel fetch: feed each thread from its own PC if enabled; otherwise feed NOP.
     uint32_t ft = dut.io_fetchThread & 0x3;
     if ((options.thread_mask >> ft) & 0x1) {
@@ -118,7 +127,16 @@ int main(int argc, char** argv) {
     driveMemory();
     dut.eval();
     captureThreadPcs();
-
+    if (log.is_open() && dut.io_ctrlTaken) {
+      log << std::hex << "ctrl: taken=1 "
+          << "thread=" << static_cast<unsigned>(dut.io_ctrlThread)
+          << " from=0x" << dut.io_ctrlFromPC
+          << " target=0x" << dut.io_ctrlTarget
+          << " branch=" << static_cast<unsigned>(dut.io_ctrlIsBranch)
+          << " jal=" << static_cast<unsigned>(dut.io_ctrlIsJal)
+          << " jalr=" << static_cast<unsigned>(dut.io_ctrlIsJalr)
+          << std::dec << '\n';
+    }
     dut.clock = 1;
     driveMemory();
     dut.eval();
@@ -144,7 +162,12 @@ int main(int argc, char** argv) {
           << "pc0=0x" << dut.io_if_pc_0 << " "
           << "pc1=0x" << dut.io_if_pc_1 << " "
           << "pc2=0x" << dut.io_if_pc_2 << " "
-          << "pc3=0x" << dut.io_if_pc_3 << std::dec << '\n';
+          << "pc3=0x" << dut.io_if_pc_3
+          << " en=[" << static_cast<unsigned>(dut.io_threadEnable_0)
+          << static_cast<unsigned>(dut.io_threadEnable_1)
+          << static_cast<unsigned>(dut.io_threadEnable_2)
+          << static_cast<unsigned>(dut.io_threadEnable_3) << "]"
+          << std::dec << '\n';
     }
 
     const uint32_t addr = dut.io_memAddr;
@@ -165,11 +188,15 @@ int main(int argc, char** argv) {
           << " mask=0x" << mask
           << " tohost=0x" << symbols.tohost;
       if (options.trace_pc) {
-        log << " pc0=0x" << thread_pcs[0]
-            << " pc1=0x" << thread_pcs[1]
-            << " pc2=0x" << thread_pcs[2]
-            << " pc3=0x" << thread_pcs[3]
-            << " ft=" << static_cast<unsigned>(dut.io_fetchThread);
+      log << " pc0=0x" << thread_pcs[0]
+          << " pc1=0x" << thread_pcs[1]
+          << " pc2=0x" << thread_pcs[2]
+          << " pc3=0x" << thread_pcs[3]
+          << " instr0=0x" << dut.io_if_instr_0
+          << " instr1=0x" << dut.io_if_instr_1
+          << " instr2=0x" << dut.io_if_instr_2
+          << " instr3=0x" << dut.io_if_instr_3
+          << " ft=" << static_cast<unsigned>(dut.io_fetchThread);
       }
       log << std::dec << '\n';
     }
