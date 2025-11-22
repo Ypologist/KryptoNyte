@@ -7,6 +7,7 @@ val chiselVersion = "6.6.0"
 lazy val generateLibraryRTL   = taskKey[Unit]("Generate RTL for standalone library modules")
 lazy val generateZeroNyteRTL  = taskKey[Unit]("Generate RTL for the ZeroNyte core")
 lazy val generateTetraNyteRTL = taskKey[Unit]("Generate RTL for the TetraNyte core")
+lazy val generateOctoNyteRTL  = taskKey[Unit]("Generate RTL for the OctoNyte core")
 lazy val generateRTL          = taskKey[Unit]("Generate RTL for library, ZeroNyte, and TetraNyte")
 
 // ***************************
@@ -75,9 +76,17 @@ lazy val tetraNyte = (project in file("TetraNyte/rv32i"))
   )
   .settings(commonSettings: _*)
 
+// ----------------- OctoNyte Project -----------------
+lazy val octoNyte = (project in file("OctoNyte/rv32i"))
+  .dependsOn(library)
+  .settings(
+    name := "OctoNyte"
+  )
+  .settings(commonSettings: _*)
+
 // ----------------- Generators Project -----------------
 lazy val generators = (project in file("generators"))
-  .dependsOn(library, zeroNyte, tetraNyte)
+  .dependsOn(library, zeroNyte, tetraNyte, octoNyte)
   .settings(
     name := "Generators"
   )
@@ -88,7 +97,8 @@ lazy val generators = (project in file("generators"))
     Compile / compile := (Compile / compile).dependsOn(
       library / Compile / compile,
       zeroNyte / Compile / compile,
-      tetraNyte / Compile / compile
+      tetraNyte / Compile / compile,
+      octoNyte / Compile / compile
     ).value,
     
     // Additional dependencies for RTL generation 
@@ -114,17 +124,24 @@ lazy val generators = (project in file("generators"))
       (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL --core-family TetraNyte --core-variant rv32i").value
     },
 
+    generateOctoNyteRTL := {
+      (library / Compile / compile).value
+      (octoNyte / Compile / compile).value
+      (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL --core-family OctoNyte --core-variant rv32i").value
+    },
+
     generateRTL := Def.sequential(
       generateLibraryRTL,
       generateZeroNyteRTL,
-      generateTetraNyteRTL
+      generateTetraNyteRTL,
+      generateOctoNyteRTL
     ).value,
     
   )
 
 // ----------------- Root Project -----------------
 lazy val root = (project in file("."))
-  .aggregate(library, zeroNyte, tetraNyte, generators)
+  .aggregate(library, zeroNyte, tetraNyte, octoNyte, generators)
   .settings(
     name := "KryptoNyte",
     
@@ -133,7 +150,7 @@ lazy val root = (project in file("."))
     addCommandAlias("genZeroNyte", "generators/generateZeroNyteRTL"),
     addCommandAlias("genPipeNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family PipeNyte"),
     addCommandAlias("genTetraNyte", "generators/generateTetraNyteRTL"),
-    addCommandAlias("genOctoNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family OctoNyte"),
+    addCommandAlias("genOctoNyte", "generators/generateOctoNyteRTL"),
     addCommandAlias("genAllRtl", "generators/generateRTL"),
     
   )

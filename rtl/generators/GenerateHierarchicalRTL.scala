@@ -23,6 +23,7 @@ import RegFiles.RegFileMT2R1WVec
 import StoreUnit.StoreUnit
 import TetraNyte.TetraNyteRV32ICore
 import ZeroNyte.ZeroNyteRV32ICore
+import OctoNyte.OctoNyteRV32ICore
 
 // Note: RV32IDecode is an object (not a Module class), so it's not imported for RTL generation
 
@@ -310,8 +311,13 @@ Environment Variables:
   }
   
   def getOctoNyteModules(variant: String): Seq[ModuleSpec] = {
-    // Placeholder for OctoNyte modules
-    Seq.empty
+    variant match {
+      case "rv32i" =>
+        val libraryBlocks = getRV32ILibraryModules("OctoNyte")
+        libraryBlocks :+
+          ModuleSpec(() => new OctoNyteRV32ICore, "OctoNyteRV32ICore", "Eight-thread, 4-wide packet barrel-threaded RV32I core", "OctoNyte", "rv32i")
+      case _ => Seq.empty
+    }
   }
   
   def generateModuleRTL(moduleSpec: ModuleSpec, config: RTLGeneratorConfig): Unit = {
