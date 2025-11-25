@@ -31,6 +31,10 @@ object RV32IDecode {
     val isSystem = Bool()
     val isFence  = Bool()
 
+    val rs1      = UInt(5.W)
+    val rs2      = UInt(5.W)
+    val rd       = UInt(5.W)
+
     val aluOp    = UInt(5.W)
     val imm      = UInt(32.W)
   }
@@ -61,6 +65,10 @@ object RV32IDecode {
     val opcode = instr(6,0)
     val funct3 = instr(14,12)
     val funct7 = instr(31,25)
+
+    dec.rs1 := instr(19,15)
+    dec.rs2 := instr(24,20)
+    dec.rd  := instr(11,7)
 
     switch(opcode) {
       // R-type
