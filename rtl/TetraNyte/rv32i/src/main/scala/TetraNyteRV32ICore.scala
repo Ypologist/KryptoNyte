@@ -2,6 +2,7 @@ package TetraNyte
 
 import chisel3._
 import chisel3.util._
+import chisel3.dontTouch
 import ALUs._
 import BranchUnit._
 import Decoders._
@@ -83,6 +84,9 @@ class TetraNyteRV32ICore extends Module {
 
   // Shared multithreaded register file
   val regFile = Module(new RegFileMT2R1WVec(numThreads = numThreads))
+  val unusedRegDebugX1 = Wire(Vec(numThreads, UInt(32.W)))
+  unusedRegDebugX1 := regFile.io.debugX1
+  dontTouch(unusedRegDebugX1)
 
   // Debug mirrors to expose last-seen per-thread stage values
   val debugIfInstr = RegInit(VecInit(Seq.fill(numThreads)(0.U(32.W))))
