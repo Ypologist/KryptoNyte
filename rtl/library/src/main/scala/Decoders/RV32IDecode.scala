@@ -30,6 +30,7 @@ object RV32IDecode {
     val isAUIPC  = Bool()
     val isSystem = Bool()
     val isFence  = Bool()
+    val usesImm  = Bool()
 
     val rs1      = UInt(5.W)
     val rs2      = UInt(5.W)
@@ -98,6 +99,7 @@ object RV32IDecode {
       // I-type ALU
       is(OP_I) {
         dec.isALU := true.B
+        dec.usesImm := true.B
         val immI = signExt12(instr(31,20))
         dec.imm := immI
         switch(funct3) {
@@ -121,12 +123,14 @@ object RV32IDecode {
       // Loads
       is(LOAD) {
         dec.isLoad := true.B
+        dec.usesImm := true.B
         dec.imm := signExt12(instr(31,20))
       }
 
       // Stores
       is(STORE) {
         dec.isStore := true.B
+        dec.usesImm := true.B
         val storeImm = Cat(instr(31,25), instr(11,7))
         dec.imm := signExt12(storeImm)
       }
@@ -148,18 +152,21 @@ object RV32IDecode {
       // JALR
       is(JALR) {
         dec.isJALR := true.B
+        dec.usesImm := true.B
         dec.imm := signExt12(instr(31,20))
       }
 
       // LUI
       is(LUI) {
         dec.isLUI := true.B
+        dec.usesImm := true.B
         dec.imm   := Cat(instr(31,12), Fill(12, 0.U))
       }
 
       // AUIPC
       is(AUIPC) {
         dec.isAUIPC := true.B
+        dec.usesImm := true.B
         dec.imm     := Cat(instr(31,12), Fill(12, 0.U))
       }
 

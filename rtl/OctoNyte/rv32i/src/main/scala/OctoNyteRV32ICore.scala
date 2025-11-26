@@ -2,337 +2,246 @@ package OctoNyte
 
 import chisel3._
 import chisel3.util._
-import ALUs._
-import BranchUnit._
-import Decoders._
-import LoadUnit._
-import StoreUnit._
-import RegFiles._
+import ALUs.ALU32
+import Decoders.RV32IDecode
+import Pipeline.PipelineScheduler
 import RegFiles.RegFileMTMultiWVec
-import Pipeline._
-import java.nio.channels.Pipe
 
-
-class FetchPipelineRegBundle(threadBits: Int, fetchWidth: Int) extends Bundle {
-  val valid     = Bool()
-  val pc        = UInt(32.W)
-  val instr     = UInt((fetchWidth * 32).W)
+class FetchBundle(threadBits: Int) extends Bundle {
+  val valid    = Bool()
+  val threadId = UInt(threadBits.W)
+  val pc       = UInt(32.W)
+  val instr    = UInt(32.W)
 }
 
-
-class DecodePipelineRegBundle(threadBits: Int) extends Bundle {
-  val fetchSignals = new FetchPipelineRegBundle(threadBits)
-  val decodeSignals = new RV32IDecode.DecodeSignals
-}
-
-
-class DipatchPipelineRegBundle(threadBits: Int) extends Bundle {
-  val decodeSignals = new DecodePipelineRegBundle(threadBits)  // includes fetch signals too
-  // Additional dispatch-specific signals can be added here when multiple-issue is implemented
-}
-
-class RegisterReadPipelineRegBundle(threadBits: Int) extends Bundle {
-  val dispatchSignals = new DispatchPipelineRegBundle(threadBits)  // include fetch and decode signals too
-  val rs1Data   = UInt(32.W)
-  val rs2Data   = UInt(32.W)
-}
-
-class Exec1PipelineRegBundle(threadBits: Int) extends Bundle {
-  val registReadSignals = new RegisterReadPipelineRegBundle(threadBits)  // include fetch and decode signals too
-  val result = UInt(32.W)
-}
-
-class Exec2PipelineRegBundle(threadBits: Int) extends Bundle {
-  val exec1Signals = new Exec1PipelineRegBundle(threadBits)  // include fetch and decode signals too
-}
-
-class Exec3PipelineRegBundle(threadBits: Int) extends Bundle {
-  val exec2Signals = new Exec2PipelineRegBundle(threadBits)  
-  var memReadData = UInt(32.W)
-}
-
-class WritebackPipelineRegBundle(threadBits: Int) extends Bundle {
-  val exec3Signals = new Exec3PipelineRegBundle(threadBits)  
+class StageBundle(threadBits: Int) extends Bundle {
+  val valid    = Bool()
+  val threadId = UInt(threadBits.W)
+  val pc       = UInt(32.W)
+  val instr    = UInt(32.W)
+  val decode   = new RV32IDecode.DecodeSignals
+  val rs1Data  = UInt(32.W)
+  val rs2Data  = UInt(32.W)
+  val result   = UInt(32.W)
 }
 
 class OctoNyteRV32ICoreIO(val numThreads: Int, val fetchWidth: Int) extends Bundle {
   val threadEnable = Input(Vec(numThreads, Bool()))
-  val instrMem     = Input(UInt((fetchWidth * 32).W)) 
+  val instrMem     = Input(UInt((fetchWidth * 32).W))
   val dataMemResp  = Input(UInt(32.W))
   val memAddr      = Output(UInt(32.W))
   val memWrite     = Output(UInt(32.W))
   val memMask      = Output(UInt(4.W))
   val memMisaligned= Output(Bool())
+
+  val debugRegX1      = Output(Vec(numThreads, UInt(32.W)))
+  val debugRegs01234  = Output(Vec(numThreads, Vec(5, UInt(32.W))))
+  val debugPC         = Output(Vec(numThreads, UInt(32.W)))
+  val debugIbCount    = Output(UInt(log2Ceil(9).W))
+  val debugIbThread   = Output(UInt(log2Ceil(numThreads).W))
+  val debugIbValid    = Output(Bool())
+  val debugStageThreads = Output(Vec(8, UInt(log2Ceil(numThreads).W)))
+  val debugStageValids  = Output(Vec(8, Bool()))
 }
 
 class OctoNyteRV32ICore extends Module {
   val numThreads = 8
-  val fetchWidth = 1
+  val fetchWidth = 4
   val io = IO(new OctoNyteRV32ICoreIO(numThreads, fetchWidth))
 
   private val threadBits = log2Ceil(numThreads)
 
-  // *******************
-  // Default IO outputs
-  // *******************
+  // Default IO outputs (no memory subsystem yet)
   io.memAddr := 0.U
   io.memWrite := 0.U
   io.memMask := 0.U
   io.memMisaligned := false.B
 
+  // Round-robin pipeline scheduler shared by all stages
+  val stageCount = 8
+  val scheduler = Module(new PipelineScheduler(numThreads = numThreads, stageCount = stageCount))
+  scheduler.io.threadEnable := io.threadEnable
+  scheduler.io.advance := true.B
+  io.debugStageThreads := scheduler.io.stageThreads
+  io.debugStageValids := scheduler.io.stageValids
 
+  // Per-thread program counters
+  val pcRegs = RegInit(VecInit(Seq.fill(numThreads)("h8000_0000".U(32.W))))
+  io.debugPC := pcRegs
 
-  // *******************************
-  // Per-pipeline barrel schedulers
-  // *******************************
-  val pcScheduler       = Module(new PipelineScheduler(numThreads = numThreads, defaultThread = 0))
-  val decScheduler      = Module(new PipelineScheduler(numThreads = numThreads, defaultThread = 7))
-  val disScheduler      = Module(new PipelineScheduler(numThreads = numThreads, defaultThread = 6))
-  val regReadScheduler  = Module(new PipelineScheduler(numThreads = numThreads, defaultThread = 5))
-  val ex1Scheduler      = Module(new PipelineScheduler(numThreads = numThreads, defaultThread = 4))
-  val ex2Scheduler      = Module(new PipelineScheduler(numThreads = numThreads, defaultThread = 3))
-  val ex3Scheduler      = Module(new PipelineScheduler(numThreads = numThreads, defaultThread = 2))
-  val wbScheduler       = Module(new PipelineScheduler(numThreads = numThreads, defaultThread = 1))
+  // Per-stage pipeline registers (one entry per thread)
+  val fetchRegs       = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new FetchBundle(threadBits)))))
+  val decodeRegs      = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new StageBundle(threadBits)))))
+  val dispatchRegs    = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new StageBundle(threadBits)))))
+  val regReadRegs     = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new StageBundle(threadBits)))))
+  val exec1Regs       = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new StageBundle(threadBits)))))
+  val exec2Regs       = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new StageBundle(threadBits)))))
+  val exec3Regs       = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new StageBundle(threadBits)))))
 
-
-  // *************************************************************************
-  // Multithreaded register file with 1 write port and 2 read-port groups
-  // *************************************************************************
+  // Multithreaded register file: 1 write port, 2 read groups (only port0 used for now)
   val regFile = Module(new RegFileMTMultiWVec(numThreads = numThreads, numWritePorts = 1, numReadPorts = 2))
+  regFile.io.readThreadID := VecInit(Seq.fill(2)(0.U(threadBits.W)))
+  regFile.io.src1 := VecInit(Seq.fill(2)(0.U(5.W)))
+  regFile.io.src2 := VecInit(Seq.fill(2)(0.U(5.W)))
+  regFile.io.writeThreadID := VecInit(Seq.fill(1)(0.U(threadBits.W)))
+  regFile.io.dst := VecInit(Seq.fill(1)(0.U(5.W)))
+  regFile.io.wen := VecInit(Seq.fill(1)(false.B))
+  regFile.io.dstData := VecInit(Seq.fill(1)(0.U(32.W)))
 
-  
-  // *********************************************************************
-  // Initialize pipeline stage registers and control signals
-  // *********************************************************************
+  io.debugRegX1 := regFile.io.debugX1
+  io.debugRegs01234 := regFile.io.debugRegs01234
 
-   val pcRegs = RegInit(VecInit(Seq.fill(numThreads, fetchWidth=1) {
-    val init = WireDefault(0.U.asTypeOf(new FetchPipelineRegBundle(threadBits, fetchWidth)))
-      init.valid    := false.B
-      init.pc       := "h80000000".U
-      init.instr    := 0.U
-      init  //return the bundle
-  }))
-
-
-  val decodeRegs = RegInit(VecInit(Seq.fill(numThreads) {
-    val init = WireDefault(0.U.asTypeOf(new DecodePipelineRegBundle(threadBits)))
-      init.fetchSignals := 0.U.asTypeOf(new FetchPipelineRegBundle(threadBits))
-      init.decodeSignals := 0.U.asTypeOf(new RV32IDecode.DecodeSignals)
-      init
-  }))
-
-  val dispatchRegs = RegInit(VecInit(Seq.fill(numThreads) {
-    val init = WireDefault(0.U.asTypeOf(new DispatchPipelineRegBundle(threadBits)))
-      init.decodeSignals := 0.U.asTypeOf(new DecodePipelineRegBundle(threadBits))
-      init
-  }))
-
-
-  val registerReadRegs = RegInit(VecInit(Seq.fill(numThreads) {
-    val init = WireDefault(0.U.asTypeOf(new RegisterReadPipelineRegBundle(threadBits)))
-      init.dispatchSignals := 0.U.asTypeOf(new DispatchPipelineRegBundle(threadBits))
-      init
-  }))
-
-  val exec1Regs = RegInit(VecInit(Seq.fill(numThreads) {
-    val init = WireDefault(0.U.asTypeOf(new Exec1PipelineRegBundle(threadBits)))
-      init.registReadSignals := 0.U.asTypeOf(new RegisterReadPipelineRegBundle(threadBits))
-      init.result := 0.U
-      init
-  }))
-
-  val exec2Regs = RegInit(VecInit(Seq.fill(numThreads) {
-    val init = WireDefault(0.U.asTypeOf(new Exec2PipelineRegBundle(threadBits)))
-      init.exec1Signals := 0.U.asTypeOf(new Exec1PipelineRegBundle(threadBits))
-      init
-  }))
-
-  val exec3Regs = RegInit(VecInit(Seq.fill(numThreads) {
-    val init = WireDefault(0.U.asTypeOf(new Exec3PipelineRegBundle(threadBits)))
-      init.exec2Signals := 0.U.asTypeOf(new Exec2PipelineRegBundle(threadBits))
-      init
-  }))
-
-  val writebackRegs = RegInit(VecInit(Seq.fill(numThreads) {
-    val init = WireDefault(0.U.asTypeOf(new WritebackPipelineRegBundle(threadBits)))
-      init.exec3Signals := 0.U.asTypeOf(new Exec3PipelineRegBundle(threadBits))
-      init
-  }))
-
-  // =============================================================
-  // ===================== Instruction Fetch =====================
-  // =============================================================
-
-  val FetchThreadSel = pcScheduler.io.threadSelect
-  val fetchEntry     = pcRegs(FetchThreadSel)
-
-  // Update the PC for that thread
-  when(io.threadEnable(FetchThreadSel)) {
-     
-    // Capture the incoming packet
-    decodeRegs(FetchThreadSel).pc    := pcRegs(FetchThreadSel).pc
-    decodeRegs(FetchThreadSel).instr := io.instrMem
-    decodeRegs(FetchThreadSel).valid := true.B 
-  
-    pcRegs(FetchThreadSel).pc := pcRegs(FetchThreadSel).pc + (fetchWidth * 4).U  // advance PC
-
-  } .otherwise {
-    fetchEntry.valid := false.B
-  } 
-
-  // ==============================================================
-  // ===================== Decode  ================================
-  // ==============================================================
-  val decodeThreadSel = decScheduler.io.threadSelect
-  val fetchEntry      = decodeRegs(decodeThreadSel).fetchSignals
-  val decEntry        = decodeRegs(decodeThreadSel).decodeSignals
-
-  when(fetchEntry.valid && io.threadEnable(decodeThreadSel)) {
-    val instrWord = fetchEntry.instr(31, 0)                   // single-issue: use low 32 bits
-    val dec       = RV32IDecode.decodeInstr(instrWord)
-
-    decEntry.fetch    := fetchEntry                          // copy pc, instr, threadId, valid
-    decEntry.decodeSignals := dec                            // assign the whole bundle
-
+  // =============================
+  // Fetch stage
+  // =============================
+  val fetchThreadSel = scheduler.io.stageThreads(0)
+  val fetchEntry = fetchRegs(fetchThreadSel)
+  when(io.threadEnable(fetchThreadSel)) {
+    val instrWord = io.instrMem(31, 0)
+    fetchEntry.valid := true.B
+    fetchEntry.threadId := fetchThreadSel
+    fetchEntry.pc := pcRegs(fetchThreadSel)
+    fetchEntry.instr := instrWord
+    pcRegs(fetchThreadSel) := pcRegs(fetchThreadSel) + 4.U
   }.otherwise {
     fetchEntry.valid := false.B
   }
 
-  // ===============================================================
-  // ===================== Dispatch ================================
-  // ===============================================================
-
-  // Passthru for now. Update when multiple-issue dispatch is added.
-  val dispatchThreadSel = disScheduler.io.threadSelect
-  val decEntry        = decodeRegs(dispatchThreadSel).decodeSignals
-
-  when(decEntry.valid && io.threadEnable(dispatchThreadSel)) {
-    dispatchEntry.dispatchSignals := decEntry
-
-  } .otherwise {
-    dispatchEntry.dispatchSignals.fetch.valid := false.B
-  }
-  
-
-
-  // =========================================================
-  // ===================== Register Read =====================
-  // =========================================================
-  val registerReadThreadSel = regReadScheduler.io.threadSelect
-  val dispatchEntry   = dispatchRegs(registerReadThreadSel)
-  val registerReadEntry = dispatchRegs(registerReadThreadSel)
-
-  //Read the register file here
-  regFile.io.writeThreadID := registerReadThreadSel
-  regFile.io.rs1 := dispatchEntry.decodeSignals.rs1
-  regFile.io.rs2 := dispatchEntry.decodeSignals.rs2
-  
-  when(dispatchEntry.valid && io.threadEnable(registerReadThreadSel)) {
-    regFile.io.readThreadID := registerReadThreadSel
-    regFile.io.src1(0) := dispatchEntry.decodeSignals.rs1
-    regFile.io.src2(0) := dispatchEntry.decodeSignals.rs2
-
-    dispatchEntry.rs1Data := regFile.io.src1data(0)
-    dispatchEntry.rs2Data := regFile.io.src2data(0)
-
-    // mark dispatch entry consumed, so it doesn’t get re-used next cycle
-    dispatchEntry.fetch.valid := false.B
-
-
-  } .otherwise {
-    registerReadEntry.dispatchSignals.fetch.valid := false.B
+  // =============================
+  // Decode stage
+  // =============================
+  val decodeThreadSel = scheduler.io.stageThreads(1)
+  val fetchDecodeEntry = fetchRegs(decodeThreadSel)
+  val decodeEntry = decodeRegs(decodeThreadSel)
+  when(fetchDecodeEntry.valid && io.threadEnable(decodeThreadSel)) {
+    val dec = RV32IDecode.decodeInstr(fetchDecodeEntry.instr)
+    decodeEntry.valid := true.B
+    decodeEntry.threadId := fetchDecodeEntry.threadId
+    decodeEntry.pc := fetchDecodeEntry.pc
+    decodeEntry.instr := fetchDecodeEntry.instr
+    decodeEntry.decode := dec
+    decodeEntry.rs1Data := 0.U
+    decodeEntry.rs2Data := 0.U
+    decodeEntry.result := 0.U
+    fetchDecodeEntry.valid := false.B
+  }.otherwise {
+    decodeEntry.valid := false.B
   }
 
-  // =============================================================
-  // ===================== Execute 1  ============================
-  // =============================================================
-  val ex1ThreadSel = ex1Scheduler.io.threadSelect
-  val regReadEntry = registerReadRegs(ex1ThreadSel)
-  val ex1Entry     = exec1Regs(ex1ThreadSel)
+  // =============================
+  // Dispatch stage
+  // =============================
+  val dispatchThreadSel = scheduler.io.stageThreads(2)
+  val decodeToDispatchEntry = decodeRegs(dispatchThreadSel)
+  when(decodeToDispatchEntry.valid && io.threadEnable(dispatchThreadSel)) {
+    dispatchRegs(dispatchThreadSel) := decodeToDispatchEntry
+    dispatchRegs(dispatchThreadSel).valid := true.B
+    decodeToDispatchEntry.valid := false.B
+  }.otherwise {
+    dispatchRegs(dispatchThreadSel).valid := false.B
+  }
 
+  // =============================
+  // Register read stage
+  // =============================
+  val regReadThreadSel = scheduler.io.stageThreads(3)
+  val dispatchEntry = dispatchRegs(regReadThreadSel)
+  when(dispatchEntry.valid && io.threadEnable(regReadThreadSel)) {
+    regFile.io.readThreadID(0) := regReadThreadSel
+    regFile.io.src1(0) := dispatchEntry.decode.rs1
+    regFile.io.src2(0) := dispatchEntry.decode.rs2
+
+    val rrEntry = regReadRegs(regReadThreadSel)
+    rrEntry := dispatchEntry
+    rrEntry.valid := true.B
+    rrEntry.rs1Data := regFile.io.src1data(0)
+    rrEntry.rs2Data := regFile.io.src2data(0)
+
+    dispatchEntry.valid := false.B
+  }.otherwise {
+    regReadRegs(regReadThreadSel).valid := false.B
+  }
+
+  // =============================
+  // Execute 1 stage (ALU)
+  // =============================
   val alu = Module(new ALU32)
-  val branchUnit = Module(new BranchUnit)
-  val loadUnit = Module(new LoadUnit()) // default 32b for data
-  val storeUnit = Module(new StoreUnit)
+  alu.io.a := 0.U
+  alu.io.b := 0.U
+  alu.io.opcode := ALU32.Opcode.ADD
 
+  val ex1ThreadSel = scheduler.io.stageThreads(4)
+  val regReadEntry = regReadRegs(ex1ThreadSel)
+  when(regReadEntry.valid && io.threadEnable(ex1ThreadSel)) {
+    val opcode = regReadEntry.instr(6, 0)
+    val useImm = (opcode === RV32IDecode.OP_I) || regReadEntry.decode.isLoad || regReadEntry.decode.isStore ||
+      regReadEntry.decode.isJALR || regReadEntry.decode.isLUI || regReadEntry.decode.isAUIPC
+    val opA = Mux(regReadEntry.decode.isAUIPC, regReadEntry.pc,
+      Mux(regReadEntry.decode.isLUI, 0.U, regReadEntry.rs1Data))
+    val opB = Mux(useImm, regReadEntry.decode.imm, regReadEntry.rs2Data)
 
-  when(regReadEntry.isALU && io.threadEnable(ex1ThreadSel)) {
-    alu.io.a := regReadEntry.rs1Data
-    alu.io.b := regReadEntry.rs2Data
-    alu.io.opcode := regReadEntry.aluOp
-    ex1Entry.result := alu.io.result
+    alu.io.a := opA
+    alu.io.b := opB
+    alu.io.opcode := regReadEntry.decode.aluOp
+
+    val result = Mux(regReadEntry.decode.isAUIPC, regReadEntry.pc + regReadEntry.decode.imm,
+      Mux(regReadEntry.decode.isLUI, regReadEntry.decode.imm, alu.io.result))
+
+    val nextEntry = exec1Regs(ex1ThreadSel)
+    nextEntry := regReadEntry
+    nextEntry.result := result
+    nextEntry.valid := true.B
+    regReadEntry.valid := false.B
+  }.otherwise {
+    exec1Regs(ex1ThreadSel).valid := false.B
   }
 
-  when(regReadEntry.isBranch && io.threadEnable(ex1ThreadSel)) {
-    branchUnit.io.rs1 := regReadEntry.rs1Data
-    branchUnit.io.rs2 := regReadEntry.rs2Data
-    branchUnit.io.pc  := regReadEntry.fetch.pc
-    branchUnit.io.imm := regReadEntry.imm.asSInt
-    branchUnit.io.branchOp := regReadEntry.instr(14,12)
-    branchUnit.io.valid := regReadEntry.valid
+  // =============================
+  // Execute 2 stage (pass-through)
+  // =============================
+  val ex2ThreadSel = scheduler.io.stageThreads(5)
+  when(exec1Regs(ex2ThreadSel).valid && io.threadEnable(ex2ThreadSel)) {
+    exec2Regs(ex2ThreadSel) := exec1Regs(ex2ThreadSel)
+    exec2Regs(ex2ThreadSel).valid := true.B
+    exec1Regs(ex2ThreadSel).valid := false.B
+  }.otherwise {
+    exec2Regs(ex2ThreadSel).valid := false.B
   }
 
-  when(regReadEntry.isLoad && io.threadEnable(ex1ThreadSel)) {
-    loadUnit.io.addr := alu.io.result
-    loadUnit.io.dataIn := io.dataMemResp
-    loadUnit.io.funct3 := regReadEntry.instr(14,12)
+  // =============================
+  // Execute 3 stage (pass-through)
+  // =============================
+  val ex3ThreadSel = scheduler.io.stageThreads(6)
+  when(exec2Regs(ex3ThreadSel).valid && io.threadEnable(ex3ThreadSel)) {
+    exec3Regs(ex3ThreadSel) := exec2Regs(ex3ThreadSel)
+    exec3Regs(ex3ThreadSel).valid := true.B
+    exec2Regs(ex3ThreadSel).valid := false.B
+  }.otherwise {
+    exec3Regs(ex3ThreadSel).valid := false.B
   }
 
-  when(regReadEntry.isStore && io.threadEnable(ex1ThreadSel)) {
-    storeUnit.io.addr := alu.io.result
-    storeUnit.io.data := regReadEntry.rs2Data
-    storeUnit.io.storeType := regReadEntry.instr(13,12)
+  // =============================
+  // Writeback stage
+  // =============================
+  val wbThreadSel = scheduler.io.stageThreads(7)
+  val wbEntry = exec3Regs(wbThreadSel)
+  val writeEnable = wbEntry.valid && io.threadEnable(wbThreadSel) &&
+    (wbEntry.decode.isALU || wbEntry.decode.isLUI || wbEntry.decode.isAUIPC)
+  when(writeEnable && wbEntry.decode.rd =/= 0.U) {
+    regFile.io.writeThreadID(0) := wbThreadSel
+    regFile.io.dst(0) := wbEntry.decode.rd
+    regFile.io.wen(0) := true.B
+    regFile.io.dstData(0) := wbEntry.result
+
+  }
+  when(wbEntry.valid && io.threadEnable(wbThreadSel)) {
+    wbEntry.valid := false.B
   }
 
-  // ==============================================================
-  // ===================== Execute2 ===============================
-  // ==============================================================
-  val ex2ThreadSel = ex2Scheduler.io.threadSelect
-  val ex1Entry     = exec1Regs(ex2ThreadSel)
-  val ex2Entry     = exec2Regs(ex2ThreadSel)
-
-
-  // Fill in Execute2 logic when needed and copy data from ex1Entry to ex2Entry
-  when(ex1Entry.valid && io.threadEnable(ex2ThreadSel)) {
-    ex2Entry.exec1Signals := ex1Entry
-  } .otherwise {
-    ex2Entry.exec1Signals.registReadSignals.fetch.valid := false.B
-  }
-
-  // ==============================================================
-  // ===================== Execute3 ===============================
-  // ==============================================================
-  val ex3ThreadSel = ex3Scheduler.io.threadSelect
-  val ex2Entry     = exec2Regs(ex3ThreadSel)
-  val ex3Entry     = exec3Regs(ex3ThreadSel)  
-
-  // Fill in Execute3 logic when needed and copy data from ex2Entry to ex3Entry
-  when(ex2Entry.valid && io.threadEnable(ex3ThreadSel)) {
-    ex3Entry.exec2Signals := ex2Entry
-  } .otherwise {
-    ex3Entry.exec2Signals.exec1Signals.registReadSignals.fetch.valid := false.B
-  } 
-
-
-
-  // =============================================================
-  // ===================== Writeback  ============================
-  // =============================================================
-  val wbThreadSel = wbScheduler.io.threadSelect
-  val ex3Entry    = exec3Regs(wbThreadSel)
-  val wbEntry     = writebackRegs(wbThreadSel)
-
-
-  when(ex3Entry.valid && io.threadEnable(wbThreadSel)) {
-    wbEntry.exec3Signals := ex3Entry
-
-    regFile.io.writeThreadID := wbThreadSel
-    regFile.io.dst := ex3Entry.rd
-    regFile.io.wen := true.B
-    regFile.io.dstData := ex3Entry.result
-
-
-  } 
- 
-
-
+  // =============================
+  // Debug instrumentation placeholders
+  // =============================
+  io.debugIbCount := 0.U
+  io.debugIbThread := fetchThreadSel
+  io.debugIbValid := false.B
+}

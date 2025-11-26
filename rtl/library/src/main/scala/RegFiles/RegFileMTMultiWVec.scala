@@ -39,6 +39,7 @@ class RegFileMTMultiWVec(
 
     // Debug: per-thread x1 view
     val debugX1       = Output(Vec(numThreads, UInt(width.W)))
+    val debugRegs01234= Output(Vec(numThreads, Vec(5, UInt(width.W))))
   })
 
   val regs = RegInit(VecInit(Seq.fill(effectiveDepth)(0.U(width.W))))
@@ -63,5 +64,9 @@ class RegFileMTMultiWVec(
   for (t <- 0 until numThreads) {
     val idx = t * depth + 1
     io.debugX1(t) := regs(idx)
+    val base = t * depth
+    for (r <- 0 until 5) {
+      io.debugRegs01234(t)(r) := regs(base + r)
+    }
   }
 }
