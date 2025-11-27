@@ -11,7 +11,7 @@ ENV_ROOT="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env"
 
 print_usage() {
   cat <<EOF
-Usage: $(basename "$0") [--processor <zeronyte|tetranyte>]
+Usage: $(basename "$0") [--processor <zeronyte|tetranyte|octonyte>]
 [--smoke-test] [--timeout <seconds>]
 
 Runs RISCOF RV32I conformance for the requested processor. Defaults to ZeroNyte.
@@ -76,6 +76,15 @@ case "$PROCESSOR" in
     RTL_TOP="$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/TetraNyteRV32ICore.v"
     RTL_GEN_TASK="generators/generateTetraNyteRTL"
     ;;
+  octonyte)
+    DUT_NAME="octonyte"
+    SIM_BUILD_SCRIPT="$SCRIPT_DIR/sim/build_octonyte_sim.sh"
+    SIM_BINARY="octonyte_sim"
+    ISA_FILE="octonyte/octonyte_isa.yaml"
+    PLATFORM_FILE="octonyte/octonyte_platform.yaml"
+    RTL_TOP="$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/OctoNyteRV32ICore.v"
+    RTL_GEN_TASK="generators/generateOctoNyteRTL"
+    ;;
   *)
     echo "Unsupported processor: $PROCESSOR" >&2
     exit 1
@@ -129,6 +138,7 @@ OUTPUT_DIR="$SCRIPT_DIR/output/rv32i/$PROCESSOR"
 mkdir -p "$OUTPUT_DIR"
 
 SUITE_PATH="$SUITE_ROOT"
+SMOKE_CASES=()
 if $SMOKE_TEST; then
   SMOKE_DIR="$SCRIPT_DIR/smoke_suite"
   mkdir -p "$SMOKE_DIR"
@@ -175,6 +185,7 @@ if $SMOKE_TEST; then
     exit 1
   fi
   SUITE_PATH="$SMOKE_DIR"
+  SMOKE_CASES=("${COPIED[@]}")
   echo "Smoke test enabled: running ${#COPIED[@]} tests: ${COPIED[*]}"
 fi
 
@@ -221,18 +232,55 @@ export PATH="$TOOLCHAIN_DIR:$PATH"
 export PYTHONPATH="$VENV_BIN:${PYTHONPATH:-}"
 export PYTHONPATH="$SCRIPT_DIR/riscof:$PLUGIN_ROOT:$PYTHONPATH"
 
-pushd "$SCRIPT_DIR/riscof" >/dev/null
-RISCOF_TIMEOUT=${TIMEOUT_SECS} \
-TIMEOUT=${TIMEOUT_SECS} \
-  riscof run \
-  --config "$CONFIG_GENERATED" \
-  --work-dir "$OUTPUT_DIR" \
-  --suite "$SUITE_PATH" \
-  --env "$ENV_ROOT"
-popd >/dev/null
+run_riscof_suite() {
+  local suite_dir="$1"
+  local work_dir="$2"
+  local label="$3"
+  mkdir -p "$work_dir"
+  echo "[INFO] Running RISCOF suite '$label' (suite=${suite_dir}, work=${work_dir})"
+  pushd "$SCRIPT_DIR/riscof" >/dev/null
+  RISCOF_TIMEOUT=${TIMEOUT_SECS} \
+  TIMEOUT=${TIMEOUT_SECS} \
+    riscof run \
+    --config "$CONFIG_GENERATED" \
+    --work-dir "$work_dir" \
+    --suite "$suite_dir" \
+    --env "$ENV_ROOT"
+  local status=$?
+  popd >/dev/null
+  return $status
+}
 
-echo "RISCV RV32I conformance results for $PROCESSOR available under $OUTPUT_DIR"
-if $SMOKE_TEST; then
+if $SMOKE_TEST && [[ "$PROCESSOR" == "octonyte" ]]; then
+  overall_status=0
+  for test_name in "${SMOKE_CASES[@]}"; do
+    label="${test_name%.*}"
+    single_suite="$SMOKE_DIR/${label}_suite"
+    rm -rf "$single_suite"
+    mkdir -p "$single_suite/src"
+    cp "$SMOKE_DIR/src/$test_name" "$single_suite/src/"
+    single_output="$OUTPUT_DIR/$label"
+    rm -rf "$single_output"
+    echo "=============================="
+    echo "[SMOKE] Starting $test_name for OctoNyte"
+    if run_riscof_suite "$single_suite" "$single_output" "$label"; then
+      echo "[SMOKE] $test_name PASSED (artifacts under $single_output)"
+    else
+      echo "[SMOKE] $test_name FAILED (see $single_output for logs)" >&2
+      overall_status=1
+      break
+    fi
+  done
+  if [[ $overall_status -ne 0 ]]; then
+    exit $overall_status
+  fi
+  echo "RISCV RV32I OctoNyte smoke results stored under $OUTPUT_DIR/<test>"
+else
+  run_riscof_suite "$SUITE_PATH" "$OUTPUT_DIR" "$PROCESSOR"
+  echo "RISCV RV32I conformance results for $PROCESSOR available under $OUTPUT_DIR"
+fi
+
+if $SMOKE_TEST && [[ "$PROCESSOR" != "octonyte" ]]; then
   echo "[INFO] Smoke artifacts under $OUTPUT_DIR (signatures/logs):"
   find "$OUTPUT_DIR" -type f \( -name "*.signature" -o -name "*.log" -o -name "*.elf" \) | sed 's|^|  |'
   echo "[INFO] Smoke tests executed:"

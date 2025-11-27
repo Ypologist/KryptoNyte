@@ -7,42 +7,29 @@ import org.scalatest.flatspec.AnyFlatSpec
 class ThreadSchedulerTest extends AnyFlatSpec {
   behavior of "ThreadScheduler"
 
-  it should "round-robin all enabled threads" in {
-    simulate(new ThreadScheduler(8)) { dut =>
-      for (i <- 0 until 8) dut.io.threadEnable(i).poke(true.B)
-      val seen = collection.mutable.ArrayBuffer[Int]()
-      for (c <- 0 until 16) {
-        val cur = dut.io.currentThread.peek().litValue.toInt
-        seen += cur
-        if (c < 10) println(s"[cycle $c] currentThread=$cur")
+  private def checkSequence(start: Int): Unit = {
+    simulate(new ThreadScheduler(numThreads = 8, startingThread = start)) { dut =>
+      dut.reset.poke(true.B)
+      dut.clock.step()
+      dut.reset.poke(false.B)
+      val totalCycles = 16
+      for (c <- 0 until totalCycles) {
+        val expected = (start + c) % 8
+        val expStages = Seq.tabulate(8)(i => (expected + 8 - i) % 8)
+        val curr = dut.io.currentThread.peek().litValue.toInt
+        val stages = dut.io.stageThreads.map(_.peek().litValue.toInt)
+        assert(curr == expected, s"cycle $c currentThread $curr != expected $expected (start=$start)")
+        assert(stages == expStages, s"cycle $c stageThreads $stages != expected $expStages (start=$start)")
         dut.clock.step()
       }
-      val expected = Seq(0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7)
-      assert(seen == expected, s"Unexpected sequence: $seen")
     }
   }
 
-  it should "provide stageThreads as (sel - i) mod N for a full barrel" in {
-    val n = 8
-    val stages = 8
-    simulate(new ThreadScheduler(n, stages)) { dut =>
-      for (i <- 0 until n) dut.io.threadEnable(i).poke(true.B)
-      val stageNames = Seq("F","DEC","DIS","RR","EX1","EX2","EX3","WB")
-      for (cycle <- 0 until n) {
-        val fetch = dut.io.currentThread.peek().litValue.toInt
-        if (cycle < 8) {
-          val stagesStr = (0 until stages).map(i => s"${stageNames(i)}:${dut.io.stageThreads(i).peek().litValue.toInt}").mkString(" ")
-          println(s"[cycle $cycle] fetch=$fetch $stagesStr")
-        }
-        // stageThreads(0) should equal currentThread
-        assert(dut.io.stageThreads(0).peek().litValue.toInt == fetch)
-        for (i <- 0 until stages) {
-          val expected = (fetch + n - i) % n
-          val got = dut.io.stageThreads(i).peek().litValue.toInt
-          assert(got == expected, s"cycle $cycle stage $i expected $expected got $got")
-        }
-        dut.clock.step()
-      }
-    }
+  it should "roll through 8 threads starting at 0" in {
+    checkSequence(start = 0)
+  }
+
+  it should "roll through 8 threads starting at 5" in {
+    checkSequence(start = 5)
   }
 }
