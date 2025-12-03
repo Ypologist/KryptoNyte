@@ -3,6 +3,7 @@ package TetraNyte
 import chisel3._
 import chisel3.util._
 import ALUs._
+import ALUs.{Mul32OneCycle, Div32Radix4}
 import BranchUnit._
 import Decoders._
 import LoadUnit._
@@ -103,13 +104,18 @@ class TetraNyteRV32ICore extends Module {
   val threadEnabled = io.threadEnable(currentThread)
   val currentPC = pcRegs(currentThread)
 
-  if_id.threadId := currentThread
-  if_id.pc := currentPC
-  if_id.instr := io.instrMem
-  if_id.rs1 := io.instrMem(19, 15)
-  if_id.rs2 := io.instrMem(24, 20)
-  if_id.rd := io.instrMem(11, 7)
-  if_id.valid := !flushThisThread && threadEnabled
+  // Divider stall signal declared later; predeclare to allow gating here
+  val divStallWire = WireDefault(false.B)
+
+  when(!divStallWire) {
+    if_id.threadId := currentThread
+    if_id.pc := currentPC
+    if_id.instr := io.instrMem
+    if_id.rs1 := io.instrMem(19, 15)
+    if_id.rs2 := io.instrMem(24, 20)
+    if_id.rd := io.instrMem(11, 7)
+    if_id.valid := !flushThisThread && threadEnabled
+  }
 
   when(if_id.valid) {
     debugIfInstr(currentThread) := if_id.instr
@@ -118,7 +124,7 @@ class TetraNyteRV32ICore extends Module {
   // Advance round-robin selector
   when(reset.asBool) {
     threadSel := 0.U
-  }.otherwise {
+  }.elsewhen(!divStallWire) {
     threadSel := Mux(threadSel === (numThreads - 1).U, 0.U, threadSel + 1.U)
   }
 
@@ -127,23 +133,25 @@ class TetraNyteRV32ICore extends Module {
   val rs1 = if_id.rs1
   val rs2 = if_id.rs2
 
-  id_ex.pc := if_id.pc
-  id_ex.instr := if_id.instr
-  id_ex.threadId := if_id.threadId
-  id_ex.valid := if_id.valid && !flushThread(if_id.threadId)
-  id_ex.rs1 := rs1
-  id_ex.rs2 := rs2
-  id_ex.rd := if_id.rd
-  id_ex.imm := decodeSignals.imm
-  id_ex.aluOp := decodeSignals.aluOp
-  id_ex.isALU := decodeSignals.isALU
-  id_ex.isLoad := decodeSignals.isLoad
-  id_ex.isStore := decodeSignals.isStore
-  id_ex.isBranch := decodeSignals.isBranch
-  id_ex.isJAL := decodeSignals.isJAL
-  id_ex.isJALR := decodeSignals.isJALR
-  id_ex.isLUI := decodeSignals.isLUI
-  id_ex.isAUIPC := decodeSignals.isAUIPC
+  when(!divStallWire) {
+    id_ex.pc := if_id.pc
+    id_ex.instr := if_id.instr
+    id_ex.threadId := if_id.threadId
+    id_ex.valid := if_id.valid && !flushThread(if_id.threadId)
+    id_ex.rs1 := rs1
+    id_ex.rs2 := rs2
+    id_ex.rd := if_id.rd
+    id_ex.imm := decodeSignals.imm
+    id_ex.aluOp := decodeSignals.aluOp
+    id_ex.isALU := decodeSignals.isALU
+    id_ex.isLoad := decodeSignals.isLoad
+    id_ex.isStore := decodeSignals.isStore
+    id_ex.isBranch := decodeSignals.isBranch
+    id_ex.isJAL := decodeSignals.isJAL
+    id_ex.isJALR := decodeSignals.isJALR
+    id_ex.isLUI := decodeSignals.isLUI
+    id_ex.isAUIPC := decodeSignals.isAUIPC
+  }
   // If this thread is disabled, squash the decode output
   when(!io.threadEnable(if_id.threadId)) {
     id_ex.valid := false.B
@@ -186,6 +194,8 @@ class TetraNyteRV32ICore extends Module {
   val alu = Module(new ALU32)
   val instr = id_ex.instr
   val opcode = instr(6, 0)
+  val funct3 = instr(14, 12)
+  val funct7 = instr(31, 25)
   val operandA = WireDefault(id_ex.rs1Data)
   val operandB = WireDefault(id_ex.rs2Data)
 
@@ -208,23 +218,73 @@ class TetraNyteRV32ICore extends Module {
   alu.io.b := operandB
   alu.io.opcode := id_ex.aluOp
 
-  ex_mem.aluResult := alu.io.result
-  ex_mem.instr := id_ex.instr
-  ex_mem.threadId := id_ex.threadId
-  ex_mem.rd := id_ex.rd
-  ex_mem.isALU := id_ex.isALU
-  ex_mem.isLoad := id_ex.isLoad
-  ex_mem.isStore := id_ex.isStore
-  ex_mem.isBranch := id_ex.isBranch
-  ex_mem.isJAL := id_ex.isJAL
-  ex_mem.isJALR := id_ex.isJALR
-  ex_mem.isLUI := id_ex.isLUI
-  ex_mem.isAUIPC := id_ex.isAUIPC
-  ex_mem.valid := id_ex.valid
-  ex_mem.rs1Data := id_ex.rs1Data
-  ex_mem.rs2Data := id_ex.rs2Data
-  ex_mem.pc := id_ex.pc
-  ex_mem.imm := id_ex.imm
+  // M-extension: single-cycle multiply
+  val isMExt = opcode === RV32IDecode.OP_R && funct7 === "b0000001".U
+  val isMulInstr = isMExt && (funct3 <= "b011".U)
+  val isDivInstr = isMExt && (funct3 >= "b100".U)
+
+  val mulUnit = Module(new Mul32OneCycle)
+  val mulSignedA = WireDefault(true.B)
+  val mulSignedB = WireDefault(true.B)
+  when(funct3 === "b011".U) { // MULHU
+    mulSignedA := false.B; mulSignedB := false.B
+  }.elsewhen(funct3 === "b010".U) { // MULHSU
+    mulSignedA := true.B; mulSignedB := false.B
+  }
+  mulUnit.io.a := id_ex.rs1Data
+  mulUnit.io.b := id_ex.rs2Data
+  mulUnit.io.signedA := mulSignedA
+  mulUnit.io.signedB := mulSignedB
+
+  val mulResult = MuxLookup(funct3, mulUnit.io.lo)(Seq(
+    "b000".U -> mulUnit.io.lo,
+    "b001".U -> mulUnit.io.hi,
+    "b010".U -> mulUnit.io.hi,
+    "b011".U -> mulUnit.io.hi
+  ))
+
+  // M-extension: multi-cycle divide
+  val divider = Module(new Div32Radix4)
+  val divBusy = RegInit(false.B)
+  val divSigned = (funct3 === "b100".U) || (funct3 === "b110".U)
+  divider.io.start := false.B
+  divider.io.signed := divSigned
+  divider.io.dividend := id_ex.rs1Data
+  divider.io.divisor := id_ex.rs2Data
+
+  when(isDivInstr && id_ex.valid && !divBusy) {
+    divider.io.start := true.B
+    divBusy := true.B
+  }.elsewhen(divider.io.done && divBusy) {
+    divBusy := false.B
+  }
+
+  val divResult = Mux(funct3 === "b100".U || funct3 === "b101".U,
+    divider.io.quotient,
+    divider.io.remainder)
+  val divDone = divBusy && divider.io.done
+  val divStall = divBusy && !divider.io.done
+  divStallWire := divStall
+
+  when(!divStall) {
+    ex_mem.aluResult := Mux(isMulInstr && id_ex.valid, mulResult, alu.io.result)
+    ex_mem.instr := id_ex.instr
+    ex_mem.threadId := id_ex.threadId
+    ex_mem.rd := id_ex.rd
+    ex_mem.isALU := id_ex.isALU || (isMExt && id_ex.valid)
+    ex_mem.isLoad := id_ex.isLoad
+    ex_mem.isStore := id_ex.isStore
+    ex_mem.isBranch := id_ex.isBranch
+    ex_mem.isJAL := id_ex.isJAL
+    ex_mem.isJALR := id_ex.isJALR
+    ex_mem.isLUI := id_ex.isLUI
+    ex_mem.isAUIPC := id_ex.isAUIPC
+    ex_mem.valid := id_ex.valid && !isDivInstr // div handled separately
+    ex_mem.rs1Data := id_ex.rs1Data
+    ex_mem.rs2Data := id_ex.rs2Data
+    ex_mem.pc := id_ex.pc
+    ex_mem.imm := id_ex.imm
+  }
 
   when(ex_mem.valid) {
     debugExAlu(ex_mem.threadId) := ex_mem.aluResult
@@ -245,29 +305,57 @@ class TetraNyteRV32ICore extends Module {
   // Shared memory interface driven by the single current MEM stage
   val memStoreActive = ex_mem.valid && ex_mem.isStore && io.threadEnable(ex_mem.threadId) && !storeUnit.io.misaligned
   val addrBase = Cat(ex_mem.aluResult(31, 2), 0.U(2.W))
-  io.memAddr := addrBase
-  io.memWrite := Mux(memStoreActive, storeUnit.io.memWrite, 0.U)
-  io.memMask := Mux(memStoreActive, storeUnit.io.mask, 0.U)
-  io.memMisaligned := ex_mem.valid && io.threadEnable(ex_mem.threadId) && storeUnit.io.misaligned
+  io.memAddr := Mux(divStall, 0.U, addrBase)
+  io.memWrite := Mux(divStall, 0.U, Mux(memStoreActive, storeUnit.io.memWrite, 0.U))
+  io.memMask := Mux(divStall, 0.U, Mux(memStoreActive, storeUnit.io.mask, 0.U))
+  io.memMisaligned := !divStall && ex_mem.valid && io.threadEnable(ex_mem.threadId) && storeUnit.io.misaligned
 
-  mem_wb.aluResult := ex_mem.aluResult
-  mem_wb.memRdata := loadData
-  mem_wb.instr := ex_mem.instr
-  mem_wb.threadId := ex_mem.threadId
-  mem_wb.rd := ex_mem.rd
-  mem_wb.isALU := ex_mem.isALU
-  mem_wb.isLoad := ex_mem.isLoad
-  mem_wb.isStore := ex_mem.isStore
-  mem_wb.isBranch := ex_mem.isBranch
-  mem_wb.isJAL := ex_mem.isJAL
-  mem_wb.isJALR := ex_mem.isJALR
-  mem_wb.isLUI := ex_mem.isLUI
-  mem_wb.isAUIPC := ex_mem.isAUIPC
-  mem_wb.valid := ex_mem.valid && io.threadEnable(ex_mem.threadId)
-  mem_wb.pc := ex_mem.pc
-  mem_wb.imm := ex_mem.imm
-  mem_wb.rs1Data := ex_mem.rs1Data
-  mem_wb.rs2Data := ex_mem.rs2Data
+  when(!divStall) {
+    mem_wb.aluResult := ex_mem.aluResult
+    mem_wb.memRdata := loadData
+    mem_wb.instr := ex_mem.instr
+    mem_wb.threadId := ex_mem.threadId
+    mem_wb.rd := ex_mem.rd
+    mem_wb.isALU := ex_mem.isALU
+    mem_wb.isLoad := ex_mem.isLoad
+    mem_wb.isStore := ex_mem.isStore
+    mem_wb.isBranch := ex_mem.isBranch
+    mem_wb.isJAL := ex_mem.isJAL
+    mem_wb.isJALR := ex_mem.isJALR
+    mem_wb.isLUI := ex_mem.isLUI
+    mem_wb.isAUIPC := ex_mem.isAUIPC
+    mem_wb.valid := ex_mem.valid && io.threadEnable(ex_mem.threadId)
+    mem_wb.pc := ex_mem.pc
+    mem_wb.imm := ex_mem.imm
+    mem_wb.rs1Data := ex_mem.rs1Data
+    mem_wb.rs2Data := ex_mem.rs2Data
+  }
+
+  when(divDone) {
+    mem_wb.aluResult := divResult
+    mem_wb.memRdata := 0.U
+    mem_wb.instr := id_ex.instr
+    mem_wb.threadId := id_ex.threadId
+    mem_wb.rd := id_ex.rd
+    mem_wb.isALU := true.B
+    mem_wb.isLoad := false.B
+    mem_wb.isStore := false.B
+    mem_wb.isBranch := false.B
+    mem_wb.isJAL := false.B
+    mem_wb.isJALR := false.B
+    mem_wb.isLUI := false.B
+    mem_wb.isAUIPC := false.B
+    mem_wb.valid := true.B && io.threadEnable(id_ex.threadId)
+    mem_wb.pc := id_ex.pc
+    mem_wb.imm := id_ex.imm
+    mem_wb.rs1Data := id_ex.rs1Data
+    mem_wb.rs2Data := id_ex.rs2Data
+    id_ex.valid := false.B
+    if_id.valid := false.B
+  }
+  when(divStall) {
+    mem_wb.valid := false.B
+  }
 
   when(mem_wb.valid) {
     debugMemLoad(mem_wb.threadId) := mem_wb.memRdata
@@ -303,7 +391,7 @@ class TetraNyteRV32ICore extends Module {
   // ===================== PC Update & Control =====================
   val rs1Val = mem_wb.rs1Data
   val rs2Val = mem_wb.rs2Data
-  val funct3 = mem_wb.instr(14, 12)
+  val funct3Wb = mem_wb.instr(14, 12)
 
   // Early branch/JAL/JALR resolution at EX to avoid retiring fall-through work
   val branchCondEx = WireDefault(false.B)
@@ -334,39 +422,41 @@ class TetraNyteRV32ICore extends Module {
   // Branches/JAL/JALR are resolved in EX; WB branchTaken is unused
   val branchTaken = false.B
 
-  when(branchTakenEx && io.threadEnable(id_ex.threadId)) {
-    pcRegs(id_ex.threadId) := branchTargetEx
-    flushThread(id_ex.threadId) := true.B
-  }.elsewhen(jalTakenEx && io.threadEnable(id_ex.threadId)) {
-    pcRegs(id_ex.threadId) := jalTargetEx
-    flushThread(id_ex.threadId) := true.B
-  }.elsewhen(jalrTakenEx && io.threadEnable(id_ex.threadId)) {
-    pcRegs(id_ex.threadId) := jalrTargetEx
-    flushThread(id_ex.threadId) := true.B
-  }.elsewhen(mem_wb.valid) {
-    flushThread(wbThread) := false.B
-  }
-
-  // Flush younger in-flight instructions from the taken-control-transfer thread so fall-through work is discarded.
-  // Only IF/ID need clearing; older stages must be preserved to retire results.
-  when((branchTakenEx || jalTakenEx || jalrTakenEx) && io.threadEnable(id_ex.threadId)) {
-    when(if_id.threadId === id_ex.threadId) { if_id.valid := false.B }
-  }
-
-  // Default sequential advance for the currently fetched thread unless a control transfer just wrote it.
-  when(!reset.asBool && !flushThisThread && threadEnabled) {
-    when(!(branchTakenEx && id_ex.threadId === currentThread) &&
-         !(jalTakenEx && id_ex.threadId === currentThread) &&
-         !(jalrTakenEx && id_ex.threadId === currentThread)) {
-      pcRegs(currentThread) := currentPC + 4.U
+  when(!divStall) {
+    when(branchTakenEx && io.threadEnable(id_ex.threadId)) {
+      pcRegs(id_ex.threadId) := branchTargetEx
+      flushThread(id_ex.threadId) := true.B
+    }.elsewhen(jalTakenEx && io.threadEnable(id_ex.threadId)) {
+      pcRegs(id_ex.threadId) := jalTargetEx
+      flushThread(id_ex.threadId) := true.B
+    }.elsewhen(jalrTakenEx && io.threadEnable(id_ex.threadId)) {
+      pcRegs(id_ex.threadId) := jalrTargetEx
+      flushThread(id_ex.threadId) := true.B
+    }.elsewhen(mem_wb.valid) {
+      flushThread(wbThread) := false.B
     }
-    flushThread(currentThread) := false.B
-  }.elsewhen(!reset.asBool && flushThisThread && threadEnabled) {
-    // Clear one-shot flush after it has been observed at fetch when no new branch update happens.
-    when(!(branchTakenEx && id_ex.threadId === currentThread) &&
-         !(jalTakenEx && id_ex.threadId === currentThread) &&
-         !(jalrTakenEx && id_ex.threadId === currentThread)) {
+
+    // Flush younger in-flight instructions from the taken-control-transfer thread so fall-through work is discarded.
+    // Only IF/ID need clearing; older stages must be preserved to retire results.
+    when((branchTakenEx || jalTakenEx || jalrTakenEx) && io.threadEnable(id_ex.threadId)) {
+      when(if_id.threadId === id_ex.threadId) { if_id.valid := false.B }
+    }
+
+    // Default sequential advance for the currently fetched thread unless a control transfer just wrote it.
+    when(!reset.asBool && !flushThisThread && threadEnabled) {
+      when(!(branchTakenEx && id_ex.threadId === currentThread) &&
+           !(jalTakenEx && id_ex.threadId === currentThread) &&
+           !(jalrTakenEx && id_ex.threadId === currentThread)) {
+        pcRegs(currentThread) := currentPC + 4.U
+      }
       flushThread(currentThread) := false.B
+    }.elsewhen(!reset.asBool && flushThisThread && threadEnabled) {
+      // Clear one-shot flush after it has been observed at fetch when no new branch update happens.
+      when(!(branchTakenEx && id_ex.threadId === currentThread) &&
+           !(jalTakenEx && id_ex.threadId === currentThread) &&
+           !(jalrTakenEx && id_ex.threadId === currentThread)) {
+        flushThread(currentThread) := false.B
+      }
     }
   }
 
