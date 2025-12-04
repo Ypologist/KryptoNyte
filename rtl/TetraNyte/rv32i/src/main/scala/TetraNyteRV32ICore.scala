@@ -55,6 +55,15 @@ class TetraNyteRV32ICore extends Module {
   val numThreads = 4
   val io = IO(new TetraNyteRV32ICoreIO(numThreads))
 
+  // Memory port wrapper keeps the legacy SRAM view while we migrate to TileLink.
+  val memPort = Module(new TetraNyteMemPort())
+  memPort.io.tl.a.ready := true.B
+  memPort.io.tl.d.valid := false.B
+  memPort.io.tl.d.bits := 0.U.asTypeOf(memPort.io.tl.d.bits)
+
+  val rrPtr = RegInit(0.U(log2Ceil(numThreads).W))
+  val activeThread = rrPtr
+
   // Per-thread PC registers
   val pcRegs = RegInit(VecInit(Seq.fill(numThreads)("h80000000".U(32.W))))
 
@@ -64,15 +73,21 @@ class TetraNyteRV32ICore extends Module {
   val ex_mem = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new PipelineRegBundle))))
   val mem_wb = RegInit(VecInit(Seq.fill(numThreads)(0.U.asTypeOf(new PipelineRegBundle))))
 
-  val flushThread = Wire(Vec(numThreads, Bool()))
+  val flushThread = WireInit(VecInit(Seq.fill(numThreads)(false.B)))
   // One Register file per thread
   val regFiles = Seq.fill(numThreads)(Module(new RegFileMT2R1WVec(numThreads = 1)))
 
   // Default IO outputs for preventing uninitialized errors
-  io.memAddr := 0.U
-  io.memWrite := 0.U
-  io.memMask := 0.U
+  io.memAddr := memPort.io.passthroughMem.addr
+  io.memWrite := memPort.io.passthroughMem.writeData
+  io.memMask := memPort.io.passthroughMem.writeMask
   io.memMisaligned := false.B
+  memPort.io.passthroughMem.readData := io.dataMemResp
+  memPort.io.legacy.valid := false.B
+  memPort.io.legacy.addr := 0.U
+  memPort.io.legacy.writeData := 0.U
+  memPort.io.legacy.writeMask := 0.U
+  memPort.io.legacy.misaligned := false.B
 
   // Wires for forwarding paths
   val rs1DataVec = Wire(Vec(numThreads, UInt(32.W)))
@@ -82,38 +97,27 @@ class TetraNyteRV32ICore extends Module {
 
   // ===================== Instruction Fetch (IF) =====================
   for (t <- 0 until numThreads) {
-    if_id(t).pc := pcRegs(t)
-    if_id(t).instr := io.instrMem(t)
-    if_id(t).valid := !flushThread(t)
-    if_id(t).threadId := t.U
-    if_id(t).rs1 := io.instrMem(t)(19, 15)
-    if_id(t).rs2 := io.instrMem(t)(24, 20)
-    if_id(t).rd := io.instrMem(t)(11, 7)
+    val active = activeThread === t.U
+    val nextIf = WireDefault(if_id(t))
+    nextIf.pc := pcRegs(t)
+    nextIf.instr := io.instrMem(t)
+    nextIf.valid := !flushThread(t)
+    nextIf.threadId := t.U
+    nextIf.rs1 := io.instrMem(t)(19, 15)
+    nextIf.rs2 := io.instrMem(t)(24, 20)
+    nextIf.rd := io.instrMem(t)(11, 7)
+
+    when(active) {
+      if_id(t) := nextIf
+    }
   }
 
   // ===================== Instruction Decode (ID) with Forwarding =====================
   for (t <- 0 until numThreads) {
+    val active = activeThread === t.U
     val decodeSignals = RV32IDecode.decodeInstr(if_id(t).instr)
     val rs1 = if_id(t).rs1
     val rs2 = if_id(t).rs2
-
-    id_ex(t).pc := if_id(t).pc
-    id_ex(t).instr := if_id(t).instr
-    id_ex(t).threadId := if_id(t).threadId
-    id_ex(t).valid := Mux(flushThread(t), false.B, if_id(t).valid)
-    id_ex(t).rs1 := rs1
-    id_ex(t).rs2 := rs2
-    id_ex(t).rd := if_id(t).rd
-    id_ex(t).imm := decodeSignals.imm
-    id_ex(t).aluOp := decodeSignals.aluOp
-    id_ex(t).isALU := decodeSignals.isALU
-    id_ex(t).isLoad := decodeSignals.isLoad
-    id_ex(t).isStore := decodeSignals.isStore
-    id_ex(t).isBranch := decodeSignals.isBranch
-    id_ex(t).isJAL := decodeSignals.isJAL
-    id_ex(t).isJALR := decodeSignals.isJALR
-    id_ex(t).isLUI := decodeSignals.isLUI
-    id_ex(t).isAUIPC := decodeSignals.isAUIPC
 
     // Read from Registers with forwarding paths
     val rf = regFiles(t)
@@ -146,12 +150,32 @@ class TetraNyteRV32ICore extends Module {
     rs1DataVec(t) := rs1Fwd
     rs2DataVec(t) := rs2Fwd
 
-    id_ex(t).rs1Data := rs1Fwd
-    id_ex(t).rs2Data := rs2Fwd
+    when(active) {
+      id_ex(t).pc := if_id(t).pc
+      id_ex(t).instr := if_id(t).instr
+      id_ex(t).threadId := if_id(t).threadId
+      id_ex(t).valid := Mux(flushThread(t), false.B, if_id(t).valid)
+      id_ex(t).rs1 := rs1
+      id_ex(t).rs2 := rs2
+      id_ex(t).rd := if_id(t).rd
+      id_ex(t).imm := decodeSignals.imm
+      id_ex(t).aluOp := decodeSignals.aluOp
+      id_ex(t).isALU := decodeSignals.isALU
+      id_ex(t).isLoad := decodeSignals.isLoad
+      id_ex(t).isStore := decodeSignals.isStore
+      id_ex(t).isBranch := decodeSignals.isBranch
+      id_ex(t).isJAL := decodeSignals.isJAL
+      id_ex(t).isJALR := decodeSignals.isJALR
+      id_ex(t).isLUI := decodeSignals.isLUI
+      id_ex(t).isAUIPC := decodeSignals.isAUIPC
+      id_ex(t).rs1Data := rs1Fwd
+      id_ex(t).rs2Data := rs2Fwd
+    }
   }
 
   // ===================== Execute (EX) Stage =====================
   for (t <- 0 until numThreads) {
+    val active = activeThread === t.U
     val alu = Module(new ALU32)
     val instr = id_ex(t).instr
     val opcode = instr(6, 0)
@@ -176,29 +200,32 @@ class TetraNyteRV32ICore extends Module {
     alu.io.a := operandA
     alu.io.b := operandB
     alu.io.opcode := id_ex(t).aluOp
-    ex_mem(t).aluResult := alu.io.result
-    ex_mem(t).instr := id_ex(t).instr
-    ex_mem(t).rd := id_ex(t).rd
-    ex_mem(t).isALU := id_ex(t).isALU
-    ex_mem(t).isLoad := id_ex(t).isLoad
-    ex_mem(t).isStore := id_ex(t).isStore
-    ex_mem(t).isBranch := id_ex(t).isBranch
-    ex_mem(t).isJAL := id_ex(t).isJAL
-    ex_mem(t).isJALR := id_ex(t).isJALR
-    ex_mem(t).isLUI := id_ex(t).isLUI
-    ex_mem(t).isAUIPC := id_ex(t).isAUIPC
-    ex_mem(t).valid := Mux(flushThread(t), false.B, id_ex(t).valid)
-    ex_mem(t).rs1Data := id_ex(t).rs1Data
-    ex_mem(t).rs2Data := id_ex(t).rs2Data
-    ex_mem(t).pc := id_ex(t).pc
-    ex_mem(t).imm := id_ex(t).imm
+    when(active) {
+      ex_mem(t).aluResult := alu.io.result
+      ex_mem(t).instr := id_ex(t).instr
+      ex_mem(t).rd := id_ex(t).rd
+      ex_mem(t).isALU := id_ex(t).isALU
+      ex_mem(t).isLoad := id_ex(t).isLoad
+      ex_mem(t).isStore := id_ex(t).isStore
+      ex_mem(t).isBranch := id_ex(t).isBranch
+      ex_mem(t).isJAL := id_ex(t).isJAL
+      ex_mem(t).isJALR := id_ex(t).isJALR
+      ex_mem(t).isLUI := id_ex(t).isLUI
+      ex_mem(t).isAUIPC := id_ex(t).isAUIPC
+      ex_mem(t).valid := Mux(flushThread(t), false.B, id_ex(t).valid)
+      ex_mem(t).rs1Data := id_ex(t).rs1Data
+      ex_mem(t).rs2Data := id_ex(t).rs2Data
+      ex_mem(t).pc := id_ex(t).pc
+      ex_mem(t).imm := id_ex(t).imm
+    }
   }
 
   // ===================== Memory (MEM) Stage =====================
   for (t <- 0 until numThreads) {
+    val active = activeThread === t.U
     val loadUnit = Module(new LoadUnit)
     loadUnit.io.addr := ex_mem(t).aluResult
-    loadUnit.io.dataIn := io.dataMemResp
+    loadUnit.io.dataIn := memPort.io.legacy.readData
     loadUnit.io.funct3 := ex_mem(t).instr(14, 12)
     val loadData = loadUnit.io.dataOut
 
@@ -207,51 +234,59 @@ class TetraNyteRV32ICore extends Module {
     storeUnit.io.data := ex_mem(t).rs2Data
     storeUnit.io.storeType := ex_mem(t).instr(14, 12)
 
-    // Drive shared memory signals from thread 0 for illustration:
     val addrBase = Cat(ex_mem(t).aluResult(31, 2), 0.U(2.W))
-    if (t == 0) {
-      io.memAddr := addrBase
-      io.memWrite := Mux(ex_mem(t).isStore && !storeUnit.io.misaligned, storeUnit.io.memWrite, 0.U)
-      io.memMask := Mux(ex_mem(t).isStore && !storeUnit.io.misaligned, storeUnit.io.mask, 0.U)
+    when(active) {
+      val writeData = Mux(ex_mem(t).isStore && !storeUnit.io.misaligned, storeUnit.io.memWrite, 0.U)
+      val writeMask = Mux(ex_mem(t).isStore && !storeUnit.io.misaligned, storeUnit.io.mask, 0.U)
+      memPort.io.legacy.valid := ex_mem(t).valid
+      memPort.io.legacy.addr := addrBase
+      memPort.io.legacy.writeData := writeData
+      memPort.io.legacy.writeMask := writeMask
+      memPort.io.legacy.misaligned := storeUnit.io.misaligned
       io.memMisaligned := storeUnit.io.misaligned
     }
 
-    mem_wb(t).aluResult := ex_mem(t).aluResult
-    mem_wb(t).memRdata := loadData
-    mem_wb(t).instr := ex_mem(t).instr
-    mem_wb(t).rd := ex_mem(t).rd
-    mem_wb(t).isALU := ex_mem(t).isALU
-    mem_wb(t).isLoad := ex_mem(t).isLoad
-    mem_wb(t).isStore := ex_mem(t).isStore
-    mem_wb(t).isBranch := ex_mem(t).isBranch
-    mem_wb(t).isJAL := ex_mem(t).isJAL
-    mem_wb(t).isJALR := ex_mem(t).isJALR
-    mem_wb(t).isLUI := ex_mem(t).isLUI
-    mem_wb(t).isAUIPC := ex_mem(t).isAUIPC
-    mem_wb(t).valid := ex_mem(t).valid
-    mem_wb(t).pc := ex_mem(t).pc
-    mem_wb(t).imm := ex_mem(t).imm
-    mem_wb(t).rs1Data := ex_mem(t).rs1Data
-    mem_wb(t).rs2Data := ex_mem(t).rs2Data
+    when(active) {
+      mem_wb(t).aluResult := ex_mem(t).aluResult
+      mem_wb(t).memRdata := loadData
+      mem_wb(t).instr := ex_mem(t).instr
+      mem_wb(t).rd := ex_mem(t).rd
+      mem_wb(t).isALU := ex_mem(t).isALU
+      mem_wb(t).isLoad := ex_mem(t).isLoad
+      mem_wb(t).isStore := ex_mem(t).isStore
+      mem_wb(t).isBranch := ex_mem(t).isBranch
+      mem_wb(t).isJAL := ex_mem(t).isJAL
+      mem_wb(t).isJALR := ex_mem(t).isJALR
+      mem_wb(t).isLUI := ex_mem(t).isLUI
+      mem_wb(t).isAUIPC := ex_mem(t).isAUIPC
+      mem_wb(t).valid := ex_mem(t).valid
+      mem_wb(t).pc := ex_mem(t).pc
+      mem_wb(t).imm := ex_mem(t).imm
+      mem_wb(t).rs1Data := ex_mem(t).rs1Data
+      mem_wb(t).rs2Data := ex_mem(t).rs2Data
+    }
   }
 
   // ===================== Writeback (WB) Stage =====================
   for (t <- 0 until numThreads) {
+    val active = activeThread === t.U
     val pcPlus4 = mem_wb(t).pc + 4.U
     val auipcValue = mem_wb(t).pc + mem_wb(t).imm
     val wbData = Wire(UInt(32.W))
     wbData := mem_wb(t).aluResult
-    when(mem_wb(t).isLoad) {
-      wbData := mem_wb(t).memRdata
-    }.elsewhen(mem_wb(t).isLUI) {
-      wbData := mem_wb(t).imm
-    }.elsewhen(mem_wb(t).isAUIPC) {
-      wbData := auipcValue
-    }.elsewhen(mem_wb(t).isJAL || mem_wb(t).isJALR) {
-      wbData := pcPlus4
+    when(active) {
+      when(mem_wb(t).isLoad) {
+        wbData := mem_wb(t).memRdata
+      }.elsewhen(mem_wb(t).isLUI) {
+        wbData := mem_wb(t).imm
+      }.elsewhen(mem_wb(t).isAUIPC) {
+        wbData := auipcValue
+      }.elsewhen(mem_wb(t).isJAL || mem_wb(t).isJALR) {
+        wbData := pcPlus4
+      }
     }
 
-    val writeEnable = mem_wb(t).valid && mem_wb(t).rd =/= 0.U &&
+    val writeEnable = active && mem_wb(t).valid && mem_wb(t).rd =/= 0.U &&
       (mem_wb(t).isALU || mem_wb(t).isLoad || mem_wb(t).isLUI ||
         mem_wb(t).isAUIPC || mem_wb(t).isJAL || mem_wb(t).isJALR)
 
@@ -263,6 +298,7 @@ class TetraNyteRV32ICore extends Module {
 
   // ===================== PC Update =====================
   for (t <- 0 until numThreads) {
+    val active = activeThread === t.U
     val pcPlus4 = pcRegs(t) + 4.U
     val branchOffset = (mem_wb(t).imm.asSInt << 1).asUInt
     val branchTarget = (mem_wb(t).pc.asSInt + branchOffset.asSInt).asUInt
@@ -301,9 +337,13 @@ class TetraNyteRV32ICore extends Module {
       }
     }
 
-    pcRegs(t) := nextPC
+    when(active) {
+      pcRegs(t) := nextPC
+    }
     flushThread(t) := mem_wb(t).valid && (branchTaken || jalTaken || jalrTaken)
   }
+
+  rrPtr := Mux(rrPtr === (numThreads - 1).U, 0.U, rrPtr + 1.U)
 
   // ===================== Expose Pipeline State =====================
   io.if_pc := pcRegs

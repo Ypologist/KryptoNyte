@@ -64,6 +64,19 @@ class TetraNyteRV32ICoreTest extends AnyFlatSpec {
       val pipelineLatency = 4
       val totalCycles = program.length * numThreads
 
+      def assertRoundRobinSchedule(cycle: Int, prevPCs: Array[Long]): Unit = {
+        if (cycle < totalCycles) {
+          val changedThreads = (0 until numThreads).filter(t => threadPCs(t) != prevPCs(t))
+          val expectedThread = cycle % numThreads
+          val changedStr = changedThreads.mkString("[", ", ", "]")
+          val prevStr = prevPCs.mkString("[", ", ", "]")
+          val currStr = threadPCs.mkString("[", ", ", "]")
+          assert(changedThreads.size == 1 && changedThreads.head == expectedThread,
+            f"[Cycle $cycle%02d] Barrel schedule violated. Expected thread $expectedThread to advance PC " +
+              s"but threads $changedStr changed. prev=$prevStr curr=$currStr")
+        }
+      }
+
       def formatThreadLog(t: Int, fetchPc: Long): String = {
         val ifPc = threadPCs(t)
         val ifInstr = dut.io.if_instr(t).peek().litValue
@@ -85,6 +98,7 @@ class TetraNyteRV32ICoreTest extends AnyFlatSpec {
         driveDataMem(cycle)
         dut.clock.step()
         refreshPCs()
+        assertRoundRobinSchedule(cycle, pcsBeforeStep)
 
         if (cycle >= pipelineLatency) {
           val printCycle = cycle - pipelineLatency

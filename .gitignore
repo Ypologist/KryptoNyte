@@ -48,6 +48,7 @@ rtl/.sbtboot/
 **/plugins.sbt
 **/build.properties
 **/sbt.json
+**/.bsp/
 
 #==============================================================================
 # Simulation and Verification
