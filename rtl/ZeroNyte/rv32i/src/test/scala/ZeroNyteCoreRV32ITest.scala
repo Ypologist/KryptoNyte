@@ -12,9 +12,22 @@ class ZeroNyteRV32ICoreTest extends AnyFlatSpec {
       val printDebugInfo = true
       val mask32 = 0xFFFFFFFFL
 
+      def driveTLIdle(): Unit = {
+        dut.io.tl.a.ready.poke(true.B)
+        dut.io.tl.d.valid.poke(false.B)
+        dut.io.tl.d.bits.opcode.poke(0.U)
+        dut.io.tl.d.bits.param.poke(0.U)
+        dut.io.tl.d.bits.size.poke(0.U)
+        dut.io.tl.d.bits.source.poke(0.U)
+        dut.io.tl.d.bits.denied.poke(false.B)
+        dut.io.tl.d.bits.data.poke(0.U)
+        dut.io.tl.d.bits.corrupt.poke(false.B)
+      }
+
       // Apply reset to ensure deterministic starting state
       dut.reset.poke(true.B)
       dut.io.imem_rdata.poke(0.U)
+      driveTLIdle()
       dut.clock.step()
       dut.reset.poke(false.B)
 
@@ -28,6 +41,7 @@ class ZeroNyteRV32ICoreTest extends AnyFlatSpec {
 
         // Drive instruction memory with expected word for the current PC
         dut.io.imem_rdata.poke((expectedInstr & mask32).U(32.W))
+        driveTLIdle()
 
         val instr = dut.io.instr_out.peek().litValue.toLong & mask32
 
