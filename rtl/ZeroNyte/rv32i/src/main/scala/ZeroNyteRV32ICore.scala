@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import Decoders.RV32IDecode
 import ALUs.ALU32
+import TileLink._
 
 
 class ZeroNyteRV32ICore extends Module {
@@ -17,6 +18,9 @@ class ZeroNyteRV32ICore extends Module {
     val dmem_rdata = Input(UInt(32.W))
     val dmem_wdata = Output(UInt(32.W))
     val dmem_wen = Output(Bool())
+
+    // TileLink master port for data memory (optional; legacy path still works)
+    val tl = new TLBundleUL(TLParams())
 
     // Debug Outputs
     val pc_out    = Output(UInt(32.W))
@@ -54,6 +58,8 @@ class ZeroNyteRV32ICore extends Module {
   alu.io.b := operandB
   alu.io.opcode := dec.aluOp
 
+  val memPort = Module(new ZeroNyteMemPort())
+
   // ---------- Data Memory Access ----------
   val effAddr    = alu.io.result
   val addrBase   = Cat(effAddr(31, 2), 0.U(2.W))
@@ -61,7 +67,7 @@ class ZeroNyteRV32ICore extends Module {
   val halfOffset = effAddr(1)
   val storeFunct3 = instr(14, 12)
 
-  val dmemReadWord = io.dmem_rdata
+  val dmemReadWord = memPort.io.legacy.readData
 
   val storeData = WireDefault(r2Reg)
   when(dec.isStore) {
@@ -84,9 +90,23 @@ class ZeroNyteRV32ICore extends Module {
     }
   }
 
-  io.dmem_addr := addrBase
-  io.dmem_wdata := storeData
+  // Legacy outputs still exposed for compatibility.
+  memPort.io.legacy.valid := dec.isLoad || dec.isStore
+  memPort.io.legacy.addr := addrBase
+  memPort.io.legacy.writeData := storeData
+  memPort.io.legacy.writeMask := Mux(dec.isStore,
+    MuxLookup(storeFunct3, "b1111".U(4.W))(Seq(
+      "b000".U -> ("b0001".U << byteOffset), // SB
+      "b001".U -> Mux(halfOffset === 0.U, "b0011".U, "b1100".U), // SH
+      "b010".U -> "b1111".U // SW
+    )),
+    0.U)
+
+  memPort.io.passthroughMem.readData := io.dmem_rdata
+  io.dmem_addr := memPort.io.passthroughMem.addr
+  io.dmem_wdata := memPort.io.passthroughMem.writeData
   io.dmem_wen := dec.isStore
+  io.tl <> memPort.io.tl
 
   // ---------- Write Back ----------
   val pcPlus4 = pc + 4.U
