@@ -5,7 +5,6 @@ import chisel3.util._
 import Decoders.RV32IDecode
 import ALUs.ALU32
 
-
 class ZeroNyteRV32ICore extends Module {
   val io = IO(new Bundle {
     // Instruction Memory Interface
@@ -28,15 +27,34 @@ class ZeroNyteRV32ICore extends Module {
   val pc = RegInit("h80000000".U(32.W))  // Start at RISC-V reset vector
   io.pc_out := pc
 
-  // ---------- Instruction Memory ----------
-  io.imem_addr := pc
-  val instr = io.imem_rdata
-  io.instr_out := instr
+  // ---------- Instruction Cache (Simple) ----------
+  val I$ = Module(new ICacheSimple(new ICacheSimpleConfig(2*1024, 16, 1)))
+
+  // Request fetch every cycle for current PC (cache will stall/fill as needed)
+  I$.io.pc := pc
+  I$.io.pc_valid := true.B
+
+  // Hook cache to external imem
+  io.imem_addr := I$.io.mem_addr
+  I$.io.mem_rdata := io.imem_rdata
+  // If your imem returns combinationally, set mem_rvalid true
+  I$.io.mem_rvalid := true.B
+
+  // Instruction and valid flag from cache
+  val instr_valid = I$.io.instr_valid
+  val fetched_instr = I$.io.instr
+
+  // Expose visible instruction for debug (0 when not valid)
+  io.instr_out := Mux(instr_valid, fetched_instr, 0.U)
 
   // ---------- Register File ----------
   val regFile = RegInit(VecInit(Seq.fill(32)(0.U(32.W))))
 
-  // ---------- Decode ----------
+  // ---------- Decode (based on fetched instruction) ----------
+  // Use fetched instruction only when valid; otherwise use 0 to keep decode stable.
+  val instr = Wire(UInt(32.W))
+  instr := Mux(instr_valid, fetched_instr, 0.U)
+
   val dec = RV32IDecode.decodeInstr(instr)
   val rd  = instr(11,7)
   val rs1 = instr(19,15)
@@ -44,6 +62,7 @@ class ZeroNyteRV32ICore extends Module {
 
   val r1 = regFile(rs1)
   val r2Reg = regFile(rs2)
+
   val useImmForB = (instr(6,0) === RV32IDecode.OP_I) || dec.isLoad || dec.isStore || dec.isJALR || dec.isLUI || dec.isAUIPC
   val operandB = Mux(useImmForB, dec.imm, r2Reg)
   val operandA = Mux(dec.isLUI, 0.U, r1)
@@ -55,7 +74,10 @@ class ZeroNyteRV32ICore extends Module {
   alu.io.opcode := dec.aluOp
 
   // ---------- Data Memory Access ----------
-  val effAddr    = alu.io.result
+  // Only use ALU result when an instruction is valid; otherwise drive safe zeros
+  val effAddr = Wire(UInt(32.W))
+  effAddr := Mux(instr_valid, alu.io.result, 0.U)
+
   val addrBase   = Cat(effAddr(31, 2), 0.U(2.W))
   val byteOffset = effAddr(1, 0)
   val halfOffset = effAddr(1)
@@ -63,30 +85,35 @@ class ZeroNyteRV32ICore extends Module {
 
   val dmemReadWord = io.dmem_rdata
 
-  val storeData = WireDefault(r2Reg)
-  when(dec.isStore) {
-    switch(storeFunct3) {
-      is("b000".U) { // SB
-        val byteVal = r2Reg(7, 0)
-        val byteMask = (0xff.U(32.W)) << (byteOffset << 3)
-        val byteShifted = (byteVal & 0xff.U) << (byteOffset << 3)
-        storeData := (dmemReadWord & ~byteMask) | byteShifted
-      }
-      is("b001".U) { // SH
-        val halfVal = r2Reg(15, 0)
-        val halfMask = (0xffff.U(32.W)) << (halfOffset << 4)
-        val halfShifted = (halfVal & 0xffff.U) << (halfOffset << 4)
-        storeData := (dmemReadWord & ~halfMask) | halfShifted
-      }
-      is("b010".U) { // SW
-        storeData := r2Reg
+  // Build storeData only when an instruction is valid; default 0
+  val storeData = WireDefault(0.U(32.W))
+  when(instr_valid) {
+    storeData := r2Reg
+    when(dec.isStore) {
+      switch(storeFunct3) {
+        is("b000".U) { // SB
+          val byteVal = r2Reg(7, 0)
+          val byteMask = (0xff.U(32.W)) << (byteOffset << 3)
+          val byteShifted = (byteVal & 0xff.U) << (byteOffset << 3)
+          storeData := (dmemReadWord & ~byteMask) | byteShifted
+        }
+        is("b001".U) { // SH
+          val halfVal = r2Reg(15, 0)
+          val halfMask = (0xffff.U(32.W)) << (halfOffset << 4)
+          val halfShifted = (halfVal & 0xffff.U) << (halfOffset << 4)
+          storeData := (dmemReadWord & ~halfMask) | halfShifted
+        }
+        is("b010".U) { // SW
+          storeData := r2Reg
+        }
       }
     }
   }
 
-  io.dmem_addr := addrBase
-  io.dmem_wdata := storeData
-  io.dmem_wen := dec.isStore
+  // Drive data memory outputs only when instruction is valid and op requires it
+  io.dmem_addr := Mux(instr_valid && (dec.isLoad || dec.isStore), addrBase, 0.U)
+  io.dmem_wdata := Mux(instr_valid && dec.isStore, storeData, 0.U)
+  io.dmem_wen := instr_valid && dec.isStore
 
   // ---------- Write Back ----------
   val pcPlus4 = pc + 4.U
@@ -98,7 +125,8 @@ class ZeroNyteRV32ICore extends Module {
   write_data := alu.io.result
   doWrite := dec.isALU
 
-  when(dec.isLoad) {
+  // Loads: only process when instr_valid
+  when(instr_valid && dec.isLoad) {
     val loadWord = io.dmem_rdata
     val byteVec = VecInit(
       loadWord(7, 0),
@@ -136,24 +164,26 @@ class ZeroNyteRV32ICore extends Module {
     }
   }
 
-  when(dec.isLUI) {
+  when(instr_valid && dec.isLUI) {
     write_data := dec.imm
     doWrite := true.B
   }
 
-  when(dec.isAUIPC) {
+  when(instr_valid && dec.isAUIPC) {
     write_data := auipcValue
     doWrite := true.B
   }
 
-  when(dec.isJAL || dec.isJALR) {
+  when(instr_valid && (dec.isJAL || dec.isJALR)) {
     write_data := pcPlus4
     doWrite := true.B
   }
 
-  when(doWrite && rd =/= 0.U) {
+  // Only commit register writes when instruction is valid and destination is not x0
+  when(instr_valid && doWrite && rd =/= 0.U) {
     regFile(rd) := write_data
   }
+
   io.result := write_data
 
   // ---------- PC Update ----------
@@ -188,5 +218,8 @@ class ZeroNyteRV32ICore extends Module {
     nextPC := jalrTarget
   }
 
-  pc := nextPC
+  // Update PC only when we have a valid instruction (i.e., cache returned it).
+  when(instr_valid) {
+    pc := nextPC
+  }
 }
