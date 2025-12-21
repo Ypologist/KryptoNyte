@@ -76,6 +76,14 @@ class ALU_MulDivTest extends AnyFlatSpec with Matchers {
       runDiv(-20, 3, signed = true, expectedQ = -6, expectedR = -2)
       runDiv(20, -3, signed = true, expectedQ = -6, expectedR = 2)
       runDiv(123, 0, signed = false, expectedQ = -1, expectedR = 123, expectDivZero = true)
+      runDiv(0xb505L, -0xb505L, signed = true, expectedQ = -1, expectedR = 0)
+      runDiv(0xb505L, -2, signed = true, expectedQ = -0x5a82L, expectedR = 1)
+      runDiv(-0xb503L, 0xb505L, signed = true, expectedQ = 0, expectedR = -0xb503L)
+      runDiv(-1, 1, signed = true, expectedQ = -1, expectedR = 0)
+      runDiv(1, -1, signed = true, expectedQ = -1, expectedR = 0)
+      runDiv(-1, -1, signed = true, expectedQ = 1, expectedR = 0)
+      runDiv(-0x80000000L, 1, signed = true, expectedQ = -0x80000000L, expectedR = 0)
+      runDiv(-0x80000000L, -1, signed = true, expectedQ = 0x80000000L, expectedR = 0)
     }
   }
 }

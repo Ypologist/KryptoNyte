@@ -2,6 +2,7 @@ package ZeroNyte
 
 import chisel3._
 import chisel3.util._
+import chisel3.dontTouch
 import Decoders.RV32IDecode
 import ALUs.{ALU32, Div32Radix4, Mul32OneCycle}
 
@@ -72,6 +73,9 @@ class ZeroNyteRV32ICore extends Module {
   mulUnit.io.b := r2Reg
   mulUnit.io.signedA := mulSignedA
   mulUnit.io.signedB := mulSignedB
+  val mulProductSink = Wire(UInt(64.W))
+  mulProductSink := mulUnit.io.product
+  dontTouch(mulProductSink)
 
   val mulResult = MuxLookup(funct3, mulUnit.io.lo)(Seq(
     "b000".U -> mulUnit.io.lo, // MUL
@@ -92,10 +96,11 @@ class ZeroNyteRV32ICore extends Module {
   divider.io.signed := divSigned
   divider.io.dividend := Mux(divActive, divDividend, r1)
   divider.io.divisor := Mux(divActive, divDivisor, r2Reg)
-  divider.io.start := false.B
+  val divLaunch = WireDefault(false.B)
+  divider.io.start := divLaunch
 
   when(!divActive && isDivInstr) {
-    divider.io.start := true.B
+    divLaunch := true.B
     divActive := true.B
     divRd := rd
     divFunct3 := funct3
@@ -108,6 +113,12 @@ class ZeroNyteRV32ICore extends Module {
   val divResult = Mux(divFunct3 === "b100".U || divFunct3 === "b101".U,
     divider.io.quotient,
     divider.io.remainder)
+  val divBusySink = Wire(UInt(1.W))
+  val divDivideByZeroSink = Wire(UInt(1.W))
+  divBusySink := divider.io.busy
+  divDivideByZeroSink := divider.io.divideByZero
+  dontTouch(divBusySink)
+  dontTouch(divDivideByZeroSink)
   val divDone = divActive && divider.io.done
 
   // ---------- Data Memory Access ----------
@@ -249,7 +260,7 @@ class ZeroNyteRV32ICore extends Module {
   val jalTarget = (pc.asSInt + dec.imm.asSInt).asUInt
 
   val nextPC = WireDefault(pcPlus4)
-  val divStall = divActive && !divider.io.done
+  val divStall = (divActive || divLaunch) && !divider.io.done
   when(dec.isBranch && branchTaken) {
     nextPC := branchTarget
   }
