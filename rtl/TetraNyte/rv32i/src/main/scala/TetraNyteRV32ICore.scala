@@ -103,13 +103,23 @@ class TetraNyteRV32ICore extends Module {
   val threadEnabled = io.threadEnable(currentThread)
   val currentPC = pcRegs(currentThread)
 
+  // Instruction cache instance (default config: 2KB, 16B block, direct-mapped)
+  val icache = Module(new ICache(new ICacheConfig(2*1024, 16, 1)))
+  icache.io.pc := currentPC
+  icache.io.pc_valid := !flushThisThread && threadEnabled
+  // Wire combinational instruction memory into cache memory port for now
+  icache.io.mem_rdata := io.instrMem
+  icache.io.mem_rvalid := true.B
+
   if_id.threadId := currentThread
   if_id.pc := currentPC
-  if_id.instr := io.instrMem
-  if_id.rs1 := io.instrMem(19, 15)
-  if_id.rs2 := io.instrMem(24, 20)
-  if_id.rd := io.instrMem(11, 7)
-  if_id.valid := !flushThisThread && threadEnabled
+  // Prefer cache-provided instruction when valid, otherwise fall back to external combinational input
+  if_id.instr := Mux(icache.io.instr_valid, icache.io.instr, io.instrMem)
+  if_id.rs1 := if_id.instr(19, 15)
+  if_id.rs2 := if_id.instr(24, 20)
+  if_id.rd := if_id.instr(11, 7)
+  // Stall fetch/advance when the ICache is busy
+  if_id.valid := !flushThisThread && threadEnabled && !icache.io.stall
 
   when(if_id.valid) {
     debugIfInstr(currentThread) := if_id.instr
@@ -119,7 +129,10 @@ class TetraNyteRV32ICore extends Module {
   when(reset.asBool) {
     threadSel := 0.U
   }.otherwise {
-    threadSel := Mux(threadSel === (numThreads - 1).U, 0.U, threadSel + 1.U)
+    // Do not advance thread selection while icache is stalling/filling
+    when(!icache.io.stall) {
+      threadSel := Mux(threadSel === (numThreads - 1).U, 0.U, threadSel + 1.U)
+    }
   }
 
   // ===================== Instruction Decode (ID) with Forwarding =====================
@@ -245,7 +258,8 @@ class TetraNyteRV32ICore extends Module {
   // Shared memory interface driven by the single current MEM stage
   val memStoreActive = ex_mem.valid && ex_mem.isStore && io.threadEnable(ex_mem.threadId) && !storeUnit.io.misaligned
   val addrBase = Cat(ex_mem.aluResult(31, 2), 0.U(2.W))
-  io.memAddr := addrBase
+  // Arbitration: allow icache to drive memory address while it is stalling (performing fills)
+  io.memAddr := Mux(icache.io.stall, icache.io.mem_addr, addrBase)
   io.memWrite := Mux(memStoreActive, storeUnit.io.memWrite, 0.U)
   io.memMask := Mux(memStoreActive, storeUnit.io.mask, 0.U)
   io.memMisaligned := ex_mem.valid && io.threadEnable(ex_mem.threadId) && storeUnit.io.misaligned
@@ -355,12 +369,14 @@ class TetraNyteRV32ICore extends Module {
 
   // Default sequential advance for the currently fetched thread unless a control transfer just wrote it.
   when(!reset.asBool && !flushThisThread && threadEnabled) {
-    when(!(branchTakenEx && id_ex.threadId === currentThread) &&
-         !(jalTakenEx && id_ex.threadId === currentThread) &&
-         !(jalrTakenEx && id_ex.threadId === currentThread)) {
-      pcRegs(currentThread) := currentPC + 4.U
+    when(!icache.io.stall) {
+      when(!(branchTakenEx && id_ex.threadId === currentThread) &&
+           !(jalTakenEx && id_ex.threadId === currentThread) &&
+           !(jalrTakenEx && id_ex.threadId === currentThread)) {
+        pcRegs(currentThread) := currentPC + 4.U
+      }
+      flushThread(currentThread) := false.B
     }
-    flushThread(currentThread) := false.B
   }.elsewhen(!reset.asBool && flushThisThread && threadEnabled) {
     // Clear one-shot flush after it has been observed at fetch when no new branch update happens.
     when(!(branchTakenEx && id_ex.threadId === currentThread) &&
