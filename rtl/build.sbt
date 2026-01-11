@@ -43,7 +43,7 @@ lazy val commonSettings = Seq(
   javaOptions ++= Seq(
     "-Xmx4G",
     "-Dchisel.firtool.path=/usr/local/bin/firtool",
-    "-Dorg.slf4j.simpleLogger.defaultLogLevel=WARN",
+    "-Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG",
     "-Dorg.slf4j.simpleLogger.showDateTime=true",
     "-Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd HH:mm:ss"
   )
