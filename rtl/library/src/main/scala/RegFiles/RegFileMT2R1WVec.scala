@@ -46,6 +46,8 @@ class RegFileMT2R1WVec(width: Int = 32, depth: Int = 32, numThreads: Int = 4) ex
     val dst1data      = Input(UInt(width.W))         // Data to write
     val src1data      = Output(UInt(width.W))        // Read port 1 data
     val src2data      = Output(UInt(width.W))        // Read port 2 data
+    // Debug: expose x1 per thread for simple inspection
+    val debugX1       = Output(Vec(numThreads, UInt(width.W)))
   })
 
   // Create the register file as a vector of registers.
@@ -65,4 +67,10 @@ class RegFileMT2R1WVec(width: Int = 32, depth: Int = 32, numThreads: Int = 4) ex
   // Read logic: the outputs are generated combinationally.
   io.src1data := regs(effectiveSrc1)
   io.src2data := regs(effectiveSrc2)
+
+  // Debug view of x1 per thread (register index 1)
+  for (t <- 0 until numThreads) {
+    val idx = t * depth + 1
+    io.debugX1(t) := regs(idx)
+  }
 }

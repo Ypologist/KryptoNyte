@@ -5,10 +5,21 @@ package LoadUnit
 import chisel3._
 import chisel3.util._
 
-class LoadUnit extends Module {
+/**
+  * Load unit with parameterizable bus width.
+  *
+  * @param dataWidth width of the incoming data bus in bits (must be >= 32 and byte-multiple).
+  *                  Defaults to 32b so existing cores (Zero/TetraNyte) are unchanged.
+  *                  Wider values (e.g. 128b) allow aligned packet fetches while still
+  *                  extracting the targeted byte/half/word based on the byte address.
+  */
+class LoadUnit(dataWidth: Int = 32) extends Module {
+  require(dataWidth % 8 == 0, "dataWidth must be a multiple of 8")
+  require(dataWidth >= 32, "dataWidth must be at least 32 bits")
+
   val io = IO(new Bundle {
     val addr = Input(UInt(32.W))      // Memory address
-    val dataIn = Input(UInt(32.W))    // Data from memory
+    val dataIn = Input(UInt(dataWidth.W))    // Data from memory (bus width parameterized)
     val funct3 = Input(UInt(3.W))     // Load type (funct3 field from instruction)
     val dataOut = Output(UInt(32.W))  // Processed load data
   })
@@ -33,10 +44,12 @@ class LoadUnit extends Module {
   isSigned := (io.funct3 === LB || io.funct3 === LH || io.funct3 === LW)
 
   // Select the proper lane based on address offset (little endian).
-  val byteShift = io.addr(1, 0) << 3
-  val halfShift = io.addr(1) << 4
-  val byteLane = (io.dataIn >> byteShift)(7, 0)
-  val halfLane = (io.dataIn >> halfShift)(15, 0)
+  // Supports wider buses by shifting the incoming line down to the targeted byte.
+  private val addrLSBWidth = log2Ceil(dataWidth / 8)
+  val byteShift = (io.addr(addrLSBWidth - 1, 0) << 3)
+  val aligned = (io.dataIn >> byteShift)(31, 0) // capture up to 32b window after shift
+  val byteLane = aligned(7, 0)
+  val halfLane = aligned(15, 0)
 
   val signedData = MuxCase(io.dataIn, Seq(
     (loadWidth === 0.U)  -> byteLane.asSInt.pad(32).asUInt,
