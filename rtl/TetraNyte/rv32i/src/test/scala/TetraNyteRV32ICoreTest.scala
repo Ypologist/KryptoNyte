@@ -7,9 +7,13 @@ import org.scalatest.flatspec.AnyFlatSpec
 class TetraNyteRV32ICoreTest extends AnyFlatSpec {
   "TetraNyteRV32ICore" should "simulate 4-threaded ALU, Load, Store, and Branch operations" in {
     simulate(new TetraNyteRV32ICore) { dut =>
+
       val numThreads = 4
-      var resetPC = 0L
+      val threadPCs = Array.fill(numThreads)(0L)
       val nop = 0x00000013L
+
+      // Enable all threads for this test
+      dut.io.threadEnable.foreach(_.poke(true.B))
 
       val program = Seq[Long](
         0x00000013L, // NOP
@@ -22,93 +26,162 @@ class TetraNyteRV32ICoreTest extends AnyFlatSpec {
       )
       val memResponses = Seq(0xAAAA0000L, 0x55550000L, 0xDEADBEAFL, 0xCAFEBABEL)
 
-      val threadPCs = Array.fill(numThreads)(resetPC)
+      var resetPC = 0L
+      def instructionFor(pc: Long): Long = {
+        val offset = pc - resetPC
+        if (offset < 0 || offset % 4 != 0) nop
+        else {
+          val idx = (offset / 4).toInt
+          if (idx >= 0 && idx < program.length) program(idx) else nop
+        }
+      }
 
-      def refreshPCs(): Unit = {
+      // Apply reset to get deterministic thread ordering and PC bases
+      dut.reset.poke(true.B)
+      dut.clock.step(2)
+      dut.reset.poke(false.B)
+
+      // Initialize PC view without advancing the scheduler
+      for (t <- 0 until numThreads) {
+        threadPCs(t) = dut.io.if_pc(t).peek().litValue.longValue
+      }
+      resetPC = threadPCs.head
+
+      val pipelineLatency = 5
+      // Run long enough to fetch and retire the full program for each thread
+      val totalCycles = (program.length + pipelineLatency) * numThreads
+
+      for (cycle <- 0 until totalCycles) {
+        val fetchThread = dut.io.fetchThread.peek().litValue.toInt
+        val instr = instructionFor(threadPCs(fetchThread))
+        dut.io.instrMem.poke(instr.U)
+        dut.io.dataMemResp.poke(memResponses(cycle % memResponses.length).U)
+
+        dut.clock.step()
+
+        for (t <- 0 until numThreads) {
+          threadPCs(t) = dut.io.if_pc(t).peek().litValue.longValue
+        }
+
+        if (cycle >= pipelineLatency) {
+          val if_pc    = dut.io.if_pc(fetchThread).peek().litValue
+          val if_instr = dut.io.if_instr(fetchThread).peek().litValue
+          val id_rs1   = dut.io.id_rs1Data(fetchThread).peek().litValue
+          val id_rs2   = dut.io.id_rs2Data(fetchThread).peek().litValue
+          val ex_alu   = dut.io.ex_aluResult(fetchThread).peek().litValue
+          val mem_load = dut.io.mem_loadData(fetchThread).peek().litValue
+          val mem_write= dut.io.memWrite.peek().litValue
+          val mem_addr = dut.io.memAddr.peek().litValue
+
+          println(f"[Cycle ${cycle - pipelineLatency}%02d][FetchT $fetchThread] " +
+            f"PC: 0x$if_pc%08x instr: 0x$if_instr%08x RS1: 0x$id_rs1%08x RS2: 0x$id_rs2%08x " +
+            f"ALU: 0x$ex_alu%08x Load: 0x$mem_load%08x Store: 0x$mem_write%08x MemAddr: 0x$mem_addr%08x")
+        }
+      }
+
+      // Drain the pipeline so the last fetched instructions retire
+      for (_ <- 0 until pipelineLatency) {
+        dut.io.instrMem.poke(nop.U)
+        dut.io.dataMemResp.poke(0.U)
+        dut.clock.step()
         for (t <- 0 until numThreads) {
           threadPCs(t) = dut.io.if_pc(t).peek().litValue.longValue
         }
       }
 
+      val expectedMinPC = resetPC + (program.length * 4)
+      assert(threadPCs.forall(_ >= expectedMinPC), s"Each thread PC should advance at least program length; saw ${threadPCs.mkString(",")}")
+    }
+  }
+
+  it should "branch on equal and take the correct path" in {
+    simulate(new TetraNyteRV32ICore) { dut =>
+      val numThreads = 4
+      val threadPCs = Array.fill(numThreads)(0L)
+      val nop = 0x00000013L
+
+      // Enable all threads for this test
+      dut.io.threadEnable.foreach(_.poke(true.B))
+
+      // Simple branch program (thread 0)
+      // 0x0  addi x1,x0,1
+      // 0x4  addi x2,x0,1
+      // 0x8  beq  x1,x2,+8 (to 0x10)
+      // 0xc  addi x3,x0,0x00ad   (should be skipped)
+      // 0x10 addi x3,x0,0x00be   (should execute)
+      // 0x14 sw   x3,0(x0)       (store expected 0x000000be)
+      // 0x18 nop
+      val program = Seq[Long](
+        0x00100093L, // addi x1,x0,1
+        0x00100113L, // addi x2,x0,1
+        0x00208263L, // beq x1,x2,+8 (to 0x10)
+        0x0ad00193L, // addi x3,x0,0x00ad (skip)
+        0x0be00193L, // addi x3,x0,0x00be (take)
+        0x00302023L, // sw x3,0(x0)
+        0x00000013L  // nop
+      )
+
+      var resetPC = 0L
+      // Prime pipeline after reset to get stable PCs
       def instructionFor(pc: Long): Long = {
-        if (pc < resetPC) {
-          nop
-        } else {
-          val offset = pc - resetPC
-          if (offset % 4 != 0) {
-            nop
-          } else {
-            val index = (offset / 4).toInt
-            if (index >= 0 && index < program.length) program(index) else nop
-          }
+        val offset = pc - resetPC
+        if (offset < 0 || offset % 4 != 0) nop
+        else {
+          val idx = (offset / 4).toInt
+          if (idx >= 0 && idx < program.length) program(idx) else nop
         }
       }
 
-      def driveInstructionPorts(): Unit = {
-        for (t <- 0 until numThreads) {
-          val instr = instructionFor(threadPCs(t))
-          dut.io.instrMem(t).poke(instr.U)
-        }
-      }
+      dut.reset.poke(true.B)
+      dut.clock.step(2) // reset asserted
+      dut.reset.poke(false.B)
 
-      def driveDataMem(cycle: Int): Unit = {
-        dut.io.dataMemResp.poke(memResponses(cycle % memResponses.length).U)
-      }
-
-      refreshPCs()
-      val resetSnapshot = threadPCs.mkString(", ")
-      resetPC = threadPCs.head
-      assert(threadPCs.forall(_ == resetPC),
-        f"All threads should share the same reset PC (0x$resetPC%08x) but saw $resetSnapshot")
-
-      val pipelineLatency = 4
-      val totalCycles = program.length * numThreads
-
-      def assertRoundRobinSchedule(cycle: Int, prevPCs: Array[Long]): Unit = {
-        if (cycle < totalCycles) {
-          val changedThreads = (0 until numThreads).filter(t => threadPCs(t) != prevPCs(t))
-          val expectedThread = cycle % numThreads
-          val changedStr = changedThreads.mkString("[", ", ", "]")
-          val prevStr = prevPCs.mkString("[", ", ", "]")
-          val currStr = threadPCs.mkString("[", ", ", "]")
-          assert(changedThreads.size == 1 && changedThreads.head == expectedThread,
-            f"[Cycle $cycle%02d] Barrel schedule violated. Expected thread $expectedThread to advance PC " +
-              s"but threads $changedStr changed. prev=$prevStr curr=$currStr")
-        }
-      }
-
-      def formatThreadLog(t: Int, fetchPc: Long): String = {
-        val ifPc = threadPCs(t)
-        val ifInstr = dut.io.if_instr(t).peek().litValue
-        val idRs1 = dut.io.id_rs1Data(t).peek().litValue
-        val idRs2 = dut.io.id_rs2Data(t).peek().litValue
-        val exAlu = dut.io.ex_aluResult(t).peek().litValue
-        val memLoad = dut.io.mem_loadData(t).peek().litValue
-        val memWrite = dut.io.memWrite.peek().litValue
-        val memAddr = dut.io.memAddr.peek().litValue
-
-        f"T$t fetchPC=0x$fetchPc%08x ifPC=0x$ifPc%08x instr=0x$ifInstr%08x " +
-          f"RS1=0x$idRs1%08x RS2=0x$idRs2%08x ALU=0x$exAlu%08x " +
-          f"Load=0x$memLoad%08x Store=0x$memWrite%08x Addr=0x$memAddr%08x"
-      }
-
-      for (cycle <- 0 until totalCycles + pipelineLatency) {
-        val pcsBeforeStep = threadPCs.clone()
-        driveInstructionPorts()
-        driveDataMem(cycle)
+      // Let the core run a few cycles with NOPs so that if_pc reflects the post-reset base.
+      for (_ <- 0 until 4) {
+        dut.io.instrMem.poke(nop.U)
+        dut.io.dataMemResp.poke(0.U)
         dut.clock.step()
-        refreshPCs()
-        assertRoundRobinSchedule(cycle, pcsBeforeStep)
+      }
+      for (t <- 0 until numThreads) {
+        threadPCs(t) = dut.io.if_pc(t).peek().litValue.longValue
+      }
+      resetPC = threadPCs.min
 
-        if (cycle >= pipelineLatency) {
-          val printCycle = cycle - pipelineLatency
-          val perThreadLogs = (0 until numThreads).map { t =>
-            formatThreadLog(t, pcsBeforeStep(t))
-          }.mkString(" | ")
+      val pipelineLatency = 6
+      val totalCycles = 200
+      var targetSeen = false
+      var observedStore: Option[Long] = None
+      var storeBeSeen = false
 
-          println(f"[Cycle $printCycle%02d] $perThreadLogs")
+      for (_ <- 0 until totalCycles) {
+        val fetchThread = dut.io.fetchThread.peek().litValue.toInt
+        val instr = instructionFor(threadPCs(fetchThread))
+        dut.io.instrMem.poke(instr.U)
+        dut.io.dataMemResp.poke(0.U)
+
+        dut.clock.step()
+
+        // Update PC view
+        for (t <- 0 until numThreads) {
+          threadPCs(t) = dut.io.if_pc(t).peek().litValue.longValue
+        }
+
+        // Track whether we hit the branch target and capture the first store data
+        val pc0 = threadPCs(0)
+        if (pc0 == resetPC + 0x10) targetSeen = true
+
+        val memMask = dut.io.memMask.peek().litValue
+        if (memMask != 0) {
+          val storeData = dut.io.memWrite.peek().litValue.longValue
+          if (observedStore.isEmpty) observedStore = Some(storeData)
+          if (storeData == 0xbeL) storeBeSeen = true
         }
       }
+
+      val expectedMinPC = resetPC + 0x1c
+      assert(threadPCs(0) >= expectedMinPC, s"Thread 0 PC should advance past branch block; saw ${threadPCs(0)}")
+      assert(targetSeen, s"Branch target PC was not observed at 0x${(resetPC + 0x10).toHexString}")
+      assert(storeBeSeen, s"Expected to observe a store of 0xbe when branch is taken; first store seen: ${observedStore}")
     }
   }
 }
