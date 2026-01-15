@@ -12,6 +12,7 @@
 **/reference_signatures/
 **/riscof_work/
 tests/output/
+tests/reports/
 tests/toolchain/
 tests/sim/build/
 tests/riscof/.config*.ini
@@ -46,6 +47,7 @@ rtl/.sbtboot/
 **/plugins.sbt
 **/build.properties
 **/sbt.json
+**/.bsp/
 
 #==============================================================================
 # Simulation and Verification
