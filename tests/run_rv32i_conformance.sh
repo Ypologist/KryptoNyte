@@ -23,6 +23,7 @@ EOF
 PROCESSOR="zeronyte"
 SMOKE_TEST=false
 TIMEOUT_SECS=3600
+TIMEOUT_SPECIFIED=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --processor|-p)
@@ -47,6 +48,7 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       TIMEOUT_SECS="$2"
+      TIMEOUT_SPECIFIED=true
       shift 2
       ;;
     *)
@@ -91,6 +93,10 @@ case "$PROCESSOR" in
     ;;
 esac
 
+if [[ "$PROCESSOR" == "octonyte" && "$TIMEOUT_SPECIFIED" == "false" ]]; then
+  TIMEOUT_SECS=120
+fi
+
 # Prefer local virtualenv bins early so riscof check succeeds
 VENV_BIN="$REPO_ROOT/.venv/bin"
 if [[ -d "$VENV_BIN" ]]; then
@@ -104,7 +110,12 @@ if [[ ! -d "$RISCV_ARCH_TEST_ROOT" ]]; then
   exit 1
 fi
 
-if ! command -v riscof >/dev/null 2>&1; then
+RISCOF_CMD=()
+if [[ -x "$VENV_BIN/python3" ]] && "$VENV_BIN/python3" -c "import riscof.cli" >/dev/null 2>&1; then
+  RISCOF_CMD=("$VENV_BIN/python3" -m riscof.cli)
+elif command -v riscof >/dev/null 2>&1; then
+  RISCOF_CMD=(riscof)
+else
   echo "riscof CLI not found. Install riscof in your Python environment." >&2
   exit 1
 fi
@@ -241,7 +252,7 @@ run_riscof_suite() {
   pushd "$SCRIPT_DIR/riscof" >/dev/null
   RISCOF_TIMEOUT=${TIMEOUT_SECS} \
   TIMEOUT=${TIMEOUT_SECS} \
-    riscof run \
+    "${RISCOF_CMD[@]}" run \
     --config "$CONFIG_GENERATED" \
     --work-dir "$work_dir" \
     --suite "$suite_dir" \

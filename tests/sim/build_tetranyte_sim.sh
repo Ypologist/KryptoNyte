@@ -2,14 +2,19 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-TESTS_DIR=$(dirname "$SCRIPT_DIR")
-REPO_ROOT=$(dirname "$TESTS_DIR")
-BUILD_DIR="$SCRIPT_DIR/build"
+REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+
+cd "$REPO_ROOT"
+
+SIM_DIR="tests/sim"
+BUILD_DIR="$SIM_DIR/build"
 OBJ_DIR="$BUILD_DIR/tetranyte_obj"
 
 mkdir -p "$BUILD_DIR"
+rm -rf "$OBJ_DIR"
+mkdir -p "$OBJ_DIR"
 
-VERILOG_TOP="$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/TetraNyteRV32ICore.v"
+VERILOG_TOP="rtl/generators/generated/verilog_hierarchical_timed/TetraNyteRV32ICore.v"
 if [[ ! -f "$VERILOG_TOP" ]]; then
   echo "Expected RTL at $VERILOG_TOP. Regenerate with 'sbt generateRTL' from rtl/." >&2
   exit 1
@@ -25,9 +30,9 @@ verilator -cc "$VERILOG_TOP" \
   -CFLAGS "-O2 -std=c++17" \
   -LDFLAGS "-O2" \
   --exe \
-    "$SCRIPT_DIR/tetranyte_sim.cpp" \
-    "$SCRIPT_DIR/elf_loader.cpp" \
-    "$SCRIPT_DIR/memory.cpp"
+    "$SIM_DIR/tetranyte_sim.cpp" \
+    "$SIM_DIR/elf_loader.cpp" \
+    "$SIM_DIR/memory.cpp"
 
 cp "$OBJ_DIR/VTetraNyteRV32ICore" "$BUILD_DIR/tetranyte_sim"
 chmod +x "$BUILD_DIR/tetranyte_sim"

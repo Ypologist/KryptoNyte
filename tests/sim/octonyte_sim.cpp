@@ -189,6 +189,35 @@ int main(int argc, char** argv) {
           << " memAddr=0x" << addr
           << " memMask=0x" << mask
           << std::dec << '\n';
+
+      if (dut.io_debugExecValid &&
+          (dut.io_debugExecIsBranch || dut.io_debugExecIsJal || dut.io_debugExecIsJalr)) {
+        log << std::hex << "exec1: thread=0x" << static_cast<unsigned>(dut.io_debugExecThread)
+            << " pc=0x" << dut.io_debugExecPC
+            << " instr=0x" << dut.io_debugExecInstr
+            << " rs1=0x" << dut.io_debugExecRs1
+            << " rs2=0x" << dut.io_debugExecRs2
+            << " op=0x" << static_cast<unsigned>(dut.io_debugExecBranchOp)
+            << " taken=" << static_cast<unsigned>(dut.io_debugExecCtrlTaken)
+            << " target=0x" << dut.io_debugExecCtrlTarget
+            << " branch=" << static_cast<unsigned>(dut.io_debugExecIsBranch)
+            << " jal=" << static_cast<unsigned>(dut.io_debugExecIsJal)
+            << " jalr=" << static_cast<unsigned>(dut.io_debugExecIsJalr)
+            << std::dec << '\n';
+      }
+
+      if (dut.io_debugCtrlValid &&
+          (dut.io_debugCtrlIsBranch || dut.io_debugCtrlIsJal || dut.io_debugCtrlIsJalr)) {
+        log << std::hex << "wb: thread=0x" << static_cast<unsigned>(dut.io_debugCtrlThread)
+            << " from=0x" << dut.io_debugCtrlFromPC
+            << " instr=0x" << dut.io_debugCtrlInstr
+            << " taken=" << static_cast<unsigned>(dut.io_debugCtrlTaken)
+            << " target=0x" << dut.io_debugCtrlTarget
+            << " branch=" << static_cast<unsigned>(dut.io_debugCtrlIsBranch)
+            << " jal=" << static_cast<unsigned>(dut.io_debugCtrlIsJal)
+            << " jalr=" << static_cast<unsigned>(dut.io_debugCtrlIsJalr)
+            << std::dec << '\n';
+      }
     }
 
     if (completed) {
