@@ -18,7 +18,7 @@ class BranchUnitTest extends AnyFlatSpec {
         dut.io.rs1.poke(rs1.S(32.W).asUInt) // Convert signed values to UInt properly
         dut.io.rs2.poke(rs2.S(32.W).asUInt)
         dut.io.pc.poke(pc.U(32.W))
-        dut.io.imm.poke(imm.S(12.W))
+        dut.io.imm.poke(imm.S(32.W))
         dut.io.branchOp.poke(branchOp)
         dut.io.valid.poke(valid.B)
         dut.clock.step()

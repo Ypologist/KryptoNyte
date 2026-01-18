@@ -2,6 +2,7 @@ package OctoNyte
 
 import chisel3._
 import chisel3.util._
+import chisel3.dontTouch
 import ALUs.ALU32
 import Decoders.RV32IDecode
 import Pipeline.ThreadScheduler
@@ -30,6 +31,27 @@ class OctoNyteRV32ICoreIO(val numThreads: Int, val fetchWidth: Int) extends Bund
   val debugPC           = Output(Vec(numThreads, UInt(32.W)))
   val debugRegs01234    = Output(Vec(numThreads, Vec(5, UInt(32.W))))
   val debugRegX1        = Output(Vec(numThreads, UInt(32.W)))
+  val debugCtrlValid    = Output(Bool())
+  val debugCtrlInstr    = Output(UInt(32.W))
+  val debugCtrlTaken    = Output(Bool())
+  val debugCtrlThread   = Output(UInt(threadBits.W))
+  val debugCtrlFromPC   = Output(UInt(32.W))
+  val debugCtrlTarget   = Output(UInt(32.W))
+  val debugCtrlIsBranch = Output(Bool())
+  val debugCtrlIsJal    = Output(Bool())
+  val debugCtrlIsJalr   = Output(Bool())
+  val debugExecValid    = Output(Bool())
+  val debugExecThread   = Output(UInt(threadBits.W))
+  val debugExecPC       = Output(UInt(32.W))
+  val debugExecInstr    = Output(UInt(32.W))
+  val debugExecIsBranch = Output(Bool())
+  val debugExecIsJal    = Output(Bool())
+  val debugExecIsJalr   = Output(Bool())
+  val debugExecBranchOp = Output(UInt(3.W))
+  val debugExecRs1      = Output(UInt(32.W))
+  val debugExecRs2      = Output(UInt(32.W))
+  val debugExecCtrlTaken = Output(Bool())
+  val debugExecCtrlTarget = Output(UInt(32.W))
 }
 
 // ****************************************************************************************
@@ -63,6 +85,8 @@ class Exec1PipelineRegs(threadBits: Int) extends Bundle {
   val regReadSignals = new RegisterReadPipelineRegs(threadBits)
   val result   = UInt(32.W)
   val doRegFileWrite = Bool()
+  val ctrlTaken = Bool()
+  val ctrlTarget = UInt(32.W)
 } 
 
 class Exec2PipelineRegs(threadBits: Int) extends Bundle {
@@ -120,6 +144,12 @@ class OctoNyteRV32ICore extends Module {
   regFile.io.wen := VecInit(Seq.fill(regFileWritePorts)(false.B))
   regFile.io.dstData := VecInit(Seq.fill(regFileWritePorts)(0.U(32.W)))
 
+  val unusedRegDebugX1 = Wire(Vec(numThreads, UInt(32.W)))
+  val unusedRegDebugRegs = Wire(Vec(numThreads, Vec(5, UInt(32.W))))
+  unusedRegDebugX1 := regFile.io.debugX1
+  unusedRegDebugRegs := regFile.io.debugRegs01234
+  dontTouch(unusedRegDebugX1)
+  dontTouch(unusedRegDebugRegs)
 
   // ***************************************************************************
   // Execution Units
@@ -135,9 +165,15 @@ class OctoNyteRV32ICore extends Module {
   branchUnit.io.rs1 := 0.U    // TODO: This is really rs1data not rs1
   branchUnit.io.rs2 := 0.U    // TODO: This is really rs2data not rs2
   branchUnit.io.pc := 0.U
-  branchUnit.io.imm := 0.S(12.W)
+  branchUnit.io.imm := 0.S(32.W)
   branchUnit.io.branchOp := 0.U
   branchUnit.io.valid := false.B
+  val unusedBranchNextPc = Wire(UInt(32.W))
+  val unusedBranchMisaligned = Wire(Bool())
+  unusedBranchNextPc := branchUnit.io.nextPc
+  unusedBranchMisaligned := branchUnit.io.misaligned
+  dontTouch(unusedBranchNextPc)
+  dontTouch(unusedBranchMisaligned)
 
   // Load Unit
   val loadUnit = Module(new LoadUnit)
@@ -279,78 +315,121 @@ class OctoNyteRV32ICore extends Module {
   val exec1ThreadSel = exec1Scheduler.io.currentThread // Get current execute 1 thread
   val regReadToExec1Entry = regReadRegs(exec1ThreadSel)
 
-  
+  val exec1DebugValid = WireDefault(false.B)
+  val exec1DebugPC = WireDefault(0.U(32.W))
+  val exec1DebugInstr = WireDefault(0.U(32.W))
+  val exec1DebugIsBranch = WireDefault(false.B)
+  val exec1DebugIsJal = WireDefault(false.B)
+  val exec1DebugIsJalr = WireDefault(false.B)
+  val exec1DebugBranchOp = WireDefault(0.U(3.W))
+  val exec1DebugRs1 = WireDefault(0.U(32.W))
+  val exec1DebugRs2 = WireDefault(0.U(32.W))
+  val exec1DebugCtrlTaken = WireDefault(false.B)
+  val exec1DebugCtrlTarget = WireDefault(0.U(32.W))
 
   when(regReadToExec1Entry.dispatchSignals.decodePipelineSignals.fetchSignals.valid && io.threadEnable(exec1ThreadSel)) {
     val exec1RegsEntry = exec1Regs(exec1ThreadSel) // propagate pipeline regs
+    val decodeSignals = regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals
+    val fetchSignals = regReadToExec1Entry.dispatchSignals.decodePipelineSignals.fetchSignals
     exec1RegsEntry.regReadSignals := regReadToExec1Entry
+    exec1RegsEntry.doRegFileWrite := false.B
+    exec1RegsEntry.ctrlTaken := exec1DebugCtrlTaken
+    exec1RegsEntry.ctrlTarget := exec1DebugCtrlTarget
+
+    exec1DebugValid := true.B
+    exec1DebugPC := fetchSignals.pc
+    exec1DebugInstr := fetchSignals.instr
+    exec1DebugIsBranch := decodeSignals.isBranch
+    exec1DebugIsJal := decodeSignals.isJAL
+    exec1DebugIsJalr := decodeSignals.isJALR
+    exec1DebugBranchOp := fetchSignals.instr(14, 12)
+    exec1DebugRs1 := regReadToExec1Entry.rs1Data
+    exec1DebugRs2 := regReadToExec1Entry.rs2Data
 
     // ALU
-    when(regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.isALU ||
-         regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.isLUI ||
-         regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.isAUIPC) {
-      exec1RegsEntry.doRegFileWrite := true.B
-      val instr = regReadToExec1Entry.dispatchSignals.decodePipelineSignals.fetchSignals.instr
+    when(decodeSignals.isALU ||
+         decodeSignals.isLUI ||
+         decodeSignals.isAUIPC) {
+      val instr = fetchSignals.instr
       val opcode = instr(6, 0)
-      val useImm = (opcode === RV32IDecode.OP_I) || regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.isLUI || 
-        regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.isAUIPC
-      val opA = Mux(regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.isAUIPC, 
-        regReadToExec1Entry.dispatchSignals.decodePipelineSignals.fetchSignals.pc,
-        Mux(regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.isLUI, 
+      val useImm = (opcode === RV32IDecode.OP_I) || decodeSignals.isLUI || 
+        decodeSignals.isAUIPC
+      val opA = Mux(decodeSignals.isAUIPC, 
+        fetchSignals.pc,
+        Mux(decodeSignals.isLUI, 
           0.U, 
           regReadToExec1Entry.rs1Data))
       val opB = Mux(useImm, 
-        regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.imm, 
+        decodeSignals.imm, 
         regReadToExec1Entry.rs2Data)
 
       alu.io.a := opA
       alu.io.b := opB
-      alu.io.opcode := regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.aluOp
+      alu.io.opcode := decodeSignals.aluOp
 
-      val result = Mux(regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.isAUIPC, 
-        regReadToExec1Entry.dispatchSignals.decodePipelineSignals.fetchSignals.pc + regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.imm,
-        Mux(regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.isLUI, 
-          regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.imm, 
+      val result = Mux(decodeSignals.isAUIPC, 
+        fetchSignals.pc + decodeSignals.imm,
+        Mux(decodeSignals.isLUI, 
+          decodeSignals.imm, 
           alu.io.result))
 
       exec1RegsEntry.result := result
       exec1RegsEntry.doRegFileWrite := true.B
 
+    // JAL
+    } .elsewhen (decodeSignals.isJAL) {
+      val pc = fetchSignals.pc
+      val imm = decodeSignals.imm
+      exec1RegsEntry.result := pc + 4.U
+      exec1RegsEntry.doRegFileWrite := true.B
+      exec1DebugCtrlTaken := true.B
+      exec1DebugCtrlTarget := (pc.asSInt + imm.asSInt).asUInt
+
+    // JALR
+    } .elsewhen (decodeSignals.isJALR) {
+      val pc = fetchSignals.pc
+      val imm = decodeSignals.imm
+      val target = ((regReadToExec1Entry.rs1Data.asSInt + imm.asSInt).asUInt & ~1.U(32.W))
+      exec1RegsEntry.result := pc + 4.U
+      exec1RegsEntry.doRegFileWrite := true.B
+      exec1DebugCtrlTaken := true.B
+      exec1DebugCtrlTarget := target
+
     
     // Branch
-    } .elsewhen (regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.isBranch) {
-      exec1RegsEntry.doRegFileWrite := false.B        // Branches do not produce a result to write back
-      
+    } .elsewhen (decodeSignals.isBranch) {
       branchUnit.io.rs1 := regReadToExec1Entry.rs1Data
       branchUnit.io.rs2 := regReadToExec1Entry.rs2Data
-      branchUnit.io.pc := regReadToExec1Entry.dispatchSignals.decodePipelineSignals.fetchSignals.pc
-      branchUnit.io.imm := regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.imm.asSInt
-      branchUnit.io.branchOp := regReadToExec1Entry.dispatchSignals.decodePipelineSignals.fetchSignals.instr(14, 12)
+      branchUnit.io.pc := fetchSignals.pc
+      // Decode stores branch immediates in halfword units; restore byte offset here.
+      val branchImm = decodeSignals.imm
+      branchUnit.io.imm := (branchImm << 1)(31, 0).asSInt
+      branchUnit.io.branchOp := fetchSignals.instr(14, 12)
       branchUnit.io.valid := true.B
-      val nextPc = branchUnit.io.nextPc
-      when(branchUnit.io.taken) {
-        pcRegs(exec1ThreadSel) := nextPc
-      }
+      exec1DebugCtrlTaken := branchUnit.io.taken
+      exec1DebugCtrlTarget := branchUnit.io.target
       
 
       // Load
-    } .elsewhen (regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.isLoad) {
-      val address = regReadToExec1Entry.rs1Data + regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.imm
+    } .elsewhen (decodeSignals.isLoad) {
+      val address = regReadToExec1Entry.rs1Data + decodeSignals.imm
+      val alignedAddr = Cat(address(31, 2), 0.U(2.W))
       loadUnit.io.addr := address
-      loadUnit.io.funct3 := regReadToExec1Entry.dispatchSignals.decodePipelineSignals.fetchSignals.instr(14, 12)
-      io.memAddr := address
+      loadUnit.io.funct3 := fetchSignals.instr(14, 12)
+      io.memAddr := alignedAddr
       val loadData = loadUnit.io.dataOut
       exec1RegsEntry.result := loadData
       exec1RegsEntry.doRegFileWrite := true.B
 
       // Store
-    } .elsewhen (regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.isStore) {
+    } .elsewhen (decodeSignals.isStore) {
       exec1RegsEntry.doRegFileWrite := false.B
-      val address = regReadToExec1Entry.rs1Data + regReadToExec1Entry.dispatchSignals.decodePipelineSignals.decodeSignals.imm
+      val address = regReadToExec1Entry.rs1Data + decodeSignals.imm
+      val alignedAddr = Cat(address(31, 2), 0.U(2.W))
       storeUnit.io.addr := address
       storeUnit.io.data := regReadToExec1Entry.rs2Data
-      storeUnit.io.storeType := regReadToExec1Entry.dispatchSignals.decodePipelineSignals.fetchSignals.instr(13, 12)
-      io.memAddr := address
+      storeUnit.io.storeType := fetchSignals.instr(13, 12)
+      io.memAddr := alignedAddr
       io.memWrite := storeUnit.io.memWrite
       io.memMask := storeUnit.io.mask
       io.memMisaligned := storeUnit.io.misaligned
@@ -420,21 +499,26 @@ class OctoNyteRV32ICore extends Module {
   val exec3ToWbEntry = exec3Regs(wbThreadSel)
   val wbValid = exec3ToWbEntry.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid &&
     io.threadEnable(wbThreadSel)
-  val wbDoWrite = wbValid && exec3ToWbEntry.exec2Signals.exec1Signals.doRegFileWrite
+  val wbRd = exec3ToWbEntry.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.decodeSignals.rd
+  val wbDoWrite = wbValid && exec3ToWbEntry.exec2Signals.exec1Signals.doRegFileWrite && (wbRd =/= 0.U)
+  val wbCtrlTaken = wbValid && exec3ToWbEntry.exec2Signals.exec1Signals.ctrlTaken
   when(wbDoWrite) {
-    val rd = exec3ToWbEntry.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.decodeSignals.rd
     val data = exec3ToWbEntry.exec2Signals.exec1Signals.result
     regFile.io.writeThreadID(0) := wbThreadSel
-    regFile.io.dst(0) := rd
+    regFile.io.dst(0) := wbRd
     regFile.io.wen(0) := true.B
     regFile.io.dstData(0) := data
 
-    when(rd === 1.U) { debugRegs1to4(wbThreadSel)(0) := data }
-      .elsewhen(rd === 2.U) { debugRegs1to4(wbThreadSel)(1) := data }
-      .elsewhen(rd === 3.U) { debugRegs1to4(wbThreadSel)(2) := data }
-      .elsewhen(rd === 4.U) { debugRegs1to4(wbThreadSel)(3) := data }
+  }
+  when(wbCtrlTaken) {
+    pcRegs(wbThreadSel) := exec3ToWbEntry.exec2Signals.exec1Signals.ctrlTarget
+  }
 
-    // TODO: Move Branch PC update here for better timing
+  when(wbDoWrite) {
+    when(wbRd === 1.U) { debugRegs1to4(wbThreadSel)(0) := exec3ToWbEntry.exec2Signals.exec1Signals.result }
+      .elsewhen(wbRd === 2.U) { debugRegs1to4(wbThreadSel)(1) := exec3ToWbEntry.exec2Signals.exec1Signals.result }
+      .elsewhen(wbRd === 3.U) { debugRegs1to4(wbThreadSel)(2) := exec3ToWbEntry.exec2Signals.exec1Signals.result }
+      .elsewhen(wbRd === 4.U) { debugRegs1to4(wbThreadSel)(3) := exec3ToWbEntry.exec2Signals.exec1Signals.result }
   }
 
   // -----------------
@@ -475,4 +559,28 @@ class OctoNyteRV32ICore extends Module {
   }
 
   io.debugRegX1 := VecInit.tabulate(numThreads)(t => debugRegs1to4(t)(0))
+
+  val wbDecodeSignals = exec3ToWbEntry.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.decodeSignals
+  io.debugCtrlValid := wbValid
+  io.debugCtrlInstr := exec3ToWbEntry.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.instr
+  io.debugCtrlTaken := wbCtrlTaken
+  io.debugCtrlThread := wbThreadSel
+  io.debugCtrlFromPC := exec3ToWbEntry.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.pc
+  io.debugCtrlTarget := exec3ToWbEntry.exec2Signals.exec1Signals.ctrlTarget
+  io.debugCtrlIsBranch := wbDecodeSignals.isBranch
+  io.debugCtrlIsJal := wbDecodeSignals.isJAL
+  io.debugCtrlIsJalr := wbDecodeSignals.isJALR
+
+  io.debugExecValid := exec1DebugValid
+  io.debugExecThread := exec1ThreadSel
+  io.debugExecPC := exec1DebugPC
+  io.debugExecInstr := exec1DebugInstr
+  io.debugExecIsBranch := exec1DebugIsBranch
+  io.debugExecIsJal := exec1DebugIsJal
+  io.debugExecIsJalr := exec1DebugIsJalr
+  io.debugExecBranchOp := exec1DebugBranchOp
+  io.debugExecRs1 := exec1DebugRs1
+  io.debugExecRs2 := exec1DebugRs2
+  io.debugExecCtrlTaken := exec1DebugCtrlTaken
+  io.debugExecCtrlTarget := exec1DebugCtrlTarget
 }

@@ -52,6 +52,11 @@ class tetranyte(pluginTemplate):
     def runTests(self, testList):
         make = utils.makeUtil(makefilePath=os.path.join(self.work_dir, "Makefile." + self.name[:-1]))
         make.makeCommand = "make -k -j" + self.num_jobs
+        timeout_env = os.environ.get("RISCOF_TIMEOUT") or os.environ.get("TIMEOUT")
+        try:
+            timeout = int(timeout_env) if timeout_env else 300
+        except ValueError:
+            timeout = 300
 
         for testname, testentry in testList.items():
             test_dir = testentry["work_dir"]
@@ -85,7 +90,7 @@ class tetranyte(pluginTemplate):
             execute = f"@cd {test_dir}; {compile_cmd}; {run_cmd};"
             make.add_target(execute)
 
-        make.execute_all(self.work_dir)
+        make.execute_all(self.work_dir, timeout=timeout)
 
         if not self.target_run:
             raise SystemExit(0)

@@ -52,8 +52,20 @@ class octonyte(pluginTemplate):
     def runTests(self, testList):
         make = utils.makeUtil(makefilePath=os.path.join(self.work_dir, "Makefile." + self.name[:-1]))
         make.makeCommand = "make -k -j" + self.num_jobs
+        timeout_env = os.environ.get("RISCOF_TIMEOUT") or os.environ.get("TIMEOUT")
+        try:
+            timeout = int(timeout_env) if timeout_env else 300
+        except ValueError:
+            timeout = 300
+        max_cycles_env = os.environ.get("OCTONYTE_MAX_CYCLES")
+        try:
+            max_cycles = int(max_cycles_env) if max_cycles_env else 500_000
+        except ValueError:
+            max_cycles = 500_000
 
-        for testname, testentry in testList.items():
+        failed_tests = []
+        ordered_tests = sorted(testList.items(), key=lambda item: item[0])
+        for testname, testentry in ordered_tests:
             test_dir = testentry["work_dir"]
             elf_path = os.path.join(test_dir, "test.elf")
             sig_path = os.path.join(test_dir, self.name[:-1] + ".signature")
@@ -76,15 +88,25 @@ class octonyte(pluginTemplate):
             if self.target_run:
                 run_cmd = (
                     f"{self.dut_exe} --elf {elf_path} --signature {sig_path} "
-                    f"--log {log_path} --max-cycles 20000000"
+                    f"--log {log_path} --max-cycles {max_cycles}"
                 )
             else:
                 run_cmd = "echo 'target run disabled'"
 
             execute = f"@cd {test_dir}; {compile_cmd}; {run_cmd};"
             make.add_target(execute)
+            target_name = make.targets[-1]
+            logger.info("Running OctoNyte test %s", testname)
+            result = make.execute_target(target_name, self.work_dir, timeout=timeout)
+            if result == 0:
+                logger.info("OctoNyte test %s PASSED", testname)
+            else:
+                logger.error("OctoNyte test %s FAILED", testname)
+                failed_tests.append(testname)
 
-        make.execute_all(self.work_dir)
+        if failed_tests:
+            logger.error("OctoNyte failures (%d): %s", len(failed_tests), ", ".join(failed_tests))
+            raise SystemExit(1)
 
         if not self.target_run:
             raise SystemExit(0)

@@ -2,14 +2,35 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-TESTS_DIR=$(dirname "$SCRIPT_DIR")
-REPO_ROOT=$(dirname "$TESTS_DIR")
-BUILD_DIR="$SCRIPT_DIR/build"
+REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+
+cd "$REPO_ROOT"
+
+SIM_DIR="tests/sim"
+BUILD_DIR="$SIM_DIR/build"
 OBJ_DIR="$BUILD_DIR/octonyte_obj"
 
 mkdir -p "$BUILD_DIR"
+rm -rf "$OBJ_DIR"
+mkdir -p "$OBJ_DIR"
 
-VERILOG_TOP="$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/OctoNyteRV32ICore.v"
+VERILOG_TOP="rtl/generators/generated/verilog_hierarchical_timed/OctoNyteRV32ICore.v"
+RTL_SRC_DIRS=("rtl/OctoNyte/rv32i/src" "rtl/library/src")
+
+regen_rtl=0
+if [[ "${OCTONYTE_REGEN_RTL:-0}" == "1" ]]; then
+  regen_rtl=1
+elif [[ ! -f "$VERILOG_TOP" ]]; then
+  regen_rtl=1
+elif [[ -n "$(find "${RTL_SRC_DIRS[@]}" -type f -name '*.scala' -newer "$VERILOG_TOP" -print -quit)" ]]; then
+  regen_rtl=1
+fi
+
+if [[ "$regen_rtl" -eq 1 ]]; then
+  echo "Regenerating OctoNyte RTL..."
+  (cd "rtl" && sbt "generators/generateOctoNyteRTL")
+fi
+
 if [[ ! -f "$VERILOG_TOP" ]]; then
   echo "Expected RTL at $VERILOG_TOP. Regenerate with 'sbt generateOctoNyteRTL' from rtl/." >&2
   exit 1
@@ -25,9 +46,9 @@ verilator -cc "$VERILOG_TOP" \
   -CFLAGS "-O2 -std=c++17" \
   -LDFLAGS "-O2" \
   --exe \
-    "$SCRIPT_DIR/octonyte_sim.cpp" \
-    "$SCRIPT_DIR/elf_loader.cpp" \
-    "$SCRIPT_DIR/memory.cpp"
+    "$SIM_DIR/octonyte_sim.cpp" \
+    "$SIM_DIR/elf_loader.cpp" \
+    "$SIM_DIR/memory.cpp"
 
 cp "$OBJ_DIR/VOctoNyteRV32ICore" "$BUILD_DIR/octonyte_sim"
 chmod +x "$BUILD_DIR/octonyte_sim"

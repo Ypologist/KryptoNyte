@@ -12,7 +12,7 @@ class BranchUnit extends Module {
     val rs1 = Input(UInt(32.W))      // First register operand
     val rs2 = Input(UInt(32.W))      // Second register operand
     val pc = Input(UInt(32.W))       // Current PC (32-bit)
-    val imm = Input(SInt(12.W))      // 12-bit immediate (sign-extended)
+    val imm = Input(SInt(32.W))      // Byte offset (sign-extended)
     val branchOp = Input(UInt(3.W))  // Branch operation (BEQ/BNE/BLT/BGE/BLTU/BGEU)
     val valid = Input(Bool())        // Instruction valid
     
