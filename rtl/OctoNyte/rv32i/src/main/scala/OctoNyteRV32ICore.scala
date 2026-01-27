@@ -528,7 +528,7 @@ when (wbFetch.valid &&
 }
 
 when (wbFetch.valid && wbExec.doRegFileWrite) {
-  assert(wbDecode.rd =/= 0.U, "Writeback attempted to x0")
+  assert(wbDecode.rd =/= 0.U)
 }
 
 // -----------------
