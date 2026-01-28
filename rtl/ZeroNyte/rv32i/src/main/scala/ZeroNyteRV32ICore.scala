@@ -2,8 +2,9 @@ package ZeroNyte
 
 import chisel3._
 import chisel3.util._
+import chisel3.dontTouch
 import Decoders.RV32IDecode
-import ALUs.ALU32
+import ALUs.{ALU32, Div32Radix4, Mul32OneCycle}
 import TileLink._
 
 
@@ -45,6 +46,7 @@ class ZeroNyteRV32ICore extends Module {
   val rd  = instr(11,7)
   val rs1 = instr(19,15)
   val rs2 = instr(24,20)
+  val funct3 = instr(14, 12)
 
   val r1 = regFile(rs1)
   val r2Reg = regFile(rs2)
@@ -59,6 +61,70 @@ class ZeroNyteRV32ICore extends Module {
   alu.io.opcode := dec.aluOp
 
   val memPort = Module(new ZeroNyteMemPort())
+  // ---------- M Extension (Mul/Div) ----------
+  val isMExt = (instr(6,0) === RV32IDecode.OP_R) && (instr(31,25) === "b0000001".U)
+  val isMulInstr = isMExt && (funct3 <= "b011".U)
+  val isDivInstr = isMExt && (funct3 >= "b100".U)
+
+  val mulUnit = Module(new Mul32OneCycle)
+  val mulSignedA = WireDefault(true.B)
+  val mulSignedB = WireDefault(true.B)
+  when(funct3 === "b011".U) { // MULHU
+    mulSignedA := false.B; mulSignedB := false.B
+  }.elsewhen(funct3 === "b010".U) { // MULHSU
+    mulSignedA := true.B; mulSignedB := false.B
+  }
+  mulUnit.io.a := r1
+  mulUnit.io.b := r2Reg
+  mulUnit.io.signedA := mulSignedA
+  mulUnit.io.signedB := mulSignedB
+  val mulProductSink = Wire(UInt(64.W))
+  mulProductSink := mulUnit.io.product
+  dontTouch(mulProductSink)
+
+  val mulResult = MuxLookup(funct3, mulUnit.io.lo)(Seq(
+    "b000".U -> mulUnit.io.lo, // MUL
+    "b001".U -> mulUnit.io.hi, // MULH
+    "b010".U -> mulUnit.io.hi, // MULHSU
+    "b011".U -> mulUnit.io.hi  // MULHU
+  ))
+
+  val divider = Module(new Div32Radix4)
+  val divActive = RegInit(false.B)
+  val divRd = Reg(UInt(5.W))
+  val divFunct3 = Reg(UInt(3.W))
+  val divDividend = Reg(UInt(32.W))
+  val divDivisor = Reg(UInt(32.W))
+
+  val divSigned = Mux(divActive, divFunct3 === "b100".U || divFunct3 === "b110".U,
+    isDivInstr && (funct3 === "b100".U || funct3 === "b110".U))
+  divider.io.signed := divSigned
+  divider.io.dividend := Mux(divActive, divDividend, r1)
+  divider.io.divisor := Mux(divActive, divDivisor, r2Reg)
+  val divLaunch = WireDefault(false.B)
+  divider.io.start := divLaunch
+
+  when(!divActive && isDivInstr) {
+    divLaunch := true.B
+    divActive := true.B
+    divRd := rd
+    divFunct3 := funct3
+    divDividend := r1
+    divDivisor := r2Reg
+  }.elsewhen(divActive && divider.io.done) {
+    divActive := false.B
+  }
+
+  val divResult = Mux(divFunct3 === "b100".U || divFunct3 === "b101".U,
+    divider.io.quotient,
+    divider.io.remainder)
+  val divBusySink = Wire(UInt(1.W))
+  val divDivideByZeroSink = Wire(UInt(1.W))
+  divBusySink := divider.io.busy
+  divDivideByZeroSink := divider.io.divideByZero
+  dontTouch(divBusySink)
+  dontTouch(divDivideByZeroSink)
+  val divDone = divActive && divider.io.done
 
   // ---------- Data Memory Access ----------
   val effAddr    = alu.io.result
@@ -115,6 +181,7 @@ class ZeroNyteRV32ICore extends Module {
 
   val write_data = Wire(UInt(32.W))
   val doWrite = Wire(Bool())
+  val targetRd = WireDefault(rd)
   write_data := alu.io.result
   doWrite := dec.isALU
 
@@ -156,6 +223,20 @@ class ZeroNyteRV32ICore extends Module {
     }
   }
 
+  when(isMulInstr) {
+    write_data := mulResult
+    doWrite := true.B
+  }
+
+  when(isDivInstr) {
+    doWrite := false.B
+    when(divDone) {
+      write_data := divResult
+      doWrite := true.B
+      targetRd := divRd
+    }
+  }
+
   when(dec.isLUI) {
     write_data := dec.imm
     doWrite := true.B
@@ -171,8 +252,8 @@ class ZeroNyteRV32ICore extends Module {
     doWrite := true.B
   }
 
-  when(doWrite && rd =/= 0.U) {
-    regFile(rd) := write_data
+  when(doWrite && targetRd =/= 0.U) {
+    regFile(targetRd) := write_data
   }
   io.result := write_data
 
@@ -198,6 +279,7 @@ class ZeroNyteRV32ICore extends Module {
   val jalTarget = (pc.asSInt + dec.imm.asSInt).asUInt
 
   val nextPC = WireDefault(pcPlus4)
+  val divStall = (divActive || divLaunch) && !divider.io.done
   when(dec.isBranch && branchTaken) {
     nextPC := branchTarget
   }
@@ -206,6 +288,9 @@ class ZeroNyteRV32ICore extends Module {
   }
   when(dec.isJALR) {
     nextPC := jalrTarget
+  }
+  when(divStall) {
+    nextPC := pc
   }
 
   pc := nextPC
