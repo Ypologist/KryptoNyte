@@ -46,7 +46,7 @@ object RV32IDecode {
     Cat(Fill(20, sign), value)
   }
   def signExt13(value: UInt): UInt = {
-    val sign = value(11)
+    val sign = value(12)
     Cat(Fill(19, sign), value)
   }
   def signExt20(value: UInt): UInt = {
@@ -138,8 +138,9 @@ object RV32IDecode {
       // Branch
       is(BRANCH) {
         dec.isBranch := true.B
-        val branchImm = Cat(instr(31), instr(7), instr(30,25), instr(11,8), 0.U(1.W))
-        dec.imm := signExt13(branchImm(12,1))
+        // Keep branch immediate in halfword units (bit0 dropped); pipeline shifts left by 1.
+        val branchImm = Cat(instr(31), instr(7), instr(30,25), instr(11,8))
+        dec.imm := signExt12(branchImm)
       }
 
       // JAL

@@ -16,6 +16,7 @@ class TetraNyteRV32ICoreWithCacheIO(val numThreads: Int) extends Bundle {
   val memAddr = Output(UInt(32.W))
   val memWrite = Output(UInt(32.W))
   val memMask = Output(UInt(4.W))
+  val memValid = Output(Bool())
   val memMisaligned = Output(Bool())
 
   val fetchThread = Output(UInt(log2Ceil(numThreads).W))
@@ -70,6 +71,7 @@ class TetraNyteRV32ICoreWithCache extends Module {
   io.memAddr := 0.U
   io.memWrite := 0.U
   io.memMask := 0.U
+  io.memValid := false.B
   io.memMisaligned := false.B
 
   // ===================== Instruction Fetch (IF) =====================
@@ -237,6 +239,8 @@ class TetraNyteRV32ICoreWithCache extends Module {
   io.memAddr := Mux(icache.io.stall, icache.io.mem_addr, addrBase)
   io.memWrite := Mux(memStoreActive, storeUnit.io.memWrite, 0.U)
   io.memMask := Mux(memStoreActive, storeUnit.io.mask, 0.U)
+  val memLoadActive = ex_mem.valid && ex_mem.isLoad && io.threadEnable(ex_mem.threadId)
+  io.memValid := memLoadActive || memStoreActive
   io.memMisaligned := ex_mem.valid && io.threadEnable(ex_mem.threadId) && storeUnit.io.misaligned
 
   mem_wb.aluResult := ex_mem.aluResult
