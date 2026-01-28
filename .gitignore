@@ -15,6 +15,7 @@ tests/output/
 tests/reports/
 tests/toolchain/
 tests/toolchain_alias/
+toolchain_alias/bin/
 tests/sim/build/
 tests/riscof/.config*.ini
 rtl/.sbtboot/
