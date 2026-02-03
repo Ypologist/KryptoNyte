@@ -11,7 +11,7 @@ ENV_ROOT="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env"
 
 print_usage() {
   cat <<EOF
-Usage: $(basename "$0") [--processor <zeronyte|tetranyte|octonyte>]
+Usage: $(basename "$0") [--processor <zeronyte|zeronyte-cache|tetranyte|octonyte>]
 [--smoke-test] [--timeout <seconds>]
 
 Runs RISCOF RV32I conformance for the requested processor. Defaults to ZeroNyte.
@@ -67,6 +67,15 @@ case "$PROCESSOR" in
     ISA_FILE="zeronyte/zeronyte_isa.yaml"
     PLATFORM_FILE="zeronyte/zeronyte_platform.yaml"
     RTL_TOP="$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v"
+    RTL_GEN_TASK="generators/generateZeroNyteRTL"
+    ;;
+  zeronyte-cache)
+    DUT_NAME="zeronyte"
+    SIM_BUILD_SCRIPT="$SCRIPT_DIR/sim/build_zeronyte_cache_sim.sh"
+    SIM_BINARY="zeronyte_cache_sim"
+    ISA_FILE="zeronyte/zeronyte_isa.yaml"
+    PLATFORM_FILE="zeronyte/zeronyte_platform.yaml"
+    RTL_TOP="$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICoreWithCache.v"
     RTL_GEN_TASK="generators/generateZeroNyteRTL"
     ;;
   tetranyte)
