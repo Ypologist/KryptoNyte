@@ -24,6 +24,7 @@ class OctoNyteRV32ICoreIO(val numThreads: Int, val fetchWidth: Int) extends Bund
   val memAddr      = Output(UInt(32.W))
   val memWrite     = Output(UInt(32.W))
   val memMask      = Output(UInt(4.W))
+  val memValid     = Output(Bool())
   val memMisaligned= Output(Bool())
 
   val debugStageThreads = Output(Vec(8, UInt(threadBits.W)))
@@ -174,6 +175,7 @@ class OctoNyteRV32ICore extends Module {
   io.memAddr := 0.U
   io.memWrite := 0.U
   io.memMask := 0.U
+  io.memValid := false.B
   io.memMisaligned := false.B
  
  
@@ -397,7 +399,9 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   // ---- LOAD ----
   .elsewhen (decodeSignals.isLoad) {
     val address = regReadReg.rs1Data + decodeSignals.imm
+    val loadActive = io.threadEnable(fetchSignals.threadId)
     io.memAddr := Cat(address(31, 2), 0.U(2.W))
+    io.memValid := loadActive
     loadUnit.io.addr := address
     loadUnit.io.funct3 := fetchSignals.instr(14, 12)
 
@@ -408,14 +412,16 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   // ---- STORE ----
   .elsewhen (decodeSignals.isStore) {
     val address = regReadReg.rs1Data + decodeSignals.imm
+    val storeActive = io.threadEnable(fetchSignals.threadId) && !storeUnit.io.misaligned
     io.memAddr := Cat(address(31, 2), 0.U(2.W))
     storeUnit.io.addr := address
     storeUnit.io.data := regReadReg.rs2Data
     storeUnit.io.storeType := fetchSignals.instr(13, 12)
 
-    io.memWrite := storeUnit.io.memWrite
-    io.memMask := storeUnit.io.mask
-    io.memMisaligned := storeUnit.io.misaligned
+    io.memWrite := Mux(storeActive, storeUnit.io.memWrite, 0.U)
+    io.memMask := Mux(storeActive, storeUnit.io.mask, 0.U)
+    io.memValid := storeActive
+    io.memMisaligned := io.threadEnable(fetchSignals.threadId) && storeUnit.io.misaligned
   }
 
   } .otherwise {
