@@ -114,18 +114,24 @@ int main(int argc, char** argv) {
     dut.io_threadEnable_7 = (options.thread_mask >> 7) & 0x1;
   };
 
-  uint32_t lastFetchThread = 0;
-  bool lastFetchValid = false;
+  uint32_t predictedFetchThread = 0;
+  uint32_t stageFetchThread = 0;
+  bool stageFetchValid = false;
+  uint32_t scheduledFetchThread = 0;
+  bool scheduledFetchEnabled = false;
+  uint32_t scheduledFetchAddr = kMemBase;
+  uint32_t scheduledInstr = 0x00000013;
   auto driveInterfaces = [&]() {
     driveThreadMask();
-    lastFetchThread = dut.io_debugStageThreads_0 & 0x7;
-    lastFetchValid = dut.io_debugStageValids_0;
+    stageFetchThread = dut.io_debugStageThreads_0 & 0x7;
+    stageFetchValid = dut.io_debugStageValids_0;
 
-    uint32_t instr = 0x00000013;  // NOP
-    if (lastFetchValid && ((options.thread_mask >> lastFetchThread) & 0x1)) {
-      instr = memory.read32(thread_pcs[lastFetchThread]);
-    }
-    dut.io_instrMem[0U] = instr;
+    scheduledFetchThread = predictedFetchThread & 0x7;
+    scheduledFetchEnabled = ((options.thread_mask >> scheduledFetchThread) & 0x1) != 0;
+    scheduledFetchAddr = thread_pcs[scheduledFetchThread];
+    scheduledInstr = scheduledFetchEnabled ? memory.read32(scheduledFetchAddr) : 0x00000013;
+
+    dut.io_instrMem[0U] = scheduledInstr;
     dut.io_instrMem[1U] = 0;
     dut.io_instrMem[2U] = 0;
     dut.io_instrMem[3U] = 0;
@@ -145,6 +151,8 @@ int main(int argc, char** argv) {
     driveInterfaces();
     dut.eval();
     captureThreadPcs();
+
+    predictedFetchThread = 0;
   }
   dut.reset = 0;
 
@@ -162,6 +170,8 @@ int main(int argc, char** argv) {
     dut.eval();
     captureThreadPcs();
 
+    predictedFetchThread = (predictedFetchThread + 1) % kNumThreads;
+
     const uint32_t addr = dut.io_memAddr;
     const uint32_t data = dut.io_memWrite;
     const uint32_t mask = dut.io_memMask;
@@ -176,8 +186,12 @@ int main(int argc, char** argv) {
     if (log.is_open()) {
       log << std::hex
           << "cycle=0x" << cycle
-          << " fetchThread=0x" << lastFetchThread
-          << " fetchValid=" << lastFetchValid
+          << " schedThread=0x" << scheduledFetchThread
+          << " schedEn=" << static_cast<unsigned>(scheduledFetchEnabled)
+          << " schedAddr=0x" << scheduledFetchAddr
+          << " schedInstr=0x" << scheduledInstr
+          << " stageThread=0x" << stageFetchThread
+          << " stageValid=" << stageFetchValid
           << " pc0=0x" << thread_pcs[0]
           << " pc1=0x" << thread_pcs[1]
           << " pc2=0x" << thread_pcs[2]
