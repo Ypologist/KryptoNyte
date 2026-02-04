@@ -24,6 +24,7 @@ class OctoNyteRV32ICoreIO(val numThreads: Int, val fetchWidth: Int) extends Bund
   val memAddr      = Output(UInt(32.W))
   val memWrite     = Output(UInt(32.W))
   val memMask      = Output(UInt(4.W))
+  val memValid     = Output(Bool())
   val memMisaligned= Output(Bool())
 
   val debugStageThreads = Output(Vec(8, UInt(threadBits.W)))
@@ -174,6 +175,7 @@ class OctoNyteRV32ICore extends Module {
   io.memAddr := 0.U
   io.memWrite := 0.U
   io.memMask := 0.U
+  io.memValid := false.B
   io.memMisaligned := false.B
  
  
@@ -374,7 +376,7 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   // ---- JALR ----
   .elsewhen (decodeSignals.isJALR) {
     val target =
-      ((regReadReg.rs1Data.asSInt + decodeSignals.imm.asSInt).asUInt & ~1.U)
+      ((regReadReg.rs1Data.asSInt + decodeSignals.imm.asSInt).asUInt & ~1.U(32.W))
     exec1Reg.result := fetchSignals.pc + 4.U
     exec1Reg.doRegFileWrite := true.B
     exec1Reg.ctrlTaken := true.B
@@ -397,7 +399,9 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   // ---- LOAD ----
   .elsewhen (decodeSignals.isLoad) {
     val address = regReadReg.rs1Data + decodeSignals.imm
+    val loadActive = io.threadEnable(fetchSignals.threadId)
     io.memAddr := Cat(address(31, 2), 0.U(2.W))
+    io.memValid := loadActive
     loadUnit.io.addr := address
     loadUnit.io.funct3 := fetchSignals.instr(14, 12)
 
@@ -408,14 +412,16 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   // ---- STORE ----
   .elsewhen (decodeSignals.isStore) {
     val address = regReadReg.rs1Data + decodeSignals.imm
+    val storeActive = io.threadEnable(fetchSignals.threadId) && !storeUnit.io.misaligned
     io.memAddr := Cat(address(31, 2), 0.U(2.W))
     storeUnit.io.addr := address
     storeUnit.io.data := regReadReg.rs2Data
     storeUnit.io.storeType := fetchSignals.instr(13, 12)
 
-    io.memWrite := storeUnit.io.memWrite
-    io.memMask := storeUnit.io.mask
-    io.memMisaligned := storeUnit.io.misaligned
+    io.memWrite := Mux(storeActive, storeUnit.io.memWrite, 0.U)
+    io.memMask := Mux(storeActive, storeUnit.io.mask, 0.U)
+    io.memValid := storeActive
+    io.memMisaligned := io.threadEnable(fetchSignals.threadId) && storeUnit.io.misaligned
   }
 
   } .otherwise {
@@ -513,8 +519,18 @@ when (wbFetch.valid &&
 // -----------------------------
 // Control-flow commit
 // -----------------------------
-when (wbFetch.valid && wbExec.ctrlTaken) {
-  pcRegs(wbFetch.threadId) := wbExec.ctrlTarget
+val ex1Fetch =
+  exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals
+val ex1Redirect = ex1Fetch.valid && exec1Reg.ctrlTaken
+
+// Resolve control flow in EX1 and squash younger work so taken redirects do not replay.
+when (ex1Redirect) {
+  pcRegs(ex1Fetch.threadId) := exec1Reg.ctrlTarget
+
+  fetchReg.valid := false.B
+  decodeReg.fetchSignals.valid := false.B
+  dispatchReg.decodePipelineSignals.fetchSignals.valid := false.B
+  regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
 }
 
 when (wbFetch.valid &&
@@ -527,8 +543,9 @@ when (wbFetch.valid &&
     .elsewhen (wbDecode.rd === 4.U) { debugRegs1to4(wbFetch.threadId)(3) := wbExec.result }
 }
 
-when (wbFetch.valid && wbExec.doRegFileWrite) {
-  assert(wbDecode.rd =/= 0.U)
+// Keep writeback side-effect free for x0; avoid FIRRTL verification ops in generated RTL path.
+when (wbFetch.valid && wbExec.doRegFileWrite && wbDecode.rd === 0.U) {
+  regFile.io.wen(0) := false.B
 }
 
 // -----------------
@@ -542,6 +559,23 @@ val dbgFetch =
 val dbgDecode =
   wbReg.exec3Signals.exec2Signals.exec1Signals
     .regReadSignals.dispatchSignals.decodePipelineSignals.decodeSignals
+
+io.debugStageThreads(0) := fetchReg.threadId
+io.debugStageValids(0) := fetchReg.valid
+io.debugStageThreads(1) := decodeReg.fetchSignals.threadId
+io.debugStageValids(1) := decodeReg.fetchSignals.valid
+io.debugStageThreads(2) := dispatchReg.decodePipelineSignals.fetchSignals.threadId
+io.debugStageValids(2) := dispatchReg.decodePipelineSignals.fetchSignals.valid
+io.debugStageThreads(3) := regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.threadId
+io.debugStageValids(3) := regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.valid
+io.debugStageThreads(4) := exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.threadId
+io.debugStageValids(4) := exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid
+io.debugStageThreads(5) := exec2Reg.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.threadId
+io.debugStageValids(5) := exec2Reg.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid
+io.debugStageThreads(6) := exec3Reg.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.threadId
+io.debugStageValids(6) := exec3Reg.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid
+io.debugStageThreads(7) := dbgFetch.threadId
+io.debugStageValids(7) := dbgFetch.valid
 
 io.debugCtrlValid := dbgFetch.valid
 io.debugCtrlInstr := dbgFetch.instr
