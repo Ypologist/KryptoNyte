@@ -43,6 +43,9 @@ class ZeroNyteRV32ICoreWithCache extends Module {
   // Instruction and valid flag from cache
   val instr_valid = I$.io.instr_valid
   val fetched_instr = I$.io.instr
+  val cache_stall = Wire(Bool())
+  cache_stall := I$.io.stall
+  dontTouch(cache_stall)
 
   // Expose visible instruction for debug (0 when not valid)
   io.instr_out := Mux(instr_valid, fetched_instr, 0.U)

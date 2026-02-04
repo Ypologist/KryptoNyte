@@ -22,7 +22,7 @@ import LoadUnit.LoadUnit
 import RegFiles.RegFileMT2R1WVec
 import StoreUnit.StoreUnit
 import TetraNyte.TetraNyteRV32ICore
-import ZeroNyte.ZeroNyteRV32ICore
+import ZeroNyte.{ZeroNyteRV32ICore, ZeroNyteRV32ICoreWithCache}
 import OctoNyte.OctoNyteRV32ICore
 
 // Note: RV32IDecode is an object (not a Module class), so it's not imported for RTL generation
@@ -288,8 +288,10 @@ Environment Variables:
   def getZeroNyteModules(variant: String): Seq[ModuleSpec] = {
     variant match {
       case "rv32i" =>
-        getRV32ILibraryModules("ZeroNyte") :+
-          ModuleSpec(() => new ZeroNyteRV32ICore, "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i")
+        getRV32ILibraryModules("ZeroNyte") ++ Seq(
+          ModuleSpec(() => new ZeroNyteRV32ICore, "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i"),
+          ModuleSpec(() => new ZeroNyteRV32ICoreWithCache, "ZeroNyteRV32ICoreWithCache", "Single-cycle RV32I core with I-cache", "ZeroNyte", "rv32i")
+        )
       case _ => Seq.empty
     }
   }
