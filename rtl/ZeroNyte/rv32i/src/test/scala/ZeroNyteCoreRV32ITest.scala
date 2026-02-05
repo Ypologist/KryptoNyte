@@ -27,6 +27,10 @@ class ZeroNyteRV32ICoreTest extends AnyFlatSpec {
       // Apply reset to ensure deterministic starting state
       dut.reset.poke(true.B)
       dut.io.imem_rdata.poke(0.U)
+      dut.io.irqSources.poke(0.U)
+      dut.io.irqEnableMask.poke("hff".U)
+      dut.io.irqComplete.poke(false.B)
+      dut.io.interruptVector.poke("h80000100".U)
       driveTLIdle()
       dut.clock.step()
       dut.reset.poke(false.B)
@@ -71,4 +75,43 @@ class ZeroNyteRV32ICoreTest extends AnyFlatSpec {
       }
     }
   }
+  
+  it should "jump to the interrupt vector when an external interrupt is asserted" in {
+    simulate(new ZeroNyteRV32ICore) { dut =>
+      val vector = 0x80000100L
+
+      def driveTLIdle(): Unit = {
+        dut.io.tl.a.ready.poke(true.B)
+        dut.io.tl.d.valid.poke(false.B)
+        dut.io.tl.d.bits.opcode.poke(0.U)
+        dut.io.tl.d.bits.param.poke(0.U)
+        dut.io.tl.d.bits.size.poke(0.U)
+        dut.io.tl.d.bits.source.poke(0.U)
+        dut.io.tl.d.bits.denied.poke(false.B)
+        dut.io.tl.d.bits.data.poke(0.U)
+        dut.io.tl.d.bits.corrupt.poke(false.B)
+      }
+
+      dut.reset.poke(true.B)
+      dut.io.imem_rdata.poke(0x00000013L.U)
+      dut.io.dmem_rdata.poke(0.U)
+      dut.io.irqSources.poke(0.U)
+      dut.io.irqEnableMask.poke("hff".U)
+      dut.io.irqComplete.poke(false.B)
+      dut.io.interruptVector.poke(vector.U)
+      driveTLIdle()
+      dut.clock.step()
+      dut.reset.poke(false.B)
+
+      dut.io.imem_rdata.poke(0x00000013L.U)
+      dut.io.irqSources.poke(1.U)
+      driveTLIdle()
+      assert(dut.io.interruptTaken.peek().litToBoolean, "interrupt should be taken when asserted")
+      dut.clock.step()
+
+      val pcAfterInterrupt = dut.io.pc_out.peek().litValue.toLong
+      assert(pcAfterInterrupt == vector, f"Expected PC to jump to 0x$vector%x, got 0x$pcAfterInterrupt%x")
+    }
+  }
+
 }

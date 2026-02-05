@@ -23,6 +23,15 @@ class ZeroNyteRV32ICore extends Module {
     // TileLink master port for data memory (optional; legacy path still works)
     val tl = new TLBundleUL(TLParams())
 
+     // Interrupt controller interface.
+    val irqSources = Input(UInt(8.W))
+    val irqEnableMask = Input(UInt(8.W))
+    val irqComplete = Input(Bool())
+    val interruptVector = Input(UInt(32.W))
+    val interruptTaken = Output(Bool())
+    val irqPending = Output(UInt(8.W))
+    val irqClaimId = Output(UInt(4.W))
+   
     // Debug Outputs
     val pc_out    = Output(UInt(32.W))
     val instr_out = Output(UInt(32.W))
@@ -257,6 +266,15 @@ class ZeroNyteRV32ICore extends Module {
   }
   io.result := write_data
 
+    // ---------- Interrupt Controller ----------
+  val interruptController = Module(new ZeroNyteInterruptController(8))
+  interruptController.io.irqSources := io.irqSources
+  interruptController.io.enableMask := io.irqEnableMask
+  interruptController.io.complete := io.irqComplete
+  io.irqPending := interruptController.io.pending
+  io.irqClaimId := interruptController.io.claimId
+
+
   // ---------- PC Update ----------
   val branchEq  = r1 === r2Reg
   val branchLT  = r1.asSInt < r2Reg.asSInt
@@ -280,6 +298,9 @@ class ZeroNyteRV32ICore extends Module {
 
   val nextPC = WireDefault(pcPlus4)
   val divStall = (divActive || divLaunch) && !divider.io.done
+  val interruptTaken = interruptController.io.hasInterrupt && !divStall
+  io.interruptTaken := interruptTaken
+
   when(dec.isBranch && branchTaken) {
     nextPC := branchTarget
   }
@@ -292,6 +313,8 @@ class ZeroNyteRV32ICore extends Module {
   when(divStall) {
     nextPC := pc
   }
-
+  when(interruptTaken) {
+    nextPC := io.interruptVector
+ }
   pc := nextPC
 }

@@ -27,6 +27,10 @@ class ZeroNyteRV32IAndTest extends AnyFlatSpec {
       // Reset core to a known state
       dut.reset.poke(true.B)
       dut.io.imem_rdata.poke(0.U)
+      dut.io.irqSources.poke(0.U)+      dut.io.irqEnableMask.poke("hff".U)
+      dut.io.irqComplete.poke(false.B)
+      dut.io.interruptVector.poke("h80000100".U)
+
       dut.io.dmem_rdata.poke(0.U)
       driveTLIdle()
       dut.clock.step()
