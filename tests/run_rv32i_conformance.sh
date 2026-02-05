@@ -235,12 +235,21 @@ EOF
 
 TOOLCHAIN_DIR="$SCRIPT_DIR/toolchain"
 mkdir -p "$TOOLCHAIN_DIR"
+# Prefer real compiler binaries (avoid stub wrappers in /opt/riscv/bin).
+RISCV_GCC="${RISCV_GCC:-/opt/riscv/bin/riscv64-unknown-elf-gcc-15.1.0}"
+RISCV_GPP="${RISCV_GPP:-/opt/riscv/bin/riscv64-unknown-elf-c++}"
 create_wrapper() {
   local tool="$1"
   local suffix=${tool#riscv32-unknown-elf-}
+  local real=""
+  case "$suffix" in
+    gcc) real="$RISCV_GCC" ;;
+    g++) real="$RISCV_GPP" ;;
+    *) real="/opt/riscv/riscv64-unknown-elf/bin/$suffix" ;;
+  esac
   cat >"$TOOLCHAIN_DIR/$tool" <<EOF
 #!/usr/bin/env bash
-exec riscv64-unknown-elf-$suffix "\$@"
+exec "$real" "\$@"
 EOF
   chmod +x "$TOOLCHAIN_DIR/$tool"
 }
@@ -251,6 +260,9 @@ done
 export PATH="$TOOLCHAIN_DIR:$PATH"
 export PYTHONPATH="$VENV_BIN:${PYTHONPATH:-}"
 export PYTHONPATH="$SCRIPT_DIR/riscof:$PLUGIN_ROOT:$PYTHONPATH"
+# Prefer real RISC-V toolchain binaries (avoid stub wrappers in /opt/riscv/bin).
+export PATH="/opt/riscv/riscv64-unknown-elf/bin:$PATH"
+export RISCV_GCC
 
 run_riscof_suite() {
   local suite_dir="$1"
