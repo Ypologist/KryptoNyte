@@ -48,7 +48,10 @@ CFLAGS=(
   -static
   -nostdlib
   -nostartfiles
+  -ffreestanding
+  -fno-builtin
   -g
+  -DXLEN=32
 )
 
 "$CC" "${CFLAGS[@]}" \

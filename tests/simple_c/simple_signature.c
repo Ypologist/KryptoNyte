@@ -5,6 +5,8 @@ extern volatile uint32_t fromhost;
 extern volatile uint32_t begin_signature[];
 extern volatile uint32_t end_signature;
 
+extern void rvmodel_halt(void) __attribute__((noreturn));
+
 static inline void write_signature(uint32_t index, uint32_t value) {
   begin_signature[index] = value;
 }
@@ -226,6 +228,5 @@ int main(void) {
   (void)fromhost;
   (void)end_signature;
 
-  tohost = 1;
-  return 0;
+  rvmodel_halt();
 }
