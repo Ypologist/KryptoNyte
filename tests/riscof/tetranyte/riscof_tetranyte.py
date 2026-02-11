@@ -39,8 +39,9 @@ class tetranyte(pluginTemplate):
         self.local_env = os.path.join(self.pluginpath, "env")
         self.arch_env = archtest_env
 
+        gcc = os.environ.get("RISCV_GCC", "riscv64-unknown-elf-gcc")
         self.compile_cmd_template = (
-            "riscv64-unknown-elf-gcc -march={march} -mabi=ilp32 "
+            f"{gcc} -march={{march}} -mabi=ilp32 "
             "-mcmodel=medany -static -nostdlib -nostartfiles -g "
             "-T {linker} -I {local_env} -I {arch_env} {test} -o {elf} {macros}"
         )
@@ -50,7 +51,17 @@ class tetranyte(pluginTemplate):
         self.xlen = "64" if 64 in ispec["supported_xlen"] else "32"
 
     def runTests(self, testList):
-        make = utils.makeUtil(makefilePath=os.path.join(self.work_dir, "Makefile." + self.name[:-1]))
+        # RISCOF names the generated DUT makefile as "Makefile.DUT-<model>".
+        # Pick the first matching file to avoid name mismatches.
+        makefile_path = None
+        for fname in os.listdir(self.work_dir):
+            if fname.startswith("Makefile.DUT-"):
+                makefile_path = os.path.join(self.work_dir, fname)
+                break
+        if makefile_path is None:
+            makefile_path = os.path.join(self.work_dir, "Makefile." + self.name[:-1])
+
+        make = utils.makeUtil(makefilePath=makefile_path)
         make.makeCommand = "make -k -j" + self.num_jobs
         timeout_env = os.environ.get("RISCOF_TIMEOUT") or os.environ.get("TIMEOUT")
         try:
@@ -79,10 +90,15 @@ class tetranyte(pluginTemplate):
             )
 
             if self.target_run:
-                # Barrel threading stretches execution; allow generous cycle budget.
+                # Barrel threading stretches execution; allow configurable cycle budget.
+                max_cycles_env = os.environ.get("TETRANYTE_MAX_CYCLES")
+                try:
+                    max_cycles = int(max_cycles_env) if max_cycles_env else 2_000_000
+                except ValueError:
+                    max_cycles = 2_000_000
                 run_cmd = (
                     f"{self.dut_exe} --elf {elf_path} --signature {sig_path} "
-                    f"--log {log_path} --max-cycles 20000000"
+                    f"--log {log_path} --max-cycles {max_cycles}"
                 )
             else:
                 run_cmd = "echo 'target run disabled'"
