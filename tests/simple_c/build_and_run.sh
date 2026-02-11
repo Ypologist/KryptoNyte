@@ -40,6 +40,9 @@ mkdir -p "$BUILD_DIR"
 ELF="$BUILD_DIR/simple_signature.elf"
 SIG_OUT="$BUILD_DIR/simple.signature"
 LOG_OUT="$BUILD_DIR/simple.log"
+HTML_OUT="$BUILD_DIR/simple_report.html"
+REF_SIG="$BUILD_DIR/simple.reference.signature"
+REF_LOG="$BUILD_DIR/simple.reference.log"
 
 CFLAGS=(
   -march=rv32i
@@ -69,13 +72,52 @@ if [[ ! -x "$SIM_BIN" ]]; then
   "$SIM_BUILD"
 fi
 
+USE_REF=0
+if command -v spike >/dev/null 2>&1; then
+  if spike -m8796093022208 --isa=rv32i \
+      +signature="$REF_SIG" +signature-granularity=4 \
+      "$ELF" >"$REF_LOG" 2>&1; then
+    USE_REF=1
+  else
+    echo "Warning: spike reference run failed; falling back to static expected.signature." >&2
+  fi
+fi
+
 "$SIM_BIN" --elf "$ELF" --signature "$SIG_OUT" --log "$LOG_OUT" --max-cycles 200000
 
-if [[ -f "$SIG_EXPECTED" ]]; then
-  if diff -u "$SIG_EXPECTED" "$SIG_OUT"; then
-    echo "Signature matches expected output."
+if [[ "$USE_REF" -eq 1 && -f "$REF_SIG" ]]; then
+  if diff -u "$REF_SIG" "$SIG_OUT"; then
+    echo "Signature matches reference (spike) output."
   else
-    echo "Signature mismatch. See $SIG_OUT and $SIG_EXPECTED." >&2
+    echo "Signature mismatch vs reference. See $SIG_OUT and $REF_SIG." >&2
     exit 2
+  fi
+else
+  if [[ -f "$SIG_EXPECTED" ]]; then
+    if diff -u "$SIG_EXPECTED" "$SIG_OUT"; then
+      echo "Signature matches expected output."
+    else
+      echo "Signature mismatch. See $SIG_OUT and $SIG_EXPECTED." >&2
+      exit 2
+    fi
+  fi
+fi
+
+EXPECTED_PATH="$SIG_EXPECTED"
+if [[ "$USE_REF" -eq 1 && -f "$REF_SIG" ]]; then
+  EXPECTED_PATH="$REF_SIG"
+fi
+
+python3 "$SCRIPT_DIR/generate_report.py" \
+  --expected "$EXPECTED_PATH" \
+  --actual "$SIG_OUT" \
+  --log "$LOG_OUT" \
+  --out "$HTML_OUT"
+echo "HTML report: $HTML_OUT"
+
+# Auto-open report on Ubuntu desktop if a GUI session is available.
+if command -v xdg-open >/dev/null 2>&1; then
+  if [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
+    xdg-open "$HTML_OUT" >/dev/null 2>&1 &
   fi
 fi
