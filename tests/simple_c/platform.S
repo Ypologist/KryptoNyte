@@ -12,6 +12,6 @@ fromhost:
 .align 4
 .globl begin_signature
 begin_signature:
-  .space 32
+  .space 128
 .globl end_signature
 end_signature:
