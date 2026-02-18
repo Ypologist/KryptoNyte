@@ -1,0 +1,11 @@
+.section .signature, "aw", @progbits
+.align 4
+.globl begin_signature
+begin_signature:
+.globl signature_buffer
+signature_buffer:
+  .rept 32
+  .word 0
+  .endr
+.globl end_signature
+end_signature:
