@@ -15,6 +15,10 @@ tests/output/
 tests/reports/
 tests/toolchain/
 tests/toolchain_alias/
+tests/simple_c/build/
+tests/scala_kernels/*.elf
+tests/scala_kernels/*.bin
+rtl/ZeroNyte/rv32i/src/test/resources/roms/*.bin
 toolchain_alias/bin/
 tests/sim/build/
 tests/riscof/.config*.ini

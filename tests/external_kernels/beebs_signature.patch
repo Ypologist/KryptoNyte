@@ -9,7 +9,7 @@ index 1f2edad..f7692b3 100644
 -export CHIP_CFLAGS="-march=rv32i"
 +chipdir=`readlink -m $srcdir/config/$arch/chips/$chip/`
 +
-+export CHIP_CFLAGS="-march=rv32i -fdata-sections -ffunction-sections -Wl,-gc-sections -nostartfiles -nostdlib"
++export CHIP_CFLAGS="-march=rv32i -std=gnu11 -fdata-sections -ffunction-sections -Wl,-gc-sections -nostartfiles -nostdlib"
 +export CHIP_LDFLAGS="-T $chipdir/link.ld -nostartfiles -nostdlib"
 +
 +USE_DUMMY_CRT0=yes
@@ -17,7 +17,7 @@ index 1f2edad..f7692b3 100644
 +USE_DUMMY_LIBGCC="-lgcc"
 +USE_DUMMY_LIBM=no
 diff --git a/src/cnt/cnt.c b/src/cnt/cnt.c
-index 4df958e..bab40cd 100644
+index 4df958e..5f27f60 100644
 --- a/src/cnt/cnt.c
 +++ b/src/cnt/cnt.c
 @@ -25,6 +25,7 @@
@@ -37,10 +37,24 @@ index 4df958e..bab40cd 100644
  
  
  /* sumcntmatrix.c */
-@@ -83,6 +86,16 @@ matrix Array;
+@@ -83,6 +86,28 @@ matrix Array;
  
  int Postotal, Negtotal, Poscnt, Negcnt;
  
++static uint32_t zeronyte_rng_dividend_trace[8];
++static uint32_t zeronyte_rng_remainder_trace[8];
++static uint32_t zeronyte_rng_trace_idx;
++
++static void
++record_rng_trace(uint32_t dividend, uint32_t remainder)
++{
++  if (zeronyte_rng_trace_idx < 8) {
++    zeronyte_rng_dividend_trace[zeronyte_rng_trace_idx] = dividend;
++    zeronyte_rng_remainder_trace[zeronyte_rng_trace_idx] = remainder;
++  }
++  zeronyte_rng_trace_idx++;
++}
++
 +static void
 +record_cnt_debug(void)
 +{
@@ -49,12 +63,16 @@ index 4df958e..bab40cd 100644
 +  zeronyte_signature_buffer[6] = (uint32_t)Negtotal;
 +  zeronyte_signature_buffer[7] = (uint32_t)Poscnt;
 +  zeronyte_signature_buffer[8] = (uint32_t)Negcnt;
++  for (int i = 0; i < 8; ++i) {
++    zeronyte_signature_buffer[16 + i] = zeronyte_rng_dividend_trace[i];
++    zeronyte_signature_buffer[24 + i] = zeronyte_rng_remainder_trace[i];
++  }
 +}
 +
  
  
  // The main function
-@@ -208,6 +221,8 @@ int Sum(matrix Array)
+@@ -208,6 +233,8 @@ int Sum(matrix Array)
  
    Negcnt = Ncnt;
  
@@ -63,7 +81,23 @@ index 4df958e..bab40cd 100644
    return Negtotal;
  }
  
-@@ -270,5 +285,3 @@ int verify_benchmark(int nt) {
+@@ -252,8 +279,12 @@ int RandomInteger(void)
+ 
+ {
+ 
+-   Seed = ((Seed * 133) + 81) % 8095;
+-
+-   return Seed;
++   uint32_t dividend = ((uint32_t)Seed * 133u) + 81u;
++   uint32_t remainder = dividend % 8095u;
++   record_rng_trace(dividend, remainder);
++   Seed = (int)remainder;
++
++   return Seed;
+ 
+ }
+ 
+@@ -270,5 +301,3 @@ int verify_benchmark(int nt) {
  
  
  
@@ -91,10 +125,10 @@ index 1938ce7..10b4b50 100644
 +__attribute__((section(".tohost")))
 +volatile uint64_t fromhost = 0;
 +
-+__asm__(".globl begin_signature\n"
-+        "begin_signature = zeronyte_signature_buffer\n");
-+__asm__(".globl end_signature\n"
-+        "end_signature = zeronyte_signature_end_marker\n");
++__asm__(".globl begin_signature\\n"
++        "begin_signature = zeronyte_signature_buffer\\n");
++__asm__(".globl end_signature\\n"
++        "end_signature = zeronyte_signature_end_marker\\n");
 +
 +static void
 +record_signature (uint32_t iterations, uint32_t last_result, uint32_t correct)

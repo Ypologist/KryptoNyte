@@ -5,6 +5,7 @@ import chisel3.util._
 import chisel3.dontTouch
 import Decoders.RV32IDecode
 import ALUs.{ALU32, Div32Radix4, Mul32OneCycle}
+import BranchUnit.BranchUnit
 import TileLink._
 
 
@@ -276,24 +277,17 @@ class ZeroNyteRV32ICore extends Module {
 
 
   // ---------- PC Update ----------
-  val branchEq  = r1 === r2Reg
-  val branchLT  = r1.asSInt < r2Reg.asSInt
-  val branchLTU = r1 < r2Reg
+  val branchUnit = Module(new BranchUnit)
+  val branchOffsetBytes = (dec.imm.asSInt << 1).asSInt
+  branchUnit.io.rs1 := r1
+  branchUnit.io.rs2 := r2Reg
+  branchUnit.io.pc := pc
+  branchUnit.io.imm := branchOffsetBytes
+  branchUnit.io.branchOp := instr(14, 12)
+  branchUnit.io.valid := dec.isBranch
 
-  val branchTaken = WireDefault(false.B)
-  when(dec.isBranch) {
-    switch(instr(14,12)) {
-      is("b000".U) { branchTaken := branchEq }         // BEQ
-      is("b001".U) { branchTaken := !branchEq }        // BNE
-      is("b100".U) { branchTaken := branchLT }         // BLT
-      is("b101".U) { branchTaken := !branchLT }        // BGE
-      is("b110".U) { branchTaken := branchLTU }        // BLTU
-      is("b111".U) { branchTaken := !branchLTU }       // BGEU
-    }
-  }
-
-  val branchOffset = (dec.imm.asSInt << 1).asUInt
-  val branchTarget = (pc.asSInt + branchOffset.asSInt).asUInt
+  val branchTaken = branchUnit.io.taken
+  val branchTarget = branchUnit.io.target
   val jalTarget = (pc.asSInt + dec.imm.asSInt).asUInt
 
   val nextPC = WireDefault(pcPlus4)
