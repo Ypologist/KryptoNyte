@@ -30,9 +30,10 @@ print_error() { echo -e "${RED}❌${NC} $1"; exit 1; }
 MODULE_NAME="ZeroNyteRV32ICore"
 CONFIG_BASE_FILE="config.base.json"
 CONFIG_MODULE_FILE=""
-OUTPUT_ROOT="_runs"
+OUTPUT_ROOT="${OPENLANE_OUTPUT_ROOT:-/tmp/kryptonyte_openlane_${USER}}"
 OPENLANE2_PATH="${OPENLANE2_ROOT:-/opt/skywater-pdk/openlane2}"
 VERBOSE=true
+USE_SUDO=false
 
 # Export environment variables for template substitution
 export MODULE_NAME
@@ -56,6 +57,7 @@ while [[ $# -gt 0 ]]; do
         --openlane2-path) OPENLANE2_PATH="$2"; shift 2 ;;
         --clock-period) CLOCK_PERIOD="$2"; export CLOCK_PERIOD; shift 2 ;;
         --utilization) CORE_UTILIZATION="$2"; export CORE_UTILIZATION; shift 2 ;;
+        --use-sudo) USE_SUDO=true; shift ;;
         --quiet) VERBOSE=false; shift ;;
         --help|-h) cat << EOF
 KryptoNyte Physical Design Flow
@@ -66,16 +68,18 @@ Options:
   --module-name <name>    Module to process (default: ZeroNyteRV32ICore)
   --config-base <file>    Base JSON config (default: config.base.json)
   --config-module <file>  Module-specific JSON config (optional)
-  --output-root <path>    Output directory (default: _runs)
+  --output-root <path>    Output directory (default: /tmp/kryptonyte_openlane_\$USER)
   --openlane2-path <path> OpenLane2 directory (default: /opt/skywater-pdk/openlane2)
   --clock-period <ns>     Clock period in nanoseconds (default: 10.0)
   --utilization <ratio>   Core utilization ratio (default: 0.7)
+  --use-sudo              Run nix-shell/openlane through sudo
   --quiet                 Reduced verbosity
   --help, -h              Show this help message
 
 Examples:
   ./generate_physical_design.sh --module-name ZeroNyteRV32ICore
   ./generate_physical_design.sh --module-name ZeroNyteRV32ICore --clock-period 8.0
+  ./generate_physical_design.sh --use-sudo
 EOF
             exit 0 ;;
         *) print_error "Unknown argument: $1" ;;
@@ -147,18 +151,32 @@ validate_configuration() {
     print_step "Validating configuration..."
     
     # Check OpenLane2 installation
-    if [ ! -d "$OPENLANE2_PATH" ]; then
+    if [ -d "$OPENLANE2_PATH" ]; then
+        OPENLANE2_SHELL_NIX="$OPENLANE2_PATH/shell.nix"
+        if [ ! -f "$OPENLANE2_SHELL_NIX" ]; then
+            print_error "OpenLane2 shell.nix not found at: $OPENLANE2_SHELL_NIX"
+        fi
+    elif [ -f "$OPENLANE2_PATH" ]; then
+        case "$OPENLANE2_PATH" in
+            */shell.nix|shell.nix)
+                OPENLANE2_SHELL_NIX="$OPENLANE2_PATH"
+                ;;
+            *)
+                print_error "OpenLane2 path points to a file, but it is not shell.nix: $OPENLANE2_PATH"
+                ;;
+        esac
+    else
         print_error "OpenLane2 path does not exist: $OPENLANE2_PATH"
-    fi
-    
-    # Check for Nix environment files
-    if [ ! -f "$OPENLANE2_PATH/flake.nix" ] && [ ! -f "$OPENLANE2_PATH/shell.nix" ]; then
-        print_error "OpenLane2 Nix environment not found at: $OPENLANE2_PATH"
     fi
     
     # Check nix-shell availability
     if ! command -v nix-shell >/dev/null 2>&1; then
         print_error "nix-shell not found - required for OpenLane2"
+    fi
+
+    # Warn when daemon socket likely needs elevated privileges
+    if [ "$USE_SUDO" != true ] && [ -d "/nix/var/nix/daemon-socket" ] && ! id -nG | grep -qw "nix-users"; then
+        print_warning "User '$USER' is not in nix-users; nix-shell may fail. Retry with --use-sudo or add your user to nix-users."
     fi
     
     # Check RTL file exists
@@ -184,23 +202,27 @@ run_openlane2_flow() {
     print_step "Design directory: $design_dir"
     print_step "Log file: $log_file"
 
-    # Change to the design directory to run OpenLane2
-    cd "$design_dir"
-    
-    if [ "$VERBOSE" = true ]; then
-        nix-shell "$OPENLANE2_PATH" --run "openlane config.json" 2>&1 | tee "$log_file"
-    else
-        nix-shell "$OPENLANE2_PATH" --run "openlane config.json" > "$log_file" 2>&1
+    # Avoid nix-shell fallback lookup of <nixpkgs>.bashInteractive on systems
+    # without configured channels/NIX_PATH.
+    local nix_build_shell="${NIX_BUILD_SHELL:-$(command -v bash)}"
+    local openlane_run_cmd="cd \"$design_dir\" && openlane config.json"
+    local nix_cmd=(env "NIX_BUILD_SHELL=$nix_build_shell" nix-shell --pure "$OPENLANE2_SHELL_NIX" --run "$openlane_run_cmd")
+    if [ "$USE_SUDO" = true ]; then
+        nix_cmd=(sudo env "NIX_BUILD_SHELL=$nix_build_shell" nix-shell --pure "$OPENLANE2_SHELL_NIX" --run "$openlane_run_cmd")
     fi
-
-    local exit_code=${PIPESTATUS[0]}
+    local exit_code=0
+    if [ "$VERBOSE" = true ]; then
+        "${nix_cmd[@]}" 2>&1 | tee "$log_file"
+        exit_code=${PIPESTATUS[0]}
+    else
+        "${nix_cmd[@]}" > "$log_file" 2>&1
+        exit_code=$?
+    fi
     if [ $exit_code -ne 0 ]; then
         print_error "OpenLane2 flow failed with exit code $exit_code. Check log: $log_file"
     fi
     print_success "OpenLane2 flow completed successfully."
     
-    # Return to original directory
-    cd "$PHYSICAL_DESIGN_DIR"
 }
 
 generate_final_reports() {
@@ -271,8 +293,11 @@ EOF
 main() {
     print_banner "Starting KryptoNyte OpenLane2 Physical Design Flow for $MODULE_NAME"
 
+    # Normalize execution location so run/report paths can stay relative.
+    cd "$PHYSICAL_DESIGN_DIR"
+
     # Setup paths
-    export FULL_OUTPUT_ROOT="$(pwd)/$OUTPUT_ROOT"
+    export FULL_OUTPUT_ROOT="$OUTPUT_ROOT"
     export RUNS_PATH="$FULL_OUTPUT_ROOT/runs"
     export REPORTS_PATH="$FULL_OUTPUT_ROOT/reports"
     mkdir -p "$RUNS_PATH" "$REPORTS_PATH"

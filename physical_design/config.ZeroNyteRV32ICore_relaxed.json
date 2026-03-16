@@ -6,15 +6,37 @@
   ],
 
   "CLOCK_PORT": "clock",
-  "CLOCK_PERIOD": 20.0,
+  "CLOCK_PERIOD": 25.0,
 
-  "FP_CORE_UTIL": 0.5,
+  "FP_CORE_UTIL": 0.35,
   "FP_ASPECT_RATIO": 1.0,
 
   "SYNTH_STRATEGY": "AREA 0",
-  "MAX_FANOUT_CONSTRAINT": 30,
+  "MAX_FANOUT_CONSTRAINT": 40,
 
-  "PL_TARGET_DENSITY_PCT": 50,
+  "PL_TARGET_DENSITY_PCT": 40,
 
-  "RT_MAX_LAYER": "met4"
+  "RT_MAX_LAYER": "met5",
+  "GRT_ADJUSTMENT": 0.4,
+  "DRT_OPT_ITERS": 64,
+
+  "RUN_DRT": true,
+  "RUN_ANTENNA_REPAIR": true,
+  "RUN_HEURISTIC_DIODE_INSERTION": true,
+  "DIODE_ON_PORTS": "both",
+  "RUN_POST_CTS_RESIZER_TIMING": true,
+  "RUN_MCSTA": true,
+  "RUN_SPEF_EXTRACTION": true,
+  "RUN_IRDROP_REPORT": true,
+  "RUN_LVS": true,
+  "RUN_MAGIC_STREAMOUT": true,
+  "RUN_KLAYOUT_STREAMOUT": true,
+  "RUN_MAGIC_WRITE_LEF": true,
+  "RUN_MAGIC_DRC": true,
+  "RUN_KLAYOUT_DRC": true,
+  "RUN_FILL_INSERTION": true,
+  "RUN_LINTER": true,
+
+  "PNR_SDC_FILE": "dir::constraints/ZeroNyteRV32ICore.sdc",
+  "SIGNOFF_SDC_FILE": "dir::constraints/ZeroNyteRV32ICore_signoff.sdc"
 }
