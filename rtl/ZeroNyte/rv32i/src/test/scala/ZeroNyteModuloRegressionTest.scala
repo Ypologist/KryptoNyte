@@ -1,5 +1,6 @@
 package ZeroNyte
 
+import ALUs.ALU32
 import chisel3._
 import chisel3.simulator.EphemeralSimulator._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -41,6 +42,18 @@ class ZeroNyteModuloHarness extends Module {
     val dmemAddr = Output(UInt(32.W))
     val dmemWData = Output(UInt(32.W))
     val dmemWen = Output(Bool())
+    val debugAluA = Output(UInt(32.W))
+    val debugAluB = Output(UInt(32.W))
+    val debugAluOpcode = Output(UInt(ALU32.Opcode.WIDTH.W))
+    val debugEffAddr = Output(UInt(32.W))
+    val debugMemWriteData = Output(UInt(32.W))
+    val debugMemWriteMask = Output(UInt(4.W))
+    val debugBranchTaken = Output(Bool())
+    val debugBranchTarget = Output(UInt(32.W))
+    val debugDivActive = Output(Bool())
+    val debugDivDone = Output(Bool())
+    val debugDivDividend = Output(UInt(32.W))
+    val debugDivDivisor = Output(UInt(32.W))
   })
 
   private val core = Module(new ZeroNyteRV32ICore)
@@ -64,6 +77,18 @@ class ZeroNyteModuloHarness extends Module {
   io.dmemAddr := core.io.dmem_addr
   io.dmemWData := core.io.dmem_wdata
   io.dmemWen := core.io.dmem_wen
+  io.debugAluA := core.io.debug.aluA
+  io.debugAluB := core.io.debug.aluB
+  io.debugAluOpcode := core.io.debug.aluOpcode
+  io.debugEffAddr := core.io.debug.effAddr
+  io.debugMemWriteData := core.io.debug.memWriteData
+  io.debugMemWriteMask := core.io.debug.memWriteMask
+  io.debugBranchTaken := core.io.debug.branchTaken
+  io.debugBranchTarget := core.io.debug.branchTarget
+  io.debugDivActive := core.io.debug.divActive
+  io.debugDivDone := core.io.debug.divDone
+  io.debugDivDividend := core.io.debug.divDividend
+  io.debugDivDivisor := core.io.debug.divDivisor
 }
 
 class ZeroNyteModuloRegressionTest extends AnyFlatSpec {
@@ -101,6 +126,80 @@ class ZeroNyteModuloRegressionTest extends AnyFlatSpec {
       var cycles = 0
       var initClearSeen = false
       val storeTrace = scala.collection.mutable.ArrayBuffer.empty[(Long, Long)]
+      case class CoreTrace(
+        cycle: Int,
+        pc: Long,
+        instr: Long,
+        result: Long,
+        aluA: Long,
+        aluB: Long,
+        aluOpcode: Long,
+        effAddr: Long,
+        dmemAddr: Long,
+        dmemWen: Boolean,
+        dmemWData: Long,
+        debugStoreData: Long,
+        debugStoreMask: Long,
+        branchTaken: Boolean,
+        branchTarget: Long,
+        divActive: Boolean,
+        divDone: Boolean,
+        divDividend: Long,
+        divDivisor: Long
+      )
+      val recentTrace = scala.collection.mutable.Queue.empty[CoreTrace]
+      val maxTraceDepth = 20
+      val opcodeNames: Map[Long, String] = Map(
+        ALU32.Opcode.ADD.litValue.longValue -> "ADD",
+        ALU32.Opcode.SUB.litValue.longValue -> "SUB",
+        ALU32.Opcode.SLL.litValue.longValue -> "SLL",
+        ALU32.Opcode.SLT.litValue.longValue -> "SLT",
+        ALU32.Opcode.SLTU.litValue.longValue -> "SLTU",
+        ALU32.Opcode.XOR.litValue.longValue -> "XOR",
+        ALU32.Opcode.SRL.litValue.longValue -> "SRL",
+        ALU32.Opcode.SRA.litValue.longValue -> "SRA",
+        ALU32.Opcode.OR.litValue.longValue -> "OR",
+        ALU32.Opcode.AND.litValue.longValue -> "AND"
+      )
+      def opcodeName(op: Long): String = opcodeNames.getOrElse(op, f"0x$op%02x")
+      def recordTrace(pcVal: Long, instrWord: Long): Unit = {
+        val entry = CoreTrace(
+          cycles,
+          pcVal,
+          instrWord,
+          dut.io.result.peek().litValue.toLong & 0xFFFFFFFFL,
+          dut.io.debugAluA.peek().litValue.toLong & 0xFFFFFFFFL,
+          dut.io.debugAluB.peek().litValue.toLong & 0xFFFFFFFFL,
+          dut.io.debugAluOpcode.peek().litValue.toLong,
+          dut.io.debugEffAddr.peek().litValue.toLong & 0xFFFFFFFFL,
+          dut.io.dmemAddr.peek().litValue.toLong & 0xFFFFFFFFL,
+          dut.io.dmemWen.peek().litToBoolean,
+          dut.io.dmemWData.peek().litValue.toLong & 0xFFFFFFFFL,
+          dut.io.debugMemWriteData.peek().litValue.toLong & 0xFFFFFFFFL,
+          dut.io.debugMemWriteMask.peek().litValue.toLong & 0xFL,
+          dut.io.debugBranchTaken.peek().litToBoolean,
+          dut.io.debugBranchTarget.peek().litValue.toLong & 0xFFFFFFFFL,
+          dut.io.debugDivActive.peek().litToBoolean,
+          dut.io.debugDivDone.peek().litToBoolean,
+          dut.io.debugDivDividend.peek().litValue.toLong & 0xFFFFFFFFL,
+          dut.io.debugDivDivisor.peek().litValue.toLong & 0xFFFFFFFFL
+        )
+        recentTrace.enqueue(entry)
+        while (recentTrace.size > maxTraceDepth) { recentTrace.dequeue() }
+      }
+      def renderTrace(): String = {
+        if (recentTrace.isEmpty) "<empty trace window>"
+        else {
+          recentTrace
+            .map { t =>
+              val storeInfo =
+                if (t.dmemWen) f" store data=0x${t.dmemWData}%08x mask=0x${t.debugStoreMask}%x"
+                else ""
+              f"cycle=${t.cycle}%06d pc=0x${t.pc}%08x instr=0x${t.instr}%08x alu=${opcodeName(t.aluOpcode)} a=0x${t.aluA}%08x b=0x${t.aluB}%08x result=0x${t.result}%08x eff=0x${t.effAddr}%08x daddr=0x${t.dmemAddr}%08x$storeInfo branch=${t.branchTaken} div(active/done)=${t.divActive}/${t.divDone}"
+            }
+            .mkString("\n  ", "\n  ", "")
+        }
+      }
 
       def nextSeed(prev: Long): Long = {
         val raw = prev * 133L + 81L
@@ -142,6 +241,7 @@ class ZeroNyteModuloRegressionTest extends AnyFlatSpec {
             signatureValue = Some(data)
           }
         }
+        recordTrace(pc, instr)
 
         dut.clock.step()
         cycles += 1
@@ -150,18 +250,22 @@ class ZeroNyteModuloRegressionTest extends AnyFlatSpec {
       mismatch match {
         case Some((iter, actual, expected)) =>
           val traceMsg = storeTrace.map { case (a, d) => f"0x$a%08x->0x$d%08x" }.mkString(", ")
-          fail(f"Seed mismatch at iteration $iter%d: expected 0x$expected%08x but ZeroNyte wrote 0x$actual%08x. Stores: [$traceMsg]")
+          fail(
+            f"""Seed mismatch at iteration $iter: expected 0x$expected%08x but ZeroNyte wrote 0x$actual%08x.
+               |Stores: [$traceMsg]
+               |Recent core trace:${renderTrace()}""".stripMargin
+          )
         case None =>
           assert(
             seedsSeen == iterations,
-            s"Only saw $seedsSeen seed updates before timing out (expected $iterations). Cycles=$cycles. Stores=[${storeTrace.map { case (a, d) => f"0x$a%08x->0x$d%08x" }.mkString(", ")}]."
+            s"Only saw $seedsSeen seed updates before timing out (expected $iterations). Cycles=$cycles. Stores=[${storeTrace.map { case (a, d) => f"0x$a%08x->0x$d%08x" }.mkString(", ")}]. Recent core trace:${renderTrace()}"
           )
           val expectedRemainder = expectedSeed & 0xFFFFFFFFL
           val observedStr = signatureValue.map(v => f"0x$v%08x").getOrElse("<no store>")
           assert(
             signatureValue.contains(expectedRemainder),
             s"Expected ZeroNyte to store 0x${expectedRemainder.toHexString} to 0x${signatureAddr.toHexString}, " +
-              s"but observed $observedStr"
+              s"but observed $observedStr. Recent core trace:${renderTrace()}"
           )
       }
     }

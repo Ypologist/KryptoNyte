@@ -32,11 +32,25 @@ class ZeroNyteRV32ICore extends Module {
     val interruptTaken = Output(Bool())
     val irqPending = Output(UInt(8.W))
     val irqClaimId = Output(UInt(4.W))
-   
+
     // Debug Outputs
     val pc_out    = Output(UInt(32.W))
     val instr_out = Output(UInt(32.W))
     val result    = Output(UInt(32.W))
+    val debug = new Bundle {
+      val aluA = Output(UInt(32.W))
+      val aluB = Output(UInt(32.W))
+      val aluOpcode = Output(UInt(ALU32.Opcode.WIDTH.W))
+      val effAddr = Output(UInt(32.W))
+      val memWriteData = Output(UInt(32.W))
+      val memWriteMask = Output(UInt(4.W))
+      val branchTaken = Output(Bool())
+      val branchTarget = Output(UInt(32.W))
+      val divActive = Output(Bool())
+      val divDone = Output(Bool())
+      val divDividend = Output(UInt(32.W))
+      val divDivisor = Output(UInt(32.W))
+    }
   })
 
   // ---------- Program Counter ----------
@@ -63,12 +77,15 @@ class ZeroNyteRV32ICore extends Module {
   val useImmForB = (instr(6,0) === RV32IDecode.OP_I) || dec.isLoad || dec.isStore || dec.isJALR || dec.isLUI || dec.isAUIPC
   val operandB = Mux(useImmForB, dec.imm, r2Reg)
   val operandA = Mux(dec.isLUI, 0.U, r1)
+  io.debug.aluA := operandA
+  io.debug.aluB := operandB
 
   // ---------- ALU ----------
   val alu = Module(new ALU32)
   alu.io.a := operandA
   alu.io.b := operandB
   alu.io.opcode := dec.aluOp
+  io.debug.aluOpcode := dec.aluOp
 
   val memPort = Module(new ZeroNyteMemPort())
   // ---------- M Extension (Mul/Div) ----------
@@ -138,6 +155,7 @@ class ZeroNyteRV32ICore extends Module {
 
   // ---------- Data Memory Access ----------
   val effAddr    = alu.io.result
+  io.debug.effAddr := effAddr
   val addrBase   = Cat(effAddr(31, 2), 0.U(2.W))
   val byteOffset = effAddr(1, 0)
   val halfOffset = effAddr(1)
@@ -177,6 +195,8 @@ class ZeroNyteRV32ICore extends Module {
       "b010".U -> "b1111".U // SW
     )),
     0.U)
+  io.debug.memWriteData := storeData
+  io.debug.memWriteMask := memPort.io.legacy.writeMask
 
   memPort.io.passthroughMem.readData := io.dmem_rdata
   io.dmem_addr := memPort.io.passthroughMem.addr
@@ -266,6 +286,12 @@ class ZeroNyteRV32ICore extends Module {
     regFile(targetRd) := write_data
   }
   io.result := write_data
+  io.debug.branchTaken := false.B
+  io.debug.branchTarget := 0.U
+  io.debug.divActive := divActive
+  io.debug.divDone := divDone
+  io.debug.divDividend := divDividend
+  io.debug.divDivisor := divDivisor
 
     // ---------- Interrupt Controller ----------
   val interruptController = Module(new ZeroNyteInterruptController(8))
@@ -297,6 +323,8 @@ class ZeroNyteRV32ICore extends Module {
 
   when(dec.isBranch && branchTaken) {
     nextPC := branchTarget
+    io.debug.branchTaken := true.B
+    io.debug.branchTarget := branchTarget
   }
   when(dec.isJAL) {
     nextPC := jalTarget
