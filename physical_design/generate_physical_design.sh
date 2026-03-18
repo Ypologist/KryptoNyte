@@ -27,7 +27,7 @@ print_warning() { echo -e "${YELLOW}⚠️${NC} $1"; }
 print_error() { echo -e "${RED}❌${NC} $1"; exit 1; }
 
 # --- Default Configuration ---
-MODULE_NAME="ZeroNyteRV32ICore"
+MODULE_NAME="TetraNyteRV32ICore"
 CONFIG_BASE_FILE="config.base.json"
 CONFIG_MODULE_FILE=""
 OUTPUT_ROOT="${OPENLANE_OUTPUT_ROOT:-/tmp/kryptonyte_openlane_${USER}}"
@@ -65,7 +65,7 @@ KryptoNyte Physical Design Flow
 Usage: $0 [options]
 
 Options:
-  --module-name <name>    Module to process (default: ZeroNyteRV32ICore)
+  --module-name <name>    Module to process (default: TetraNyteRV32ICore)
   --config-base <file>    Base JSON config (default: config.base.json)
   --config-module <file>  Module-specific JSON config (optional)
   --output-root <path>    Output directory (default: /tmp/kryptonyte_openlane_\$USER)
@@ -77,8 +77,8 @@ Options:
   --help, -h              Show this help message
 
 Examples:
-  ./generate_physical_design.sh --module-name ZeroNyteRV32ICore
-  ./generate_physical_design.sh --module-name ZeroNyteRV32ICore --clock-period 8.0
+  ./generate_physical_design.sh
+  ./generate_physical_design.sh --module-name TetraNyteRV32ICore --clock-period 8.0
   ./generate_physical_design.sh --use-sudo
 EOF
             exit 0 ;;
@@ -89,10 +89,12 @@ done
 # --- Configuration Loading and Processing ---
 load_and_process_config() {
     print_step "Loading and processing configurations..."
+    local module_config_is_default=false
 
     # Determine module config file if not provided
     if [ -z "$CONFIG_MODULE_FILE" ]; then
         CONFIG_MODULE_FILE="config.${MODULE_NAME}.json"
+        module_config_is_default=true
     fi
 
     # Check for jq
@@ -102,12 +104,56 @@ load_and_process_config() {
 
     # Check for config files
     [ ! -f "$CONFIG_BASE_FILE" ] && print_error "Base config file not found: $CONFIG_BASE_FILE"
-    [ ! -f "$CONFIG_MODULE_FILE" ] && print_error "Module config file not found: $CONFIG_MODULE_FILE"
 
-    # Merge configurations (module config overrides base config)
-    MERGED_CONFIG=$(jq -s '.[0] * .[1]' "$CONFIG_BASE_FILE" "$CONFIG_MODULE_FILE")
-    
-    print_success "Configurations loaded and merged."
+    if [ -f "$CONFIG_MODULE_FILE" ]; then
+        # Merge configurations (module config overrides base config)
+        MERGED_CONFIG=$(jq -s '.[0] * .[1]' "$CONFIG_BASE_FILE" "$CONFIG_MODULE_FILE")
+        print_success "Configurations loaded and merged."
+        return
+    fi
+
+    if [ "$module_config_is_default" != true ]; then
+        print_error "Module config file not found: $CONFIG_MODULE_FILE"
+    fi
+
+    local pnr_sdc_exists=false
+    local signoff_sdc_exists=false
+    [ -f "constraints/${MODULE_NAME}.sdc" ] && pnr_sdc_exists=true
+    [ -f "constraints/${MODULE_NAME}_signoff.sdc" ] && signoff_sdc_exists=true
+
+    local generated_module_config
+    generated_module_config=$(jq -n \
+        --arg module_name "$MODULE_NAME" \
+        --arg verilog_file "dir::src/${MODULE_NAME}.v" \
+        --arg clock_port "$CLOCK_PORT" \
+        --arg clock_period "$CLOCK_PERIOD" \
+        --arg core_utilization "$CORE_UTILIZATION" \
+        --arg aspect_ratio "$ASPECT_RATIO" \
+        --arg pdk_variant "$PDK_VARIANT" \
+        --arg pnr_sdc_file "dir::constraints/${MODULE_NAME}.sdc" \
+        --arg signoff_sdc_file "dir::constraints/${MODULE_NAME}_signoff.sdc" \
+        --argjson include_pnr_sdc "$pnr_sdc_exists" \
+        --argjson include_signoff_sdc "$signoff_sdc_exists" '
+        {
+          DESIGN_NAME: $module_name,
+          VERILOG_FILES: [$verilog_file],
+          CLOCK_PORT: $clock_port,
+          CLOCK_PERIOD: ($clock_period | tonumber),
+          FP_CORE_UTIL: ($core_utilization | tonumber),
+          FP_ASPECT_RATIO: ($aspect_ratio | tonumber),
+          STD_CELL_LIBRARY: $pdk_variant
+        }
+        + (if $include_pnr_sdc then {PNR_SDC_FILE: $pnr_sdc_file} else {} end)
+        + (if $include_signoff_sdc then {SIGNOFF_SDC_FILE: $signoff_sdc_file} else {} end)
+    ')
+
+    MERGED_CONFIG=$(jq -s --argjson module_config "$generated_module_config" '.[0] * $module_config' "$CONFIG_BASE_FILE")
+
+    print_warning "Module config file not found: $CONFIG_MODULE_FILE. Generated a default module config for $MODULE_NAME."
+    if [ "$pnr_sdc_exists" != true ] || [ "$signoff_sdc_exists" != true ]; then
+        print_warning "Module-specific SDC files were not found for $MODULE_NAME; the flow will use JSON clock settings only."
+    fi
+    print_success "Base configuration loaded with generated module defaults."
 }
 
 # --- Main Flow Functions ---

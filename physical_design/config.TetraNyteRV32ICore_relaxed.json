@@ -1,0 +1,45 @@
+{
+  "DESIGN_NAME": "TetraNyteRV32ICore",
+
+  "VERILOG_FILES": [
+    "dir::src/TetraNyteRV32ICore.v"
+  ],
+
+  "CLOCK_PORT": "clock",
+  "CLOCK_PERIOD": 50.0,
+
+  "FP_SIZING": "absolute",
+  "DIE_AREA": [0, 0, 15000, 15000],
+
+  "FP_CORE_UTIL": 0.2,
+  "FP_ASPECT_RATIO": 1.0,
+
+  "SYNTH_STRATEGY": "AREA 0",
+  "MAX_FANOUT_CONSTRAINT": 64,
+
+  "PL_TARGET_DENSITY_PCT": 25,
+
+  "RT_MAX_LAYER": "met5",
+  "GRT_ADJUSTMENT": 0.15,
+  "DRT_OPT_ITERS": 64,
+
+  "RUN_DRT": true,
+  "RUN_ANTENNA_REPAIR": true,
+  "RUN_HEURISTIC_DIODE_INSERTION": true,
+  "DIODE_ON_PORTS": "both",
+  "RUN_POST_CTS_RESIZER_TIMING": false,
+  "RUN_MCSTA": true,
+  "RUN_SPEF_EXTRACTION": true,
+  "RUN_IRDROP_REPORT": true,
+  "RUN_LVS": true,
+  "RUN_MAGIC_STREAMOUT": true,
+  "RUN_KLAYOUT_STREAMOUT": true,
+  "RUN_MAGIC_WRITE_LEF": true,
+  "RUN_MAGIC_DRC": true,
+  "RUN_KLAYOUT_DRC": true,
+  "RUN_FILL_INSERTION": true,
+  "RUN_LINTER": false,
+
+  "PNR_SDC_FILE": "dir::constraints/TetraNyteRV32ICore_relaxed.sdc",
+  "SIGNOFF_SDC_FILE": "dir::constraints/TetraNyteRV32ICore_relaxed_signoff.sdc"
+}

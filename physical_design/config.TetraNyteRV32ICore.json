@@ -1,0 +1,23 @@
+{
+  "DESIGN_NAME": "TetraNyteRV32ICore",
+
+  "VERILOG_FILES": [
+    "dir::src/TetraNyteRV32ICore.v"
+  ],
+
+  "CLOCK_PORT": "clock",
+  "CLOCK_PERIOD": 15.0,
+
+  "FP_CORE_UTIL": 0.6,
+  "FP_ASPECT_RATIO": 1.0,
+
+  "SYNTH_STRATEGY": "AREA 0",
+  "MAX_FANOUT_CONSTRAINT": 20,
+
+  "PL_TARGET_DENSITY_PCT": 55,
+
+  "RT_MAX_LAYER": "met4",
+
+  "PNR_SDC_FILE": "dir::constraints/TetraNyteRV32ICore.sdc",
+  "SIGNOFF_SDC_FILE": "dir::constraints/TetraNyteRV32ICore_signoff.sdc"
+}
