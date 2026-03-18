@@ -19,6 +19,7 @@ tests/simple_c/build/
 tests/scala_kernels/*.elf
 tests/scala_kernels/*.bin
 rtl/ZeroNyte/rv32i/src/test/resources/roms/*.bin
+!rtl/ZeroNyte/rv32i/src/test/resources/roms/mod_repro.bin
 toolchain_alias/bin/
 tests/sim/build/
 tests/riscof/.config*.ini
