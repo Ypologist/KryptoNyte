@@ -251,7 +251,7 @@ run_openlane2_flow() {
     # Avoid nix-shell fallback lookup of <nixpkgs>.bashInteractive on systems
     # without configured channels/NIX_PATH.
     local nix_build_shell="${NIX_BUILD_SHELL:-$(command -v bash)}"
-    local openlane_run_cmd="cd \"$design_dir\" && openlane config.json"
+    local openlane_run_cmd="cd \"$design_dir\" && python3 \"$PHYSICAL_DESIGN_DIR/run_custom_floorplan.py\" config.json"
     local nix_cmd=(env "NIX_BUILD_SHELL=$nix_build_shell" nix-shell --pure "$OPENLANE2_SHELL_NIX" --run "$openlane_run_cmd")
     if [ "$USE_SUDO" = true ]; then
         nix_cmd=(sudo env "NIX_BUILD_SHELL=$nix_build_shell" nix-shell --pure "$OPENLANE2_SHELL_NIX" --run "$openlane_run_cmd")
