@@ -21,7 +21,7 @@ import Decoders.RV32IDecodeModule
 import LoadUnit.LoadUnit
 import RegFiles.RegFileMT2R1WVec
 import StoreUnit.StoreUnit
-import TetraNyte.TetraNyteRV32ICore
+import TetraNyte.{TetraNyteRV32ICore, TetraNyteRV32ICoreMRF}
 import ZeroNyte.{ZeroNyteRV32ICore, ZeroNyteRV32ICoreWithCache}
 import OctoNyte.OctoNyteRV32ICore
 
@@ -306,8 +306,10 @@ Environment Variables:
       case "rv32i" =>
         // Generate all building blocks plus the threaded core itself
         val libraryBlocks = getRV32ILibraryModules("TetraNyte")
-        libraryBlocks :+
-          ModuleSpec(() => new TetraNyteRV32ICore, "TetraNyteRV32ICore", "Four-thread barrel-threaded RV32I core", "TetraNyte", "rv32i")
+        libraryBlocks ++ Seq(
+          ModuleSpec(() => new TetraNyteRV32ICore, "TetraNyteRV32ICore", "Four-thread barrel-threaded RV32I core", "TetraNyte", "rv32i"),
+          ModuleSpec(() => new TetraNyteRV32ICoreMRF, "TetraNyteRV32ICoreMRF", "Four-thread barrel-threaded RV32I core with MRF", "TetraNyte", "rv32i")
+        )
       case _ => Seq.empty
     }
   }

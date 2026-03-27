@@ -11,7 +11,7 @@ ENV_ROOT="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env"
 
 print_usage() {
   cat <<EOF
-Usage: $(basename "$0") [--processor <zeronyte|zeronyte-cache|tetranyte|octonyte>]
+Usage: $(basename "$0") [--processor <zeronyte|zeronyte-cache|tetranyte|tetranyte-mrf|octonyte>]
 [--smoke-test] [--timeout <seconds>]
 
 Runs RISCOF RV32I conformance for the requested processor. Defaults to ZeroNyte.
@@ -85,6 +85,15 @@ case "$PROCESSOR" in
     ISA_FILE="tetranyte/tetranyte_isa.yaml"
     PLATFORM_FILE="tetranyte/tetranyte_platform.yaml"
     RTL_TOP="$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/TetraNyteRV32ICore.v"
+    RTL_GEN_TASK="generators/generateTetraNyteRTL"
+    ;;
+  tetranyte-mrf)
+    DUT_NAME="tetranyte"
+    SIM_BUILD_SCRIPT="$SCRIPT_DIR/sim/build_tetranyte_mrf_sim.sh"
+    SIM_BINARY="tetranyte_mrf_sim"
+    ISA_FILE="tetranyte/tetranyte_isa.yaml"
+    PLATFORM_FILE="tetranyte/tetranyte_platform.yaml"
+    RTL_TOP="$REPO_ROOT/rtl/generators/generated/verilog_hierarchical_timed/TetraNyteRV32ICoreMRF.v"
     RTL_GEN_TASK="generators/generateTetraNyteRTL"
     ;;
   octonyte)
@@ -319,7 +328,7 @@ if $SMOKE_TEST && [[ "$PROCESSOR" != "octonyte" ]]; then
   find "$OUTPUT_DIR/src" -maxdepth 3 -mindepth 3 -type d | sed 's|^|  |'
 fi
 
-if $SMOKE_TEST && [[ "$PROCESSOR" == "tetranyte" ]]; then
+if $SMOKE_TEST && [[ "$PROCESSOR" == "tetranyte" || "$PROCESSOR" == "tetranyte-mrf" ]]; then
   for test_name in "${COPIED[@]}"; do
     ELF_PATH=$(find "$OUTPUT_DIR/src" -path "*${test_name}/dut/*.elf" | head -n1 || true)
     REF_SIG=$(find "$OUTPUT_DIR/src" -path "*${test_name}/ref/Reference-spike.signature" | head -n1 || true)
@@ -333,7 +342,13 @@ if $SMOKE_TEST && [[ "$PROCESSOR" == "tetranyte" ]]; then
       SIG_PATH="$OUTPUT_DIR/src/${test_name}/dut/DUT-tetranyte-rv32i.thread${tid}.signature"
       LOG_PATH="$OUTPUT_DIR/src/${test_name}/dut/DUT-tetranyte-rv32i.thread${tid}.log"
       THREAD_MASK=$((1 << tid))
-      "$SCRIPT_DIR/sim/build/tetranyte_obj/VTetraNyteRV32ICore" \
+      local VL_TOP="VTetraNyteRV32ICore"
+      local OBJ_DIR="tetranyte_obj"
+      if [[ "$PROCESSOR" == "tetranyte-mrf" ]]; then
+        VL_TOP="VTetraNyteRV32ICoreMRF"
+        OBJ_DIR="tetranyte_mrf_obj"
+      fi
+      "$SCRIPT_DIR/sim/build/${OBJ_DIR}/${VL_TOP}" \
         --elf "$ELF_PATH" \
         --signature "$SIG_PATH" \
         --log "$LOG_PATH" \
