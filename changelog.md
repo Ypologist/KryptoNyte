@@ -1,3 +1,63 @@
+# 03/28/2026 15:21 - TetraNyte Multi-Cycle Divider Pipeline Stall Resolution
+
+**Why these changes were made:**
+Although `ZeroNyte` natively passed the `DIV`/`REM` hardware instruction evaluation bounds structurally successfully using the standalone `Div32Radix4` integration, identical arithmetic instructions sequentially failed executing on the newly deployed multi-threaded `TetraNyte` architecture mapping logic. The root cause involved the barrel-scheduler stalling threads incorrectly exclusively against the active computational window `divActive` while completely overlooking the intermediate write-back scheduling window `divDoneSticky`. As a result, computation threads preemptively resumed fetching instruction iterations and dynamically resolved sequential ALU commands mathematically accessing destination registers before their required multi-cycle `divWrite` arbitration finalized.
+
+**What the changes are:**
+* **Pipeline Thread State Halt Logic:** Refactored `TetraNyteRV32IMCore.scala` tracking equations to explicitly validate `threadStalled(t) := (divActive || divDoneSticky) && divThread === t.U`. By anchoring subsequent PC fetches against both boolean evaluations concurrently, `threadStalled` correctly delays issuing `if_id.valid == true` transitions indefinitely until the division dynamically identifies an eligible NO-OP back-propagation pipeline slice securely avoiding structural hardware data races organically. 
+* **State Hijacking Prevention:** Because `TetraNyte` currently instantiates exactly one shared arithmetic divider globally across the barrel, a race condition uniquely manifested when running `--thread-mask 15`. After Thread 0 finished computation (`divActive` transitioned to `false`), Thread 1 would unexpectedly slide into the EX stage and trigger `divLaunch := true.B` while Thread 0's output was still blocked against the `divDoneSticky` write-back wait queue. Because Thread 1 violently hijacked `divThread` and `divRd`, Thread 0's final quotient was physically written into Thread 1's destination registers via the register-file crossbar! This was resolved by extending the `structuralHazard` validation envelope strictly over both the active cycle counter *and* the write-back commit queue (`!(divActive || divDoneSticky)`). 
+* **Zero-Register Deadlock Timeout Prevention:** The `div-01.S` conformance executable inherently tests cases bound to the zero register (`div zero, t6, t5`). Originally, `TetraNyteRV32IMCore.scala` explicitly prevented writing dummy divisions by wrapping `divWrite` in a mandatory `divRd =/= 0.U` guard. Because `divWrite` theoretically failed to evaluate true during a `zero` dump, `divDoneSticky` failed to receive its reset clearance token `divDoneSticky := false.B`. This permanently locked Thread 0's instruction fetch stream and consequently triggered infinite structural hazard loops on Threads 1-3 (hitting the 2,000,000 cycle threshold). Fix removed the `divRd` guard since the base `RegFileMTMem` component already organically drops writes to `x0`.
+* **Zmmul Fallback Defense:** Similarly synchronized the exact stall constraints into the `TetraNyteRV32IZmmulCore.scala` instantiation interface to strictly mirror identical pipeline halting specifications natively in the event any unexpected formal compliance evaluation queries multi-layer extensions improperly!
+
+**Divisor Architectural Tradeoffs:**
+* *Area vs. Throughput:* `TetraNyte` strictly shares a single sequential `Div32Radix4` instanced hardware block across all 4 threaded segments. Instantiating a pipelined spatial unrolled `16-deep` implementation (or duplicating the block 4 times) ensures zero structural collisions mathematically, but requires massive combinational slice utilization on targeted FPGA hardware. Because simultaneous multi-thread divisions represent exceedingly rare software behavior organically, `TetraNyte` guarantees optimal logical footprint by naturally penalizing collision overlaps transparently as bounded execution `EX` replay loops instead!
+
+# 03/28/2026 15:03 - TetraNyte RISCOF Environment and ISA Schema Fixes
+
+**Why these changes were made:**
+After the RTL generators successfully launched, the standard RISC-V compliance tester crashed during two sequential verification loops: initially failing during C-header inclusion (`fatal error: model_test.h`) because the required local simulation stubs were missing internally, and secondly during the `riscv_config` extraction sequence validating mathematically incorrect `misa` attributes.
+
+**What the changes are:**
+* **RISCOF Linker Skeleton Recovery:** Replicated the standard architectural `tests/riscof/tetranyte/env` logic directory recursively over to `tests/riscof/tetranyte_zmmul/env` and `tests/riscof/tetranyte_im/env` (and established the underlying `__init__.py` files) allowing the standard GCC compilation loops to access their mandatory initialization payloads (`link.ld` and `model_test.h`) appropriately.
+* **ISA Machine Register Alignment:** Configured `tests/riscof/tetranyte_zmmul/tetranyte_zmmul_isa.yaml` and `tests/riscof/tetranyte_im/tetranyte_im_isa.yaml` securely so their physical `misa` -> `reset-val` masks correctly bitshift the multiplication register payload (`0x40001100`), thereby satisfying the formal specification engine for configuring multicycle `M` hardware definitions directly.
+
+# 03/28/2026 14:39 - TetraNyte IM and Zmmul Compilation Generator Fixes
+
+**Why these changes were made:**
+Although the native simulation C++ wrappers and RISCOF Python scripts were successfully integrated, running the conformance scripts crashed parsing `GenerateHierarchicalRTL.scala` because the Chisel backend SBT graph didn't track the newly declared processor variants. 
+
+**What the changes are:**
+* **SBT Module Mapping:** Added `tetraNyteIM` and `tetraNyteZmmul` explicitly as project variables linking back to their discrete `TetraNyte/rv32i_.../` root structure and added them to both the `generators` `.dependsOn` logic and the root project's `.aggregate(...)` loops to guarantee global classpath resolution during clean builds.
+* **Namespace Imports:** Streamlined `GenerateHierarchicalRTL.scala` internally to strictly declare `import TetraNyte.{TetraNyteRV32IMCore, TetraNyteRV32IZmmulCore}` immediately in the top-level Scala domain rather than incorrectly wrapping inline case class evaluations as `new TetraNyte.TetraNyteRV32IZmmulCore`.
+
+# 03/28/2026 14:07 - TetraNyte IM and Zmmul Multithreaded Compliance Test Integration
+
+**Why these changes were made:**
+Although the base `TetraNyte` multithreaded core and the `ZeroNyte` extended series possessed native simulation architectures testing directly against the generic RISCOF compliance frameworks natively, the advanced `TetraNyteRV32IMCore` and `TetraNyteRV32IZmmulCore` multithreaded cores lacked the distinct Verilator C++ wrappers and Python configurations necessary to explicitly stress their algorithmic division and iterative multiplication structures inside the test matrix.
+
+**What the changes are:**
+* **Native C++ Multithreaded Simulation Hooks**: Constructed `tests/sim/tetranyte_im_sim.cpp` and `tests/sim/tetranyte_zmmul_sim.cpp`, applying the `0xF` dynamic CPU execution mask out of the box to consistently drive thread interleaving across multi-cycle algorithmic workloads during tests.
+* **RISCOF Architectural Modeling**: Engineered `tests/riscof/tetranyte_im` and `tests/riscof/tetranyte_zmmul` target directories natively expressing the formal specification requirements (RV32IM vs RV32I+Zmmul) into the physical `tetranyte_<variant>_isa.yaml` structures to constrain compliance payloads dynamically.
+* **Framework Automation Pipeline**: Overhauled `tests/run_riscv_conformance_tests.sh` to officially provision `--processor tetranyte-im` and `--processor tetranyte-zmmul` arguments mapping automatically into the physical `GenerateHierarchicalRTL.scala` SBT workflow target aliases in the backend.
+
+# 03/28/2026 12:35 - TetraNyte 4-Stage Architecture & Local Stall Squashing
+
+**Why these changes were made:**
+The `TetraNyte` core variants previously utilized aggressive global machine stalls whenever a thread encountered a multi-cycle block like an Instruction Cache miss or algorithmic division. This needlessly froze unaffected threads and severely crippled multi-threaded processing throughput. Furthermore, the pipeline retained legacy combinational forwarding logic that consumed unused standard cell area, despite the 4-thread / 4-stage barrel processor physically negating all overlapping data dependencies structurally.
+
+**What the changes are:**
+* **Dead Logic Eradication**: Removed legacy `rs1Fwd`/`rs2Fwd` data-hazard forwarding paths strictly from the Decode stage in all 6 processor variations (`RV32I`, `RV32IM`, `RV32IZmmul`, and their `WithCache` modules). Due to strict 4-thread barrel interleaving on the guaranteed 4-stage layout (`IF`, `ID`, `EX`, `MEM+WB`), results natively retire prior to subsequent thread fetches, rendering combinational forwarding bloat obsolete and improving routing logic paths.
+* **Non-Blocking Cache Squashing**: Modified `ICache.scala` to latch metadata during cache misses dynamically (`latchedBlockBase`, `latchedIdx`, `latchedTag`), decoupling the ICache state machine from continuous `io.pc` dependence map tracking. Unlocked `threadSel` to persistently iterate natively during single-thread cache misses, allowing hitting threads to bypass the miss and seamlessly stream pipelined bubbles (`valid := false.B`) exclusively for the stalling thread's logic stream.
+* **Multi-Cycle Thread-Local Arbitration**: Revamped the global `stall` mechanism linked to the `Div32Radix4` integration inside `TetraNyteRV32IMCore`. Division instructions now trigger thread-local fetch-squashing hooks (`threadStalled`), preserving PC iteration for the engaged thread harmlessly in the background. Concurrent division attempts from adjacent threads dynamically assert a `structuralHazard`, resolving deterministically via strict `pcRegs` rewind replays (busy-waiting) without physically paralyzing parallel pipeline progress.
+
+# 03/28/2026 12:09 - Enhanced Physical Design CLI Helper
+
+**Why these changes were made:**
+The standard backend synthesis loop (e.g. `generate_physical_design.sh`) typically accepted arbitrary argument inputs directly executing without user review. Erroneous processor targets passed directly to OpenLane would spin out resources endlessly.
+
+**What the changes are:**
+* Rebuilt `physical_design/generate_physical_design.sh` to gracefully default its behavior to presenting a robust terminal help-menu enumerating standard module arguments explicitly, enforcing safety and documenting acceptable physical design footprints automatically.
+
 # 03/28/2026 12:02 - Upgraded TetraNyte Simulation to Multithreaded Default
 
 **Why these changes were made:**

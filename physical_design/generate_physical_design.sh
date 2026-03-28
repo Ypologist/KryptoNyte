@@ -48,6 +48,60 @@ export GENERATE_GDS="true"
 export RUN_DRC="true"
 
 # --- Command-line Argument Parsing ---
+
+show_help() {
+    cat << EOF
+============================================================
+KryptoNyte Physical Design Flow
+============================================================
+
+Usage: $0 [options]
+
+Options:
+  --module-name <name>    Module to process (Required unless viewing help)
+  --config-base <file>    Base JSON config (default: config.base.json)
+  --config-module <file>  Module-specific JSON config (optional)
+  --output-root <path>    Output directory (default: /tmp/kryptonyte_openlane_\$USER)
+  --openlane2-path <path> OpenLane2 directory (default: /opt/skywater-pdk/openlane2)
+  --clock-period <ns>     Clock period in nanoseconds (default: 10.0)
+  --utilization <percent> Core utilization percentage (default: 70)
+  --use-sudo              Run nix-shell/openlane through sudo
+  --quiet                 Reduced verbosity
+  --help, -h              Show this help message
+
+------------------------------------------------------------
+Valid Target Modules for Synthesis:
+------------------------------------------------------------
+> Core Processors:
+  - TetraNyteRV32ICore           (Base 4-thread I Core)
+  - TetraNyteRV32IMCore          (Base 4-thread IM Core)
+  - TetraNyteRV32IZmmulCore      (Base 4-thread I+Zmmul Core)
+  - ZeroNyteRV32ICore            (Base single-thread I Core)
+  - ZeroNyteRV32IMCore           (Base single-thread IM Core)
+  - ZeroNyteRV32IZmmulCore       (Base single-thread I+Zmmul Core)
+
+> Hard Macro Generation Targets:
+  - RegFileMT2R1WMem             (TetraNyte Shared 2-Read 1-Write Register File)
+  - RegFileMT8R4WMem             (Superscalar 8-Read 4-Write Register File)
+  - RegFileMTMem                 (Base multithreaded monolithic RF)
+  - ICache                       (TetraNyte/ZeroNyte Instruction Cache)
+
+Examples:
+  ./generate_physical_design.sh --module-name RegFileMT2R1WMem
+  ./generate_physical_design.sh --module-name TetraNyteRV32ICore --clock-period 8.0 --utilization 65
+  ./generate_physical_design.sh --module-name ZeroNyteRV32ICore --use-sudo
+EOF
+    exit 0
+}
+
+if [[ $# -eq 0 ]]; then
+    echo -e "${YELLOW}Notice: No arguments provided. Displaying help menu.${NC}\n"
+    show_help
+fi
+
+# Reset MODULE_NAME to empty to enforce requiring it (or let it stay default if you want, but the user requested explicit safety)
+MODULE_NAME=""
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         --module-name) MODULE_NAME="$2"; export MODULE_NAME; shift 2 ;; 
@@ -59,32 +113,14 @@ while [[ $# -gt 0 ]]; do
         --utilization) CORE_UTILIZATION="$2"; export CORE_UTILIZATION; shift 2 ;;
         --use-sudo) USE_SUDO=true; shift ;;
         --quiet) VERBOSE=false; shift ;;
-        --help|-h) cat << EOF
-KryptoNyte Physical Design Flow
-
-Usage: $0 [options]
-
-Options:
-  --module-name <name>    Module to process (default: TetraNyteRV32ICore)
-  --config-base <file>    Base JSON config (default: config.base.json)
-  --config-module <file>  Module-specific JSON config (optional)
-  --output-root <path>    Output directory (default: /tmp/kryptonyte_openlane_\$USER)
-  --openlane2-path <path> OpenLane2 directory (default: /opt/skywater-pdk/openlane2)
-  --clock-period <ns>     Clock period in nanoseconds (default: 10.0)
-  --utilization <percent> Core utilization percentage (default: 70)
-  --use-sudo              Run nix-shell/openlane through sudo
-  --quiet                 Reduced verbosity
-  --help, -h              Show this help message
-
-Examples:
-  ./generate_physical_design.sh
-  ./generate_physical_design.sh --module-name TetraNyteRV32ICore --clock-period 8.0
-  ./generate_physical_design.sh --use-sudo
-EOF
-            exit 0 ;;
+        --help|-h) show_help ;;
         *) print_error "Unknown argument: $1" ;;
     esac
 done
+
+if [[ -z "$MODULE_NAME" ]]; then
+    print_error "You must specify a module to target using --module-name. Run with --help to see valid modules."
+fi
 
 # --- Configuration Loading and Processing ---
 load_and_process_config() {
@@ -168,11 +204,19 @@ prepare_design_config() {
     local input_rtl="../rtl/generators/generated/verilog_hierarchical_timed/${MODULE_NAME}.v"
     local target_rtl="$src_dir/${MODULE_NAME}.v"
     
+    if [ ! -f "$input_rtl" ]; then
+        print_warning "RTL file not found: $input_rtl"
+        print_step "Attempting to generate missing RTL automatically via SBT..."
+        pushd "$RTL_DIR" > /dev/null
+        sbt generateRTL || print_error "SBT RTL generation failed! Check compiler logs."
+        popd > /dev/null
+    fi
+
     if [ -f "$input_rtl" ]; then
         cp "$input_rtl" "$target_rtl"
         print_success "RTL file copied: $input_rtl -> $target_rtl"
     else
-        print_error "RTL file not found: $input_rtl. Please generate RTL first."
+        print_error "RTL file STILL not found: $input_rtl. Is '$MODULE_NAME' spelled perfectly with correct capitalization?"
     fi
 
     # Copy constraint files if they exist

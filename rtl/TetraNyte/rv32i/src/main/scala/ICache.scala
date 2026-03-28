@@ -84,6 +84,12 @@ class ICache(cfg: ICacheConfig) extends Module {
   val state = RegInit(sIdle)
   val fillCnt = RegInit(0.U(log2Ceil(wordsPerLine + 1).W))
 
+  // Latch critical block selection state so the FSM can tolerate changes on `io.pc` from other threads during a miss
+  val latchedBlockBase = RegInit(0.U(32.W))
+  val latchedIdx = RegInit(0.U(idxBits.max(1).W))
+  val latchedTag = RegInit(0.U(tagBits.max(1).W))
+  val latchedVictim = RegInit(0.U(wayBits.max(1).W))
+
   // defaults
   io.instr := 0.U
   io.instr_valid := false.B
@@ -105,27 +111,35 @@ class ICache(cfg: ICacheConfig) extends Module {
     } .otherwise {
       state := sMiss
       fillCnt := 0.U
+      latchedBlockBase := blockBase
+      // Fallbacks if single set or single way
+      if (idxBits > 0) latchedIdx := idx else latchedIdx := 0.U
+      if (tagBits > 0) latchedTag := tag else latchedTag := 0.U
+      if (wayBits > 0) latchedVictim := victim else latchedVictim := 0.U
     }
   }
 
   when(state === sMiss) {
-    io.mem_addr := blockBase
+    io.mem_addr := latchedBlockBase
     state := sFill
     fillCnt := 0.U
   }
 
   when(state === sFill) {
-    io.mem_addr := (blockBase + (fillCnt << 2))(31,0)
+    io.mem_addr := (latchedBlockBase + (fillCnt << 2))(31,0)
     when(io.mem_rvalid) {
-      data(idx)(victim)(fillCnt) := io.mem_rdata
+      if (idxBits > 0 && wayBits > 0) data(latchedIdx)(latchedVictim)(fillCnt) := io.mem_rdata
+      else if (idxBits > 0) data(latchedIdx)(0)(fillCnt) := io.mem_rdata
+      else if (wayBits > 0) data(0)(latchedVictim)(fillCnt) := io.mem_rdata
+      else data(0)(0)(fillCnt) := io.mem_rdata
+
       fillCnt := fillCnt + 1.U
       when(fillCnt === (wordsPerLine - 1).U) {
-        valid(idx)(victim) := true.B
-        tagArray(idx)(victim) := tag
-        age(idx)(victim) := globalTime
+        if (idxBits > 0 && wayBits > 0) { valid(latchedIdx)(latchedVictim) := true.B; tagArray(latchedIdx)(latchedVictim) := latchedTag; age(latchedIdx)(latchedVictim) := globalTime }
+        else if (idxBits > 0) { valid(latchedIdx)(0) := true.B; tagArray(latchedIdx)(0) := latchedTag; age(latchedIdx)(0) := globalTime }
+        else if (wayBits > 0) { valid(0)(latchedVictim) := true.B; tagArray(0)(latchedVictim) := latchedTag; age(0)(latchedVictim) := globalTime }
+        else { valid(0)(0) := true.B; tagArray(0)(0) := latchedTag; age(0)(0) := globalTime }
 
-        io.instr := data(idx)(victim)(wordOffset)
-        io.instr_valid := true.B
         state := sIdle
         fillCnt := 0.U
       }

@@ -106,10 +106,8 @@ class TetraNyteRV32IZmmulCoreWithCache extends Module {
   when(reset.asBool) {
     threadSel := 0.U
   }.otherwise {
-    // Do not advance thread selection while icache is stalling/filling
-    when(!icache.io.stall) {
-      threadSel := Mux(threadSel === (numThreads - 1).U, 0.U, threadSel + 1.U)
-    }
+    val maxThread = (numThreads - 1).U(log2Ceil(numThreads).W)
+    threadSel := Mux(threadSel === maxThread, 0.U, threadSel + 1.U)
   }
 
   // ===================== Instruction Decode (ID) with Forwarding =====================
@@ -147,28 +145,12 @@ class TetraNyteRV32IZmmulCoreWithCache extends Module {
   val rs1Raw = regFile.io.readData(0)
   val rs2Raw = regFile.io.readData(1)
 
-  // Simple forwarding when the same thread is in later stages
-  val rs1Fwd = WireDefault(rs1Raw)
-  val rs2Fwd = WireDefault(rs2Raw)
-
-  when(ex_mem.valid && ex_mem.threadId === if_id.threadId && ex_mem.rd =/= 0.U && ex_mem.rd === rs1) {
-    rs1Fwd := ex_mem.aluResult
-  }.elsewhen(mem_wb.valid && mem_wb.threadId === if_id.threadId && mem_wb.rd =/= 0.U && mem_wb.rd === rs1) {
-    rs1Fwd := Mux(mem_wb.isLoad, mem_wb.memRdata, mem_wb.aluResult)
-  }
-
-  when(ex_mem.valid && ex_mem.threadId === if_id.threadId && ex_mem.rd =/= 0.U && ex_mem.rd === rs2) {
-    rs2Fwd := ex_mem.aluResult
-  }.elsewhen(mem_wb.valid && mem_wb.threadId === if_id.threadId && mem_wb.rd =/= 0.U && mem_wb.rd === rs2) {
-    rs2Fwd := Mux(mem_wb.isLoad, mem_wb.memRdata, mem_wb.aluResult)
-  }
-
-  id_ex.rs1Data := rs1Fwd
-  id_ex.rs2Data := rs2Fwd
+  id_ex.rs1Data := rs1Raw
+  id_ex.rs2Data := rs2Raw
 
   when(id_ex.valid) {
-    debugIdRs1(id_ex.threadId) := rs1Fwd
-    debugIdRs2(id_ex.threadId) := rs2Fwd
+    debugIdRs1(id_ex.threadId) := rs1Raw
+    debugIdRs2(id_ex.threadId) := rs2Raw
   }
 
   // ===================== Execute (EX) Stage =====================

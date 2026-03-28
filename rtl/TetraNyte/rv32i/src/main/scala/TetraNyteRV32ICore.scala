@@ -170,24 +170,12 @@ class TetraNyteRV32ICore extends Module {
   val rs1Raw = regFile.io.readData(0)
   val rs2Raw = regFile.io.readData(1)
 
-  // Simple forwarding when the same thread is in later stages
-  val rs1Fwd = WireDefault(rs1Raw)
-  val rs2Fwd = WireDefault(rs2Raw)
-
-  when(ex_mem.valid && ex_mem.threadId === if_id.threadId && ex_mem.rd =/= 0.U && ex_mem.rd === rs1) {
-    rs1Fwd := Mux(ex_mem.isLoad, memLoadData, ex_mem.aluResult)
-  }
-
-  when(ex_mem.valid && ex_mem.threadId === if_id.threadId && ex_mem.rd =/= 0.U && ex_mem.rd === rs2) {
-    rs2Fwd := Mux(ex_mem.isLoad, memLoadData, ex_mem.aluResult)
-  }
-
-  id_ex.rs1Data := rs1Fwd
-  id_ex.rs2Data := rs2Fwd
+  id_ex.rs1Data := rs1Raw
+  id_ex.rs2Data := rs2Raw
 
   when(id_ex.valid) {
-    debugIdRs1(id_ex.threadId) := rs1Fwd
-    debugIdRs2(id_ex.threadId) := rs2Fwd
+    debugIdRs1(id_ex.threadId) := rs1Raw
+    debugIdRs2(id_ex.threadId) := rs2Raw
   }
 
   // ===================== Execute (EX) Stage =====================

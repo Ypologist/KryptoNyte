@@ -123,6 +123,11 @@ class TetraNyteRV32IMCore extends Module {
   val threadEnabled = io.threadEnable(currentThread)
   val currentPC = pcRegs(currentThread)
 
+  val threadStalled = Wire(Vec(numThreads, Bool()))
+  for (t <- 0 until numThreads) {
+    threadStalled(t) := (divActive || divDoneSticky) && divThread === t.U
+  }
+
   // IF: always update the IF/ID register for the currently selected thread.
   if_id.threadId := currentThread
   if_id.pc := currentPC
@@ -130,7 +135,7 @@ class TetraNyteRV32IMCore extends Module {
   if_id.rs1 := io.instrMem(19, 15)
   if_id.rs2 := io.instrMem(24, 20)
   if_id.rd := io.instrMem(11, 7)
-  if_id.valid := !flushThisThread && threadEnabled
+  if_id.valid := !flushThisThread && threadEnabled && !threadStalled(currentThread)
 
   when(if_id.valid) {
     debugIfInstr(currentThread) := if_id.instr
@@ -181,24 +186,12 @@ class TetraNyteRV32IMCore extends Module {
   val rs1Raw = regFile.io.readData(0)
   val rs2Raw = regFile.io.readData(1)
 
-  // Simple forwarding when the same thread is in later stages
-  val rs1Fwd = WireDefault(rs1Raw)
-  val rs2Fwd = WireDefault(rs2Raw)
-
-  when(ex_mem.valid && ex_mem.threadId === if_id.threadId && ex_mem.rd =/= 0.U && ex_mem.rd === rs1) {
-    rs1Fwd := Mux(ex_mem.isLoad, memLoadData, ex_mem.aluResult)
-  }
-
-  when(ex_mem.valid && ex_mem.threadId === if_id.threadId && ex_mem.rd =/= 0.U && ex_mem.rd === rs2) {
-    rs2Fwd := Mux(ex_mem.isLoad, memLoadData, ex_mem.aluResult)
-  }
-
-  id_ex.rs1Data := rs1Fwd
-  id_ex.rs2Data := rs2Fwd
+  id_ex.rs1Data := rs1Raw
+  id_ex.rs2Data := rs2Raw
 
   when(id_ex.valid) {
-    debugIdRs1(id_ex.threadId) := rs1Fwd
-    debugIdRs2(id_ex.threadId) := rs2Fwd
+    debugIdRs1(id_ex.threadId) := rs1Raw
+    debugIdRs2(id_ex.threadId) := rs2Raw
   }
 
   // ===================== Execute (EX) Stage =====================
@@ -234,6 +227,8 @@ class TetraNyteRV32IMCore extends Module {
   val isMulInstr = isMExt && (funct3 <= "b011".U)
   val isDivInstr = isMExt && (funct3 >= "b100".U)
 
+  val structuralHazard = (divActive || divDoneSticky) && id_ex.valid && isDivInstr
+
   val mulUnit = Module(new Mul32OneCycle)
   val mulSignedA = WireDefault(true.B)
   val mulSignedB = WireDefault(true.B)
@@ -266,7 +261,7 @@ class TetraNyteRV32IMCore extends Module {
   dontTouch(divBusySink)
   dontTouch(divDivideByZeroSink)
 
-  when(!divActive && id_ex.valid && isDivInstr) {
+  when(!(divActive || divDoneSticky) && id_ex.valid && isDivInstr) {
     divLaunch := true.B
     divActive := true.B
     divThread := id_ex.threadId
@@ -354,7 +349,7 @@ class TetraNyteRV32IMCore extends Module {
     (ex_mem.isALU || ex_mem.isLoad || ex_mem.isLUI ||
       ex_mem.isAUIPC || ex_mem.isJAL || ex_mem.isJALR)
 
-  val divWrite = divDoneSticky && divRd =/= 0.U && io.threadEnable(divThread) && !writeEnable
+  val divWrite = divDoneSticky && io.threadEnable(divThread) && !writeEnable
 
   // Safe arbitration: point the regfile write-thread to whichever write wins this cycle.
   regFile.io.writeThreadID := Mux(divWrite, divThread, ex_mem.threadId)
@@ -415,12 +410,19 @@ class TetraNyteRV32IMCore extends Module {
     when(if_id.threadId === id_ex.threadId) { if_id.valid := false.B }
   }
 
+  // Handle structural hazards: rewind PC to trigger a replay-on-hazard loop
+  when(structuralHazard && io.threadEnable(id_ex.threadId)) {
+    pcRegs(id_ex.threadId) := id_ex.pc
+  }
+
   // Default sequential advance for the currently fetched thread unless a control transfer just wrote it.
   when(!reset.asBool) {
     when(!flushThisThread && threadEnabled) {
       when(!(branchTakenEx && id_ex.threadId === currentThread) &&
            !(jalTakenEx && id_ex.threadId === currentThread) &&
-           !(jalrTakenEx && id_ex.threadId === currentThread)) {
+           !(jalrTakenEx && id_ex.threadId === currentThread) &&
+           !threadStalled(currentThread) &&
+           !(structuralHazard && id_ex.threadId === currentThread)) {
         pcRegs(currentThread) := currentPC + 4.U
       }
       flushThread(currentThread) := false.B
