@@ -58,7 +58,7 @@ class TetraNyteRV32IMCoreWithCache extends Module {
   val mem_wb = RegInit(0.U.asTypeOf(new PipelineRegBundle))
 
   // Shared multithreaded register file
-  val regFile = Module(new RegFileMT2R1WVec(numThreads = numThreads))
+  val regFile = Module(new RegFileMT2R1WMem(numThreads = numThreads))
 
   // Debug mirrors to expose last-seen per-thread stage values
   val debugIfInstr = RegInit(VecInit(Seq.fill(numThreads)(0.U(32.W))))
@@ -139,14 +139,13 @@ class TetraNyteRV32IMCoreWithCache extends Module {
     id_ex.valid := false.B
   }
 
-  // Register file reads are tagged by threadId
-  regFile.io.readThreadID := if_id.threadId
-  regFile.io.writeThreadID := mem_wb.threadId
-  regFile.io.src1 := rs1
-  regFile.io.src2 := rs2
+  // Register file reads
+  regFile.io.readThreadID := threadSel // Instruction fetch thread determines next execute thread
+  regFile.io.readAddrs(0) := rs1
+  regFile.io.readAddrs(1) := rs2
 
-  val rs1Raw = regFile.io.src1data
-  val rs2Raw = regFile.io.src2data
+  val rs1Raw = regFile.io.readData(0)
+  val rs2Raw = regFile.io.readData(1)
 
   // Simple forwarding when the same thread is in later stages
   val rs1Fwd = WireDefault(rs1Raw)
@@ -286,9 +285,11 @@ class TetraNyteRV32IMCoreWithCache extends Module {
     (mem_wb.isALU || mem_wb.isLoad || mem_wb.isLUI ||
       mem_wb.isAUIPC || mem_wb.isJAL || mem_wb.isJALR)
 
-  regFile.io.wen := writeEnable
-  regFile.io.dst1 := Mux(writeEnable, mem_wb.rd, 0.U)
-  regFile.io.dst1data := wbData
+  // Safe arbitration: point the regfile write-thread to whichever write wins this cycle.
+  regFile.io.writeThreadID := mem_wb.threadId
+  regFile.io.wens(0) := writeEnable
+  regFile.io.writeAddrs(0) := Mux(writeEnable, mem_wb.rd, 0.U)
+  regFile.io.writeData(0) := wbData
 
   // Writes and reads are tagged with the WB thread ID
   val wbThread = mem_wb.threadId

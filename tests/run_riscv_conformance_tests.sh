@@ -17,7 +17,6 @@ ENV_ROOT="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env"
 AVAILABLE_PROCESSORS=(
   "octonyte|octonyte|sim/build_octonyte_sim.sh|octonyte_sim|octonyte/octonyte_isa.yaml|octonyte/octonyte_platform.yaml|rtl/generators/generated/verilog_hierarchical_timed/OctoNyteRV32ICore.v|generators/generateOctoNyteRTL|i"
   "tetranyte|tetranyte|sim/build_tetranyte_sim.sh|tetranyte_sim|tetranyte/tetranyte_isa.yaml|tetranyte/tetranyte_platform.yaml|rtl/generators/generated/verilog_hierarchical_timed/TetraNyteRV32ICore.v|generators/generateTetraNyteRTL|i"
-  "tetranyte-mrf|tetranyte|sim/build_tetranyte_mrf_sim.sh|tetranyte_mrf_sim|tetranyte/tetranyte_isa.yaml|tetranyte/tetranyte_platform.yaml|rtl/generators/generated/verilog_hierarchical_timed/TetraNyteRV32ICoreMRF.v|generators/generateTetraNyteRTL|i"
   "zeronyte|zeronyte|sim/build_zeronyte_sim.sh|zeronyte_sim|zeronyte/zeronyte_isa.yaml|zeronyte/zeronyte_platform.yaml|rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICore.v|generators/generateZeroNyteRTL|i"
   "zeronyte-cache|zeronyte|sim/build_zeronyte_cache_sim.sh|zeronyte_cache_sim|zeronyte/zeronyte_isa.yaml|zeronyte/zeronyte_platform.yaml|rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32ICoreWithCache.v|generators/generateZeroNyteRTL|i"
   "zeronyte-im|zeronyte_im|sim/build_zeronyte_im_sim.sh|zeronyte_im_sim|zeronyte_im/zeronyte_im_isa.yaml|zeronyte_im/zeronyte_im_platform.yaml|rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32IMCore.v|generators/generateZeroNyteIMRTL|im"
@@ -255,7 +254,7 @@ if $SMOKE_TEST; then
   # Evaluate Multi-threading coherence identically for all targets
   COPIED=("add-01")
   
-  if [[ "$PROCESSOR" == "tetranyte" || "$PROCESSOR" == "tetranyte-mrf" || "$PROCESSOR" == "octonyte" ]]; then
+  if [[ "$PROCESSOR" == "tetranyte" || "$PROCESSOR" == "octonyte" ]]; then
     for test_name in "${COPIED[@]}"; do
       ELF_PATH=$(find "$SMOKE_WORK_DIR" -path "*${test_name}/dut/*.elf" | head -n1 || true)
       REF_SIG=$(find "$SMOKE_WORK_DIR" -path "*${test_name}/ref/Reference-spike.signature" | head -n1 || true)
@@ -280,10 +279,7 @@ if $SMOKE_TEST; then
         
         VL_TOP="VTetraNyteRV32ICore"
         OBJ_DIR="tetranyte_obj"
-        if [[ "$PROCESSOR" == "tetranyte-mrf" ]]; then
-          VL_TOP="VTetraNyteRV32ICoreMRF"
-          OBJ_DIR="tetranyte_mrf_obj"
-        elif [[ "$PROCESSOR" == "octonyte" ]]; then
+        if [[ "$PROCESSOR" == "octonyte" ]]; then
           VL_TOP="VOctoNyteRV32ICore"
           OBJ_DIR="octonyte_obj"
         fi

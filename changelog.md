@@ -1,3 +1,24 @@
+# 03/28/2026 12:02 - Upgraded TetraNyte Simulation to Multithreaded Default
+
+**Why these changes were made:**
+The `TetraNyte` simulator (`tetranyte_sim`) and its corresponding RISCOF validation driver previously defaulted to executing conformance tests solely across Thread 0 (using a single-thread mask of `0x1`). To rigorously validate architectural coherency and ensure the barrel threading structure is consistently stressed, the default simulation constraints have been upgraded to forcefully execute tests simultaneously across all 4 available hardware threads.
+
+**What the changes are:**
+* Updated the `tetranyte_sim.cpp` execution harness to initialize `thread_mask` to `0xF` (15) natively instead of `0x1`.
+* Modified the `riscof_tetranyte.py` Python orchestrator to systematically inject `--thread-mask 15` during regression suite assembly so all validation payloads execute in a true multi-threaded environment.
+
+# 03/28/2026 11:39 - Standardized TetraNyte Register Files (MRF Deprecation)
+
+**Why these changes were made:**
+Maintaining standalone `-mrf` variants (Memory Register File) of the multithreaded TetraNyte cores created unnecessary technical debt and compilation redundancy. Since the area-optimized `RegFileMT2R1WMem` (memory-based) register file performs impeccably across all TetraNyte multithreaded designs, it was elevated to the default register file implementation, rendering the specialized MRF duplicates obsolete.
+
+**What the changes are:**
+* Refactored `TetraNyteRV32ICore`, `TetraNyteRV32IMCore`, `TetraNyteRV32IZmmulCore`, and their `WithCache` counterparts to natively instantiate and map to the array-driven `RegFileMT2R1WMem` module.
+* Completely deleted the redundant `TetraNyteRV32ICoreMRF.scala`, `TetraNyteRV32IMCoreMRF.scala`, and `TetraNyteRV32IZmmulCoreMRF.scala` core variants.
+* Purged the obsolete `build_tetranyte_mrf_sim.sh` and `tetranyte_mrf_sim.cpp` Verilator components.
+* Removed `tetranyte-mrf` processor targeting from `run_riscv_conformance_tests.sh` and `GenerateHierarchicalRTL.scala`.
+* Fixed a cascading `ZeroNyte` compilation failure by restoring `byteOffset` declarations that were improperly stripped during previous load/store optimizations.
+
 # 03/28/2026 11:16 - Stabilized ZeroNyte Architectural Compliance (StoreUnit)
 
 **Why these changes were made:**

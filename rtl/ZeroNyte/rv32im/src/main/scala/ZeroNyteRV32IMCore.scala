@@ -189,6 +189,8 @@ class ZeroNyteRV32IMCore extends Module {
       loadWord(15, 0),
       loadWord(31, 16)
     )
+    val byteOffset = alu.io.result(1, 0)
+    val halfOffset = alu.io.result(1)
     val shiftedByte = byteVec(byteOffset)
     val shiftedHalf = halfVec(halfOffset)
     val loadFunct3 = instr(14, 12)
