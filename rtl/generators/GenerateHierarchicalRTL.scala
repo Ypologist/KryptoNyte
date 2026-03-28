@@ -22,7 +22,7 @@ import LoadUnit.LoadUnit
 import RegFiles.{RegFileMT2R1WMem, RegFileMT2R1WVec}
 import StoreUnit.StoreUnit
 import TetraNyte.{TetraNyteRV32ICore, TetraNyteRV32ICoreMRF}
-import ZeroNyte.{ZeroNyteRV32ICore, ZeroNyteRV32ICoreWithCache}
+import ZeroNyte.{ZeroNyteRV32ICore, ZeroNyteRV32ICoreWithCache, ZeroNyteRV32IZmmulCore, ZeroNyteRV32IMCore}
 import OctoNyte.OctoNyteRV32ICore
 
 // Note: RV32IDecode is an object (not a Module class), so it's not imported for RTL generation
@@ -292,6 +292,14 @@ Environment Variables:
         getRV32ILibraryModules("ZeroNyte") ++ Seq(
           ModuleSpec(() => new ZeroNyteRV32ICore, "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i"),
           ModuleSpec(() => new ZeroNyteRV32ICoreWithCache, "ZeroNyteRV32ICoreWithCache", "Single-cycle RV32I core with I-cache", "ZeroNyte", "rv32i")
+        )
+      case "rv32i_Zmmul" =>
+        getRV32ILibraryModules("ZeroNyteZmmul") ++ Seq(
+          ModuleSpec(() => new ZeroNyteRV32IZmmulCore, "ZeroNyteRV32IZmmulCore", "Single-cycle RV32I Zmmul core", "ZeroNyte", "rv32i_Zmmul")
+        )
+      case "rv32im" =>
+        getRV32ILibraryModules("ZeroNyteIM") ++ Seq(
+          ModuleSpec(() => new ZeroNyteRV32IMCore, "ZeroNyteRV32IMCore", "Single-cycle RV32IM core", "ZeroNyte", "rv32im")
         )
       case _ => Seq.empty
     }

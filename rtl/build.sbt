@@ -6,9 +6,11 @@ val chiselVersion = "6.6.0"
 
 lazy val generateLibraryRTL   = taskKey[Unit]("Generate RTL for standalone library modules")
 lazy val generateZeroNyteRTL  = taskKey[Unit]("Generate RTL for the ZeroNyte core")
+lazy val generateZeroNyteZmmulRTL = taskKey[Unit]("Generate RTL for the ZeroNyte Zmmul core")
+lazy val generateZeroNyteIMRTL    = taskKey[Unit]("Generate RTL for the ZeroNyte IM core")
 lazy val generateTetraNyteRTL = taskKey[Unit]("Generate RTL for the TetraNyte core")
 lazy val generateOctoNyteRTL  = taskKey[Unit]("Generate RTL for the OctoNyte core")
-lazy val generateRTL          = taskKey[Unit]("Generate RTL for library, ZeroNyte, and TetraNyte")
+lazy val generateRTL          = taskKey[Unit]("Generate RTL for library, ZeroNyte architectures, and TetraNyte")
 
 // ***************************
 // * COMMON SETTINGS
@@ -68,6 +70,20 @@ lazy val zeroNyte = (project in file("ZeroNyte/rv32i"))
   )
   .settings(commonSettings: _*)
 
+lazy val zeroNyteZmmul = (project in file("ZeroNyte/rv32i_Zmmul"))
+  .dependsOn(library, zeroNyte)
+  .settings(
+    name := "ZeroNyteZmmul"
+  )
+  .settings(commonSettings: _*)
+
+lazy val zeroNyteIM = (project in file("ZeroNyte/rv32im"))
+  .dependsOn(library, zeroNyte)
+  .settings(
+    name := "ZeroNyteIM"
+  )
+  .settings(commonSettings: _*)
+
 // ----------------- PipeNyte Project -----------------
 lazy val tetraNyte = (project in file("TetraNyte/rv32i"))
   .dependsOn(library)
@@ -86,7 +102,7 @@ lazy val octoNyte = (project in file("OctoNyte/rv32i"))
 
 // ----------------- Generators Project -----------------
 lazy val generators = (project in file("generators"))
-  .dependsOn(library, zeroNyte, tetraNyte, octoNyte)
+  .dependsOn(library, zeroNyte, zeroNyteZmmul, zeroNyteIM, tetraNyte, octoNyte)
   .settings(
     name := "Generators"
   )
@@ -97,6 +113,8 @@ lazy val generators = (project in file("generators"))
     Compile / compile := (Compile / compile).dependsOn(
       library / Compile / compile,
       zeroNyte / Compile / compile,
+      zeroNyteZmmul / Compile / compile,
+      zeroNyteIM / Compile / compile,
       tetraNyte / Compile / compile,
       octoNyte / Compile / compile
     ).value,
@@ -118,6 +136,18 @@ lazy val generators = (project in file("generators"))
       (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL --core-family ZeroNyte --core-variant rv32i").value
     },
 
+    generateZeroNyteZmmulRTL := {
+      (library / Compile / compile).value
+      (zeroNyteZmmul / Compile / compile).value
+      (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL --core-family ZeroNyte --core-variant rv32i_Zmmul").value
+    },
+
+    generateZeroNyteIMRTL := {
+      (library / Compile / compile).value
+      (zeroNyteIM / Compile / compile).value
+      (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL --core-family ZeroNyte --core-variant rv32im").value
+    },
+
     generateTetraNyteRTL := {
       (library / Compile / compile).value
       (tetraNyte / Compile / compile).value
@@ -133,6 +163,8 @@ lazy val generators = (project in file("generators"))
     generateRTL := Def.sequential(
       generateLibraryRTL,
       generateZeroNyteRTL,
+      generateZeroNyteZmmulRTL,
+      generateZeroNyteIMRTL,
       generateTetraNyteRTL,
       generateOctoNyteRTL
     ).value,
@@ -141,13 +173,15 @@ lazy val generators = (project in file("generators"))
 
 // ----------------- Root Project -----------------
 lazy val root = (project in file("."))
-  .aggregate(library, zeroNyte, tetraNyte, octoNyte, generators)
+  .aggregate(library, zeroNyte, zeroNyteZmmul, zeroNyteIM, tetraNyte, octoNyte, generators)
   .settings(
     name := "KryptoNyte",
     
     // Custom command aliases for easy access
     addCommandAlias("genLibrary", "generators/generateLibraryRTL"),
     addCommandAlias("genZeroNyte", "generators/generateZeroNyteRTL"),
+    addCommandAlias("genZeroNyteZmmul", "generators/generateZeroNyteZmmulRTL"),
+    addCommandAlias("genZeroNyteIM", "generators/generateZeroNyteIMRTL"),
     addCommandAlias("genPipeNyte", "generators/runMain generators.GenerateHierarchicalRTL --core-family PipeNyte"),
     addCommandAlias("genTetraNyte", "generators/generateTetraNyteRTL"),
     addCommandAlias("genOctoNyte", "generators/generateOctoNyteRTL"),

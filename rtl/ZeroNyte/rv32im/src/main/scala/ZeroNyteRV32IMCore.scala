@@ -5,6 +5,7 @@ import chisel3.util._
 import chisel3.dontTouch
 import Decoders.RV32IDecode
 import ALUs.{ALU32, Div32Radix4, Mul32OneCycle}
+import StoreUnit._
 import TileLink._
 
 
@@ -18,6 +19,7 @@ class ZeroNyteRV32IMCore extends Module {
     val dmem_addr = Output(UInt(32.W))
     val dmem_rdata = Input(UInt(32.W))
     val dmem_wdata = Output(UInt(32.W))
+    val dmem_wmask = Output(UInt(4.W))
     val dmem_wen = Output(Bool())
 
     // TileLink master port for data memory (optional; legacy path still works)
@@ -143,52 +145,23 @@ class ZeroNyteRV32IMCore extends Module {
   // ---------- Data Memory Access ----------
   val effAddr    = alu.io.result
   val addrBase   = Cat(effAddr(31, 2), 0.U(2.W))
-  val byteOffset = effAddr(1, 0)
-  val halfOffset = effAddr(1)
   val storeFunct3 = instr(14, 12)
 
-  val dmemReadWord = memPort.io.legacy.readData
-
-  val storeData = WireDefault(r2Reg)
-  when(dec.isStore) {
-    switch(storeFunct3) {
-      is("b000".U) { // SB
-        val byteVal = r2Reg(7, 0)
-        val byteMask = (0xff.U(32.W)) << (byteOffset << 3)
-        val byteShifted = (byteVal & 0xff.U) << (byteOffset << 3)
-        storeData := (dmemReadWord & ~byteMask) | byteShifted
-      }
-      is("b001".U) { // SH
-        val halfVal = r2Reg(15, 0)
-        val halfMask = (0xffff.U(32.W)) << (halfOffset << 4)
-        val halfShifted = (halfVal & 0xffff.U) << (halfOffset << 4)
-        storeData := (dmemReadWord & ~halfMask) | halfShifted
-      }
-      is("b010".U) { // SW
-        storeData := r2Reg
-      }
-    }
-  }
+  val storeUnit = Module(new StoreUnit)
+  storeUnit.io.addr := effAddr
+  storeUnit.io.data := r2Reg
+  storeUnit.io.storeType := storeFunct3(1, 0)
 
   // Legacy outputs still exposed for compatibility.
   memPort.io.legacy.valid := dec.isLoad || dec.isStore
   memPort.io.legacy.addr := addrBase
-  memPort.io.legacy.writeData := storeData
-  memPort.io.legacy.writeMask := Mux(dec.isStore,
-    MuxLookup(storeFunct3, "b1111".U(4.W))(Seq(
-      "b000".U -> ("b0001".U << byteOffset), // SB
-      "b001".U -> Mux(halfOffset === 0.U, "b0011".U, "b1100".U), // SH
-      "b010".U -> "b1111".U // SW
-    )),
-    0.U)
+  memPort.io.legacy.writeData := storeUnit.io.memWrite
+  memPort.io.legacy.writeMask := Mux(dec.isStore, storeUnit.io.mask, 0.U)
 
   memPort.io.passthroughMem.readData := io.dmem_rdata
   io.dmem_addr := memPort.io.passthroughMem.addr
   io.dmem_wdata := memPort.io.passthroughMem.writeData
-  
-  // Sink the writeMask so Chisel doesn't omit the pin in the Verilog instantiation
-  val unusedWriteMask = WireDefault(memPort.io.passthroughMem.writeMask)
-  dontTouch(unusedWriteMask)
+  io.dmem_wmask := memPort.io.passthroughMem.writeMask
   
   io.dmem_wen := dec.isStore
   io.tl <> memPort.io.tl

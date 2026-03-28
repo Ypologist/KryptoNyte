@@ -73,18 +73,7 @@ class TetraNyteRV32ICore extends Module {
   val pcRegs = Reg(Vec(numThreads, UInt(32.W)))
   val flushThread = RegInit(VecInit(Seq.fill(numThreads)(false.B)))
 
-  // Long-latency division bookkeeping (global stall while active to keep hazards simple)
-  val divider = Module(new Div32Radix4)
-  val divActive = RegInit(false.B)
-  val divThread = Reg(UInt(log2Ceil(numThreads).W))
-  val divRd = Reg(UInt(5.W))
-  val divFunct3 = Reg(UInt(3.W))
-  val divDividend = Reg(UInt(32.W))
-  val divDivisor = Reg(UInt(32.W))
-  val divResult = Reg(UInt(32.W))
-  val divDoneSticky = RegInit(false.B)
-  val divLaunch = WireDefault(false.B)
-  // No global stall: allow other threads to proceed while a divide runs.
+  // Removed division bookkeeping for strict RV32I baseline.
 
   // Round-robin thread scheduler
   val threadSel = RegInit(0.U(log2Ceil(numThreads).W))
@@ -229,64 +218,11 @@ class TetraNyteRV32ICore extends Module {
   alu.io.b := operandB
   alu.io.opcode := id_ex.aluOp
 
-  // ---------- M Extension (Mul/Div) ----------
-  val isMExt = opcode === RV32IDecode.OP_R && funct7 === "b0000001".U
-  val isMulInstr = isMExt && (funct3 <= "b011".U)
-  val isDivInstr = isMExt && (funct3 >= "b100".U)
-
-  val mulUnit = Module(new Mul32OneCycle)
-  val mulSignedA = WireDefault(true.B)
-  val mulSignedB = WireDefault(true.B)
-  when(funct3 === "b011".U) { mulSignedA := false.B; mulSignedB := false.B } // MULHU
-  .elsewhen(funct3 === "b010".U) { mulSignedA := true.B; mulSignedB := false.B } // MULHSU
-  mulUnit.io.a := id_ex.rs1Data
-  mulUnit.io.b := id_ex.rs2Data
-  mulUnit.io.signedA := mulSignedA
-  mulUnit.io.signedB := mulSignedB
-  val mulResult = MuxLookup(funct3, mulUnit.io.lo)(Seq(
-    "b000".U -> mulUnit.io.lo, // MUL
-    "b001".U -> mulUnit.io.hi, // MULH
-    "b010".U -> mulUnit.io.hi, // MULHSU
-    "b011".U -> mulUnit.io.hi  // MULHU
-  ))
-  val mulProductSink = Wire(UInt(64.W))
-  mulProductSink := mulUnit.io.product
-  dontTouch(mulProductSink)
-
-  // Divider wiring
-  divider.io.start := divLaunch
-  divider.io.signed := Mux(divActive, divFunct3 === "b100".U || divFunct3 === "b110".U,
-    isDivInstr && (funct3 === "b100".U || funct3 === "b110".U))
-  divider.io.dividend := Mux(divActive, divDividend, id_ex.rs1Data)
-  divider.io.divisor := Mux(divActive, divDivisor, id_ex.rs2Data)
-  val divBusySink = Wire(UInt(1.W))
-  val divDivideByZeroSink = Wire(UInt(1.W))
-  divBusySink := divider.io.busy
-  divDivideByZeroSink := divider.io.divideByZero
-  dontTouch(divBusySink)
-  dontTouch(divDivideByZeroSink)
-
-  when(!divActive && id_ex.valid && isDivInstr) {
-    divLaunch := true.B
-    divActive := true.B
-    divThread := id_ex.threadId
-    divRd := id_ex.rd
-    divFunct3 := funct3
-    divDividend := id_ex.rs1Data
-    divDivisor := id_ex.rs2Data
-  }.elsewhen(divActive && divider.io.done) {
-    divActive := false.B
-    divDoneSticky := true.B
-    divResult := Mux(divFunct3 === "b100".U || divFunct3 === "b101".U,
-      divider.io.quotient,
-      divider.io.remainder)
-  }
-
-  ex_mem.aluResult := Mux(isMulInstr, mulResult, alu.io.result)
+  ex_mem.aluResult := alu.io.result
   ex_mem.instr := id_ex.instr
   ex_mem.threadId := id_ex.threadId
   ex_mem.rd := id_ex.rd
-  ex_mem.isALU := id_ex.isALU || isMulInstr
+  ex_mem.isALU := id_ex.isALU
   ex_mem.isLoad := id_ex.isLoad
   ex_mem.isStore := id_ex.isStore
   ex_mem.isBranch := id_ex.isBranch
@@ -294,7 +230,7 @@ class TetraNyteRV32ICore extends Module {
   ex_mem.isJALR := id_ex.isJALR
   ex_mem.isLUI := id_ex.isLUI
   ex_mem.isAUIPC := id_ex.isAUIPC
-  ex_mem.valid := id_ex.valid && !isDivInstr
+  ex_mem.valid := id_ex.valid
   ex_mem.rs1Data := id_ex.rs1Data
   ex_mem.rs2Data := id_ex.rs2Data
   ex_mem.pc := id_ex.pc
@@ -354,17 +290,12 @@ class TetraNyteRV32ICore extends Module {
     (ex_mem.isALU || ex_mem.isLoad || ex_mem.isLUI ||
       ex_mem.isAUIPC || ex_mem.isJAL || ex_mem.isJALR)
 
-  val divWrite = divDoneSticky && divRd =/= 0.U && io.threadEnable(divThread) && !writeEnable
-
-  // Safe arbitration: point the regfile write-thread to whichever write wins this cycle.
-  regFile.io.writeThreadID := Mux(divWrite, divThread, ex_mem.threadId)
-  regFile.io.wen := writeEnable || divWrite
-  regFile.io.dst1 := Mux(divWrite, divRd, Mux(writeEnable, ex_mem.rd, 0.U))
-  regFile.io.dst1data := Mux(divWrite, divResult, wbData)
-
-  when(divWrite) { divDoneSticky := false.B }
-
   // Writes and reads are tagged with the WB thread ID (now ex_mem)
+  regFile.io.writeThreadID := ex_mem.threadId
+  regFile.io.wen := writeEnable
+  regFile.io.dst1 := Mux(writeEnable, ex_mem.rd, 0.U)
+  regFile.io.dst1data := wbData
+
   val wbThread = ex_mem.threadId
 
   // ===================== PC Update & Control =====================

@@ -4,7 +4,8 @@ import chisel3._
 import chisel3.util._
 import chisel3.dontTouch
 import Decoders.RV32IDecode
-import ALUs.{ALU32, Div32Radix4, Mul32OneCycle}
+import ALUs.{ALU32, Mul32OneCycle}
+import StoreUnit._
 import TileLink._
 
 
@@ -18,6 +19,7 @@ class ZeroNyteRV32IZmmulCore extends Module {
     val dmem_addr = Output(UInt(32.W))
     val dmem_rdata = Input(UInt(32.W))
     val dmem_wdata = Output(UInt(32.W))
+    val dmem_wmask = Output(UInt(4.W))
     val dmem_wen = Output(Bool())
 
     // TileLink master port for data memory (optional; legacy path still works)
@@ -74,11 +76,9 @@ class ZeroNyteRV32IZmmulCore extends Module {
   alu.io.b := operandB
   alu.io.opcode := dec.aluOp
 
-  val memPort = Module(new ZeroNyteMemPort())
-  // ---------- M Extension (Mul/Div) ----------
+  // ---------- M Extension (Mul Only) ----------
   val isMExt = (instr(6,0) === RV32IDecode.OP_R) && (instr(31,25) === "b0000001".U)
   val isMulInstr = isMExt && (funct3 <= "b011".U)
-  val isDivInstr = isMExt && (funct3 >= "b100".U)
 
   val mulUnit = Module(new Mul32OneCycle)
   val mulSignedA = WireDefault(true.B)
@@ -103,92 +103,30 @@ class ZeroNyteRV32IZmmulCore extends Module {
     "b011".U -> mulUnit.io.hi  // MULHU
   ))
 
-  val divider = Module(new Div32Radix4)
-  val divActive = RegInit(false.B)
-  val divRd = Reg(UInt(5.W))
-  val divFunct3 = Reg(UInt(3.W))
-  val divDividend = Reg(UInt(32.W))
-  val divDivisor = Reg(UInt(32.W))
-
-  val divSigned = Mux(divActive, divFunct3 === "b100".U || divFunct3 === "b110".U,
-    isDivInstr && (funct3 === "b100".U || funct3 === "b110".U))
-  divider.io.signed := divSigned
-  divider.io.dividend := Mux(divActive, divDividend, r1)
-  divider.io.divisor := Mux(divActive, divDivisor, r2Reg)
-  val divLaunch = WireDefault(false.B)
-  divider.io.start := divLaunch
-
-  when(!divActive && isDivInstr) {
-    divLaunch := true.B
-    divActive := true.B
-    divRd := rd
-    divFunct3 := funct3
-    divDividend := r1
-    divDivisor := r2Reg
-  }.elsewhen(divActive && divider.io.done) {
-    divActive := false.B
-  }
-
-  val divResult = Mux(divFunct3 === "b100".U || divFunct3 === "b101".U,
-    divider.io.quotient,
-    divider.io.remainder)
-  val divBusySink = Wire(UInt(1.W))
-  val divDivideByZeroSink = Wire(UInt(1.W))
-  divBusySink := divider.io.busy
-  divDivideByZeroSink := divider.io.divideByZero
-  dontTouch(divBusySink)
-  dontTouch(divDivideByZeroSink)
-  val divDone = divActive && divider.io.done
-
+  val memPort = Module(new ZeroNyteMemPort())
   // ---------- Data Memory Access ----------
   val effAddr    = alu.io.result
   val addrBase   = Cat(effAddr(31, 2), 0.U(2.W))
-  val byteOffset = effAddr(1, 0)
-  val halfOffset = effAddr(1)
   val storeFunct3 = instr(14, 12)
 
-  val dmemReadWord = memPort.io.legacy.readData
-
-  val storeData = WireDefault(r2Reg)
-  when(dec.isStore) {
-    switch(storeFunct3) {
-      is("b000".U) { // SB
-        val byteVal = r2Reg(7, 0)
-        val byteMask = (0xff.U(32.W)) << (byteOffset << 3)
-        val byteShifted = (byteVal & 0xff.U) << (byteOffset << 3)
-        storeData := (dmemReadWord & ~byteMask) | byteShifted
-      }
-      is("b001".U) { // SH
-        val halfVal = r2Reg(15, 0)
-        val halfMask = (0xffff.U(32.W)) << (halfOffset << 4)
-        val halfShifted = (halfVal & 0xffff.U) << (halfOffset << 4)
-        storeData := (dmemReadWord & ~halfMask) | halfShifted
-      }
-      is("b010".U) { // SW
-        storeData := r2Reg
-      }
-    }
-  }
+  val storeUnit = Module(new StoreUnit)
+  storeUnit.io.addr := effAddr
+  storeUnit.io.data := r2Reg
+  storeUnit.io.storeType := storeFunct3(1, 0)
 
   // Legacy outputs still exposed for compatibility.
   memPort.io.legacy.valid := dec.isLoad || dec.isStore
   memPort.io.legacy.addr := addrBase
-  memPort.io.legacy.writeData := storeData
-  memPort.io.legacy.writeMask := Mux(dec.isStore,
-    MuxLookup(storeFunct3, "b1111".U(4.W))(Seq(
-      "b000".U -> ("b0001".U << byteOffset), // SB
-      "b001".U -> Mux(halfOffset === 0.U, "b0011".U, "b1100".U), // SH
-      "b010".U -> "b1111".U // SW
-    )),
-    0.U)
+  memPort.io.legacy.writeData := storeUnit.io.memWrite
+  memPort.io.legacy.writeMask := Mux(dec.isStore, storeUnit.io.mask, 0.U)
+
+  val unusedReadData = WireDefault(memPort.io.legacy.readData)
+  dontTouch(unusedReadData)
 
   memPort.io.passthroughMem.readData := io.dmem_rdata
   io.dmem_addr := memPort.io.passthroughMem.addr
   io.dmem_wdata := memPort.io.passthroughMem.writeData
-  
-  // Sink the writeMask so Chisel doesn't omit the pin in the Verilog instantiation
-  val unusedWriteMask = WireDefault(memPort.io.passthroughMem.writeMask)
-  dontTouch(unusedWriteMask)
+  io.dmem_wmask := memPort.io.passthroughMem.writeMask
   
   io.dmem_wen := dec.isStore
   io.tl <> memPort.io.tl
@@ -200,7 +138,6 @@ class ZeroNyteRV32IZmmulCore extends Module {
 
   val write_data = Wire(UInt(32.W))
   val doWrite = Wire(Bool())
-  val targetRd = WireDefault(rd)
   write_data := alu.io.result
   doWrite := dec.isALU
 
@@ -247,15 +184,6 @@ class ZeroNyteRV32IZmmulCore extends Module {
     doWrite := true.B
   }
 
-  when(isDivInstr) {
-    doWrite := false.B
-    when(divDone) {
-      write_data := divResult
-      doWrite := true.B
-      targetRd := divRd
-    }
-  }
-
   when(dec.isLUI) {
     write_data := dec.imm
     doWrite := true.B
@@ -271,25 +199,9 @@ class ZeroNyteRV32IZmmulCore extends Module {
     doWrite := true.B
   }
 
-  // Hardware Reset FSM logic targeting RegFileMT2R1WMem
-  val resetState = RegInit(true.B)
-  val resetCounter = RegInit(1.U(5.W))
-
-  when(resetState) {
-    regFile.io.writeAddrs(0) := resetCounter
-    regFile.io.writeData(0) := 0.U
-    regFile.io.wens(0) := true.B
-    
-    when(resetCounter === 31.U) {
-      resetState := false.B
-    } .otherwise {
-      resetCounter := resetCounter + 1.U
-    }
-  } .otherwise {
-    regFile.io.writeAddrs(0) := targetRd
-    regFile.io.writeData(0) := write_data
-    regFile.io.wens(0) := doWrite && targetRd =/= 0.U
-  }
+  regFile.io.writeAddrs(0) := rd
+  regFile.io.writeData(0) := write_data
+  regFile.io.wens(0) := doWrite && rd =/= 0.U
   io.result := write_data
 
     // ---------- Interrupt Controller ----------
@@ -323,8 +235,7 @@ class ZeroNyteRV32IZmmulCore extends Module {
   val jalTarget = (pc.asSInt + dec.imm.asSInt).asUInt
 
   val nextPC = WireDefault(pcPlus4)
-  val divStall = (divActive || divLaunch) && !divider.io.done
-  val stall = resetState || divStall
+  val stall = false.B
   val interruptTaken = interruptController.io.hasInterrupt && !stall
   io.interruptTaken := interruptTaken
 

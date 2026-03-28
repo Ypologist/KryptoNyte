@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "VZeroNyteRV32ICore.h"
+#include "VZeroNyteRV32IMCore.h"
 #include "elf_loader.h"
 #include "memory.h"
 #include "verilated.h"
@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  VZeroNyteRV32ICore dut;
+  VZeroNyteRV32IMCore dut;
 
   auto applyMemory = [&]() {
     dut.io_imem_rdata = memory.read32(dut.io_imem_addr);
@@ -104,14 +104,14 @@ int main(int argc, char** argv) {
     if (dut.io_dmem_wen) {
       const uint32_t addr = dut.io_dmem_addr;
       const uint32_t data = dut.io_dmem_wdata;
-      const uint8_t mask  = dut.io_dmem_wmask;
+      const uint8_t mask = dut.io_dmem_wmask;
       try {
         if (mask & 0x1) memory.write8(addr + 0, (data >> 0) & 0xFF);
         if (mask & 0x2) memory.write8(addr + 1, (data >> 8) & 0xFF);
         if (mask & 0x4) memory.write8(addr + 2, (data >> 16) & 0xFF);
         if (mask & 0x8) memory.write8(addr + 3, (data >> 24) & 0xFF);
       } catch (const std::exception& e) {
-        std::cerr << "Memory write failed at 0x" << std::hex << addr << ": " << e.what() << std::endl;
+        std::cerr << "Memory error: " << e.what() << "\n";
         return 2;
       }
       if (addr == symbols.tohost && data != 0) {
