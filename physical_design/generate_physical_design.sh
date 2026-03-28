@@ -39,7 +39,7 @@ USE_SUDO=false
 export MODULE_NAME
 export CLOCK_PORT="clock"
 export CLOCK_PERIOD="10.0"
-export CORE_UTILIZATION="0.7"
+export CORE_UTILIZATION="70"
 export ASPECT_RATIO="1.0"
 export PDK_VARIANT="sky130_fd_sc_hd"
 export SYNTHESIS_STRATEGY="AREA 0"
@@ -71,7 +71,7 @@ Options:
   --output-root <path>    Output directory (default: /tmp/kryptonyte_openlane_\$USER)
   --openlane2-path <path> OpenLane2 directory (default: /opt/skywater-pdk/openlane2)
   --clock-period <ns>     Clock period in nanoseconds (default: 10.0)
-  --utilization <ratio>   Core utilization ratio (default: 0.7)
+  --utilization <percent> Core utilization percentage (default: 70)
   --use-sudo              Run nix-shell/openlane through sudo
   --quiet                 Reduced verbosity
   --help, -h              Show this help message

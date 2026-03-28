@@ -11,7 +11,7 @@
   "FP_SIZING": "absolute",
   "DIE_AREA": [0, 0, 15000, 15000],
 
-  "FP_CORE_UTIL": 0.2,
+  "FP_CORE_UTIL": 20,
   "FP_ASPECT_RATIO": 1.0,
 
   "SYNTH_STRATEGY": "AREA 0",

@@ -1,3 +1,20 @@
+# 06:48 - Corrected OpenLane 2 Floorplan Target Utilization
+
+**Why these changes were made:**
+A recent OpenLane 2 pass inflated the floorplan footprint of `RegFileMT2R1WMem` to ~46.2 mm², spacing out standard cells across a massive die area. This caused profound RC interconnect delays that resulted in severe setup logic timing violations (-1.48 ns slack @ 100 MHz target). This anomaly happened because `FP_CORE_UTIL` constraints within config files were specified using decimal ratio bounds (like 0.5 or 0.7), which OpenLane 2 misinterpreted directly as sparse percentages (e.g., 0.5% utilization).
+
+**What the changes are:**
+* Refactored `FP_CORE_UTIL` assignment values across all 8 distinct layout config JSON files natively located in `/physical_design`, converting them from scalar floats to rigid percentage integers (e.g. 0.5 -> 50, 0.7 -> 70).
+* Modified default environment arguments parsing in the `generate_physical_design.sh` baseline script to expect and distribute integer utilization percentages instead of numeric ratios.
+
+# 21:57 - Fixed MRF IO Pin Constraints
+
+**Why these changes were made:**
+The custom IO pin constraint configuration file (`pin_order.mrf.cfg`) was previously modified to exclude the `reset` pin because the new memory-based block eliminated the global reset logic. However, Chisel implicitly generates a default `reset` port for all modules regardless of internal usage, causing OpenLane's strict unmatched pin validation to crash during the IO placement stage.
+
+**What the changes are:**
+* Restored the `reset` pin assignment back to the Northern edge in `physical_design/constraints/pin_order.mrf.cfg` to satisfy OpenLane IO constraints and safely complete the physical design flow execution.
+
 # 16:11 - Fixed TetraNyte MRF Conformance Test Simulator
 
 **Why these changes were made:**
