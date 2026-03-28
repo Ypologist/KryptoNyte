@@ -10,9 +10,9 @@ import LoadUnit._
 import StoreUnit._
 import RegFiles._
 
-class TetraNyteRV32ICoreMRF extends Module {
+class TetraNyteRV32IZmmulCoreMRF extends Module {
   val numThreads = 4
-  val io = IO(new TetraNyteRV32ICoreIO(numThreads))
+  val io = IO(new TetraNyteRV32IZmmulCoreIO(numThreads))
 
   // Per-thread PC registers and flush tracking
   val pcResetVec = VecInit(Seq.fill(numThreads)("h80000000".U(32.W)))

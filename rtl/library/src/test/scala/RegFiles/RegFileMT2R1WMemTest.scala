@@ -32,20 +32,20 @@ class RegFileMT2R1WMemTest extends AnyFlatSpec {
         dut.io.writeThreadID.poke(thread.U)
         dut.io.readThreadID.poke(thread.U)
         // Set the destination register index and data, and enable the write.
-        dut.io.dst1.poke(regIdx.U)
-        dut.io.dst1data.poke(writeData.U)
-        dut.io.wen.poke(true.B)
+        dut.io.writeAddrs(0).poke(regIdx.U)
+        dut.io.writeData(0).poke(writeData.U)
+        dut.io.wens(0).poke(true.B)
         dut.clock.step(1) // Latch the write on the clock edge.
         // Disable write for subsequent operations.
-        dut.io.wen.poke(false.B)
+        dut.io.wens(0).poke(false.B)
         
         // Now set the read addresses to the same register.
-        dut.io.src1.poke(regIdx.U)
-        dut.io.src2.poke(regIdx.U)
+        dut.io.readAddrs(0).poke(regIdx.U)
+        dut.io.readAddrs(1).poke(regIdx.U)
         
         // Because the read ports are asynchronous, we can peek immediately.
-        val read1 = dut.io.src1data.peek().litValue
-        val read2 = dut.io.src2data.peek().litValue
+        val read1 = dut.io.readData(0).peek().litValue
+        val read2 = dut.io.readData(1).peek().litValue
         
         assert(read1 == writeData, s"Thread $thread, register $regIdx (read port1): expected $writeData, got $read1")
         assert(read2 == writeData, s"Thread $thread, register $regIdx (read port2): expected $writeData, got $read2")
@@ -62,23 +62,23 @@ class RegFileMT2R1WMemTest extends AnyFlatSpec {
       dut.io.writeThreadID.poke(0.U)
       
       // Check initial read of x0 (src1=0, src2=0) is 0
-      dut.io.src1.poke(0.U)
-      dut.io.src2.poke(0.U)
-      val zeroVal1 = dut.io.src1data.peek().litValue
-      val zeroVal2 = dut.io.src2data.peek().litValue
+      dut.io.readAddrs(0).poke(0.U)
+      dut.io.readAddrs(1).poke(0.U)
+      val zeroVal1 = dut.io.readData(0).peek().litValue
+      val zeroVal2 = dut.io.readData(1).peek().litValue
       assert(zeroVal1 == 0, s"Thread 0, register 0 expected 0, got $zeroVal1")
       assert(zeroVal2 == 0, s"Thread 0, register 0 expected 0, got $zeroVal2")
       
       // Attempt to write a non-zero value to x0
-      dut.io.dst1.poke(0.U)
-      dut.io.dst1data.poke(999.U)
-      dut.io.wen.poke(true.B)
+      dut.io.writeAddrs(0).poke(0.U)
+      dut.io.writeData(0).poke(999.U)
+      dut.io.wens(0).poke(true.B)
       dut.clock.step(1)
-      dut.io.wen.poke(false.B)
+      dut.io.wens(0).poke(false.B)
       
       // Verify that reading from x0 still returns 0 despite the write attempt
-      val zeroValPostWrite1 = dut.io.src1data.peek().litValue
-      val zeroValPostWrite2 = dut.io.src2data.peek().litValue
+      val zeroValPostWrite1 = dut.io.readData(0).peek().litValue
+      val zeroValPostWrite2 = dut.io.readData(1).peek().litValue
       assert(zeroValPostWrite1 == 0, s"Thread 0, register 0 expected 0 after write, got $zeroValPostWrite1")
       assert(zeroValPostWrite2 == 0, s"Thread 0, register 0 expected 0 after write, got $zeroValPostWrite2")
     }

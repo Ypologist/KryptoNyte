@@ -10,9 +10,62 @@ import LoadUnit._
 import StoreUnit._
 import RegFiles._
 
-class TetraNyteRV32ICoreMRF extends Module {
+class PipelineRegBundle extends Bundle {
+  val valid = Bool()
+  val pc = UInt(32.W)
+  val instr = UInt(32.W)
+  val threadId = UInt(2.W)
+
+  val rs1 = UInt(5.W)
+  val rs2 = UInt(5.W)
+  val rd = UInt(5.W)
+  val imm = UInt(32.W)
+  val aluOp = UInt(5.W)
+  val isALU = Bool()
+  val isLoad = Bool()
+  val isStore = Bool()
+  val isBranch = Bool()
+  val isJAL = Bool()
+  val isJALR = Bool()
+  val isLUI = Bool()
+  val isAUIPC = Bool()
+  val rs1Data = UInt(32.W)
+  val rs2Data = UInt(32.W)
+  val aluResult = UInt(32.W)
+  val memRdata = UInt(32.W)
+}
+
+class TetraNyteRV32IZmmulCoreIO(val numThreads: Int) extends Bundle {
+  val threadEnable = Input(Vec(numThreads, Bool()))
+  val instrMem = Input(UInt(32.W))
+  val dataMemResp = Input(UInt(32.W))
+  val memAddr = Output(UInt(32.W))
+  val memWrite = Output(UInt(32.W))
+  val memMask = Output(UInt(4.W))
+  val memValid = Output(Bool())
+  val memMisaligned = Output(Bool())
+
+  val fetchThread = Output(UInt(log2Ceil(numThreads).W))
+  val if_pc = Output(Vec(numThreads, UInt(32.W)))
+  val if_instr = Output(Vec(numThreads, UInt(32.W)))
+  val id_rs1Data = Output(Vec(numThreads, UInt(32.W)))
+  val id_rs2Data = Output(Vec(numThreads, UInt(32.W)))
+  val ex_aluResult = Output(Vec(numThreads, UInt(32.W)))
+  val mem_loadData = Output(Vec(numThreads, UInt(32.W)))
+
+  // Debug/control visibility
+  val ctrlTaken = Output(Bool())
+  val ctrlThread = Output(UInt(log2Ceil(numThreads).W))
+  val ctrlFromPC = Output(UInt(32.W))
+  val ctrlTarget = Output(UInt(32.W))
+  val ctrlIsJal = Output(Bool())
+  val ctrlIsJalr = Output(Bool())
+  val ctrlIsBranch = Output(Bool())
+}
+
+class TetraNyteRV32IZmmulCore extends Module {
   val numThreads = 4
-  val io = IO(new TetraNyteRV32ICoreIO(numThreads))
+  val io = IO(new TetraNyteRV32IZmmulCoreIO(numThreads))
 
   // Per-thread PC registers and flush tracking
   val pcResetVec = VecInit(Seq.fill(numThreads)("h80000000".U(32.W)))
@@ -44,7 +97,7 @@ class TetraNyteRV32ICoreMRF extends Module {
   val ex_mem = RegInit(0.U.asTypeOf(new PipelineRegBundle))
 
   // Shared multithreaded register file
-  val regFile = Module(new RegFileMT2R1WMem(numThreads = numThreads))
+  val regFile = Module(new RegFileMT2R1WVec(numThreads = numThreads))
   val unusedRegDebugX1 = Wire(Vec(numThreads, UInt(32.W)))
   unusedRegDebugX1 := regFile.io.debugX1
   dontTouch(unusedRegDebugX1)
@@ -122,11 +175,11 @@ class TetraNyteRV32ICoreMRF extends Module {
 
   // Register file reads are tagged by threadId
   regFile.io.readThreadID := if_id.threadId
-  regFile.io.readAddrs(0) := rs1
-  regFile.io.readAddrs(1) := rs2
+  regFile.io.src1 := rs1
+  regFile.io.src2 := rs2
 
-  val rs1Raw = regFile.io.readData(0)
-  val rs2Raw = regFile.io.readData(1)
+  val rs1Raw = regFile.io.src1data
+  val rs2Raw = regFile.io.src2data
 
   // Simple forwarding when the same thread is in later stages
   val rs1Fwd = WireDefault(rs1Raw)
@@ -305,9 +358,9 @@ class TetraNyteRV32ICoreMRF extends Module {
 
   // Safe arbitration: point the regfile write-thread to whichever write wins this cycle.
   regFile.io.writeThreadID := Mux(divWrite, divThread, ex_mem.threadId)
-  regFile.io.wens(0) := writeEnable || divWrite
-  regFile.io.writeAddrs(0) := Mux(divWrite, divRd, Mux(writeEnable, ex_mem.rd, 0.U))
-  regFile.io.writeData(0) := Mux(divWrite, divResult, wbData)
+  regFile.io.wen := writeEnable || divWrite
+  regFile.io.dst1 := Mux(divWrite, divRd, Mux(writeEnable, ex_mem.rd, 0.U))
+  regFile.io.dst1data := Mux(divWrite, divResult, wbData)
 
   when(divWrite) { divDoneSticky := false.B }
 

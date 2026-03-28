@@ -8,7 +8,7 @@ import ALUs.{ALU32, Div32Radix4, Mul32OneCycle}
 import TileLink._
 
 
-class ZeroNyteRV32ICore extends Module {
+class ZeroNyteRV32IZmmulCore extends Module {
   val io = IO(new Bundle {
     // Instruction Memory Interface
     val imem_addr = Output(UInt(32.W))

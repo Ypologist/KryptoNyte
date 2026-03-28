@@ -4,6 +4,7 @@
 package RegFiles
 
 import chisel3._
+import chisel3.util._
 
 /**
   * An explicitly instantiated 8-read, 4-write version of the parameterized

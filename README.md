@@ -23,6 +23,31 @@ Create a normal github codespace. By default, sbt and gcc are installed.
 4. Physical Design: .devcontainer/install_physical_design_tools.sh --with-sudo
 
 
+## Building and Testing ZeroNyte
+
+To build a fresh repository, generate the Verilog RTL, run the test suite, and execute physical design:
+
+1. **Compile the Chisel RTL**
+   ```bash
+   cd rtl
+   sbt compile
+   ```
+2. **Generate the Verilog Library and Core**
+   ```bash
+   sbt genLibrary genZeroNyte
+   ```
+3. **Run Unit Tests and Architecture Conformance Tests**
+   ```bash
+   sbt test
+   cd ../tests
+   ./run_rv32i_conformance.sh --processor zeronyte
+   ```
+4. **Run Physical Design (OpenLane)**
+   ```bash
+   cd ../physical_design
+   ./generate_physical_design.sh --config config.ZeroNyteRV32ICore.json
+   ```
+
 # KryptoNyte Directory Tree
 
 ## First Level
