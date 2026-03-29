@@ -49,6 +49,7 @@ PROCESSOR=""
 SMOKE_TEST=false
 TIMEOUT_SECS=3600
 TIMEOUT_SPECIFIED=false
+RUN_ALL=false
 
 if [[ $# -eq 0 ]]; then
   print_usage
@@ -82,6 +83,10 @@ while [[ $# -gt 0 ]]; do
       TIMEOUT_SPECIFIED=true
       shift 2
       ;;
+    --all)
+      RUN_ALL=true
+      shift
+      ;;
     *)
       echo "Unknown argument: $1" >&2
       print_usage >&2
@@ -89,6 +94,49 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$RUN_ALL" == "true" ]]; then
+  echo "================================================="
+  echo "Executing Nightly Conformance Suite for ALL targets"
+  echo "================================================="
+  
+  LOG_DIR="$SCRIPT_DIR/output/nightly_logs"
+  mkdir -p "$LOG_DIR"
+  declare -a SUMMARY=()
+  
+  for config in "${AVAILABLE_PROCESSORS[@]}"; do
+    IFS="|" read -r proc_name _ <<< "$config"
+    echo ""
+    echo "Starting: $proc_name ..."
+    LOG_FILE="$LOG_DIR/${proc_name}.log"
+    
+    # Run the script recursively
+    set +e
+    "$0" --processor "$proc_name" > "$LOG_FILE" 2>&1
+    set -e
+    
+    PASSES=$(grep -c " : Passed$" "$LOG_FILE" || true)
+    FAILS=$(grep -c " : Failed$" "$LOG_FILE" || true)
+    
+    if [[ $PASSES -eq 0 && $FAILS -eq 0 ]]; then
+      SUMMARY+=("❌ $proc_name: BUILD/SIM FAILED (Check nightly_logs/${proc_name}.log)")
+    elif [[ $FAILS -gt 0 ]]; then
+      SUMMARY+=("❌ $proc_name: $PASSES Passed, $FAILS Failed")
+    else
+      SUMMARY+=("✅ $proc_name: $PASSES Passed, $FAILS Failed")
+    fi
+  done
+  
+  echo ""
+  echo "================================================="
+  echo "       Nightly Conformance Final Summary         "
+  echo "================================================="
+  for s in "${SUMMARY[@]}"; do
+    echo "$s"
+  done
+  echo "================================================="
+  exit 0
+fi
 
 if [[ -z "$PROCESSOR" ]]; then
   echo "Error: You must specify a --processor." >&2
