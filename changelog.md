@@ -1,3 +1,33 @@
+# 03/29/2026 14:47 - OctoNyte Zmmul Pipelined Multiplier Alignment
+
+**Why these changes were made:**
+* **`MUL` Instruction Misalignment:** The `OctoNyte` barrel processor is entirely deterministic and evaluates the structural `Writeback` stage dynamically exactly 4 clock cycles after instruction payloads natively enter the `EX1` computational domain. The previous iteration synthesized an `ALUs.Mul32Pipelined(3)` module utilizing a rigid 3-cycle `ShiftRegister`. Due to this 1-cycle latency discrepancy, when the designated hardware thread finally accessed its architectural `Writeback` stage, the multiplier had already overwritten the outputs with data corresponding to Thread `N+1`! This physical misalignment explicitly corrupted the resulting `mul-01.S` signatures by actively mapping adjacent-thread mathematical garbage instead.
+* **Redundant Thread Tracking:** Expanding custom combinational paths (`exec1Reg -> exec2Reg -> exec3Reg -> wbReg`) explicitly dedicated solely to migrating the raw thread outputs alongside the multiplication adders consumed unnecessary area overhead when the fundamental pipeline was structurally uniform.
+
+**What the changes are:**
+* **`Mul32Pipelined(4)` Retiming (`OctoNyteRV32IZmmulCore.scala`):** Adjusted the execution boundary to formally instantiate `Mul32Pipelined(4)`. This natively forces the internal Chisel flip-flops to retain product combinations for EXACTLY 4 logic ticks. When Thread `N` inherently commits at the WB multiplexer logic sequence, the exact resultant valid product perfectly aligns transparently without necessitating extraneous manual threadID routing!
+* **Writeback Evaluation Multiplexer:** Pushed a dedicated `wbIsMulInstr` parsing buffer down directly into the `Writeback` domain logic organically routing valid M-Extension combinations seamlessly independent of upstream `exec...` register latency boundaries.
+* **Structural Multiplexer Bypass (EX -> WB Alignment):** By configuring the `Mul32Pipelined` internally as a 4-deep independent `ShiftRegister`, the multiplier functionally executes side-by-side mathematically across the internal `EX1 -> EX2 -> EX3 -> WB` pipeline cycles. The multiplier combinational payload naturally completes entirely outside the primary arithmetic `exec` trace queue and drops its payload definitively into the final multiplexing buffer, gracefully eliminating the need to synthesize explicitly serialized `adders` through sequential threaded stages contextually while inherently satisfying standard data-hazard timing windows concurrently.
+
+# 03/29/2026 13:41 - OctoNyte Zmmul Build Cache and Opcode Masking Fix
+
+**Why these changes were made:**
+* **"Ghost" Core Cache:** The `tests/run_riscv_conformance_tests.sh` script skips Scala SBT compilation if it detects `OctoNyteRV32IZmmulCore.v` already exists in `generated_sim/`. This caused tests to continually evaluate stale, broken Verilog from earlier debugging sessions rather than compiling the latest structural rewrites.
+* **`OP_R` Multiplier Masking:** The RISC-V M-Extension instructions natively use the `OP_R` (`0110011`) base opcode. The `RV32IDecode` block evaluates `isALU=true` for all `OP_R` opcodes. Since the `.elsewhen(isMulInstr)` multiplexer was placed sequentially after the generic `when(decodeSignals.isALU)` standard ALU pipeline block, `MUL` instructions were being accidentally trapped as `ADD` operations and blocked from reaching the hardware multiplier entirely.
+
+**What the changes are:**
+* **Forced Verilog Recompilation:** Manually swept the stale `OctoNyteRV32IZmmulCore.v` from `rtl/generators/generated_sim/verilog_hierarchical_timed/` dynamically tripping the `sbt generators/runMain` step and forcing a pristine build.
+* **`isALU` Masking Exclusion:** Pushed a structural patch into `OctoNyteRV32IZmmulCore.scala` wrapping the ALU boolean condition in a strict exclusion parameter (`when ((decodeSignals.isALU && !isMulInstr) || ...)`). This safely prevents the basic ALU execution bucket from erroneously capturing M-extension workloads natively.
+
+# 03/29/2026 13:05 - OctoNyte Register File Port Scaling Fix
+
+**Why these changes were made:**
+* **Excessive Register File Ports:** The OctoNyte core instantiation incorrectly derived the number of register file ports by scaling them against the 4-wide packet `fetchWidth` parameter (`regFileReadPorts = 2 * fetchWidth`). Because the core is an in-order, single-issue 8-threaded barrel processor without structural hazards, scaling ports linearly with the instruction bundle artificially synthesized heavily bloated multi-port Register Files (8-read, 4-write ports) despite pipelines permanently operating exactly at 2R/1W.
+
+**What the changes are:**
+* **`RegFileMT2R1WMem` Standardization:** Refactored `OctoNyteRV32ICore`, `OctoNyteRV32IMCore`, `OctoNyteRV32IZmmulCore`, and all associated `WithCache` wrappers to drop the multi-vector `RegFileMTMultiWVec` and natively instantiate the standard area-optimized `RegFileMT2R1WMem` pipeline, formally decoupling register widths from `fetchWidth`.
+* **Vector-to-Scalar Signal Porting:** Re-wired instruction decode and architectural writeback stages globally, converting extraneous `Vec()` signal arrays properly into explicit `readThreadID`/`writeThreadID` scalars alongside targeted `readAddrs`, `readData`, `writeAddrs`, and `writeData` bindings.
+
 # 03/29/2026 08:20 - OctoNyte Zmmul RV32I Baseline Restore
 
 **Why these changes were made:**

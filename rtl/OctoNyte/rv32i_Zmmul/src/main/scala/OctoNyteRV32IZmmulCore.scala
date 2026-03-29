@@ -4,13 +4,13 @@ import chisel3._
 import chisel3.util._
 import chisel3.dontTouch
 import ALUs.ALU32
+import ALUs.Mul32Pipelined
 import Decoders.RV32IDecode
 import Pipeline.ThreadScheduler
 import BranchUnit.BranchUnit
 import LoadUnit.LoadUnit
 import StoreUnit.StoreUnit
-import RegFiles.RegFileMTMultiWVec
-
+import RegFiles.RegFileMT2R1WMem
 
 // *********************************************************
 // Core IO Definition
@@ -64,7 +64,6 @@ class OctoNyteRV32IZmmulCoreIO(val numThreads: Int, val fetchWidth: Int, val cos
 
 // ****************************************************************************************
 // Pipeline Register Definitions
-// Pipeline registers are defined in outer scope so Verilog generation doesn't mangle names
 // ****************************************************************************************
 class FetchPipelineRegs(threadBits: Int) extends Bundle {
   val valid    = Bool()
@@ -73,7 +72,6 @@ class FetchPipelineRegs(threadBits: Int) extends Bundle {
   val instr    = UInt(32.W)
 }
 
-
 class DecodePipelineRegs(threadBits: Int) extends Bundle {
   val fetchSignals = new FetchPipelineRegs(threadBits)
   val decodeSignals = new RV32IDecode.DecodeSignals
@@ -81,7 +79,6 @@ class DecodePipelineRegs(threadBits: Int) extends Bundle {
 
 class DispatchPipelineRegs(threadBits: Int) extends Bundle {
   val decodePipelineSignals = new DecodePipelineRegs(threadBits)
-  // Additional dispatch-specific signals can be added here when multiple-issue is implemented
 }
 
 class RegisterReadPipelineRegs(threadBits: Int) extends Bundle {
@@ -111,21 +108,15 @@ class WritebackPipelineRegs(threadBits: Int) extends Bundle {
 } 
 
 // *********************************************************
-// OctoNyte RV32I Core Definition
+// OctoNyte Zmmul Core Definition
 // *********************************************************
 class OctoNyteRV32IZmmulCore(val cosimulate: Boolean = false) extends Module {
   val numThreads = 8
-  // Keep this aligned with OctoNyte tests, which drive a 4-wide (128b) instruction packet.
-  // The core currently only consumes slot 0 (`instrMem(31,0)`), so the extra slots are ignored.
   val fetchWidth = 4
-  val regFileReadPorts = 2 * fetchWidth
-  val regFileWritePorts = fetchWidth
   val io = IO(new OctoNyteRV32IZmmulCoreIO(numThreads, fetchWidth, cosimulate))
   io.jtag_tdo := 0.U
   
-
   private val threadBits = log2Ceil(numThreads)
-
 
   // ===========================
   // DEBUG DEFAULTS 
@@ -167,75 +158,50 @@ class OctoNyteRV32IZmmulCore(val cosimulate: Boolean = false) extends Module {
   io.debugExecCtrlTarget   := 0.U
 
   // ================================================
-
   
   val threadCounter = RegInit(0.U(threadBits.W))
 
   val curThread = threadCounter
-  val nextThread =
-    Mux(curThread === (numThreads - 1).U, 0.U, curThread + 1.U)
+  val nextThread = Mux(curThread === (numThreads - 1).U, 0.U, curThread + 1.U)
 
-  // ALWAYS advance
   threadCounter := nextThread
-
   
-  // Default IO outputs 
   io.memAddr := 0.U
   io.memWrite := 0.U
   io.memMask := 0.U
   io.memValid := false.B
   io.memMisaligned := false.B
  
- 
-  // ******************************************
-  // Program counter registers for each thread
-  // ******************************************
   val pcRegs = RegInit(VecInit(Seq.fill(numThreads)("h8000_0000".U(32.W))))
+  val debugRegs1to4 = RegInit(VecInit(Seq.fill(numThreads)(VecInit(Seq.fill(4)(0.U(32.W))))))
 
-  // Debug shadow registers (synthesizable): track architectural x1-x4 per thread on writeback.
-  // x0 is always 0 and is not stored.
-  val debugRegs1to4 = RegInit(VecInit(Seq.fill(numThreads)(VecInit(Seq.fill(4)(0.U(32.W)))))) // (thread)(reg-1)
-
-
-  // ***********************************************************************************
-  // Multithreaded register file: 1 write port, 2 read groups (only port0 used for now)
-  // ***********************************************************************************
-  val regFile = Module(new RegFileMTMultiWVec(numThreads = numThreads, numWritePorts = regFileWritePorts, numReadPorts = regFileReadPorts))
-  regFile.io.readThreadID := VecInit(Seq.fill(regFileReadPorts)(0.U(threadBits.W)))
-  regFile.io.src1 := VecInit(Seq.fill(regFileReadPorts)(0.U(5.W)))
-  regFile.io.src2 := VecInit(Seq.fill(regFileReadPorts)(0.U(5.W)))
-  regFile.io.writeThreadID := VecInit(Seq.fill(regFileWritePorts)(0.U(threadBits.W)))
-  regFile.io.dst := VecInit(Seq.fill(regFileWritePorts)(0.U(5.W)))
-  regFile.io.wen := VecInit(Seq.fill(regFileWritePorts)(false.B))
-  regFile.io.dstData := VecInit(Seq.fill(regFileWritePorts)(0.U(32.W)))
+  val regFile = Module(new RegFileMT2R1WMem(numThreads = numThreads))
+  regFile.io.readThreadID := 0.U(threadBits.W)
+  regFile.io.readAddrs := VecInit(Seq.fill(2)(0.U(5.W)))
+  regFile.io.writeThreadID := 0.U(threadBits.W)
+  regFile.io.writeAddrs := VecInit(Seq.fill(1)(0.U(5.W)))
+  regFile.io.wens := VecInit(Seq.fill(1)(false.B))
+  regFile.io.writeData := VecInit(Seq.fill(1)(0.U(32.W)))
 
   val unusedRegDebugX1 = Wire(Vec(numThreads, UInt(32.W)))
-  val unusedRegDebugRegs = Wire(Vec(numThreads, Vec(5, UInt(32.W))))
   unusedRegDebugX1 := regFile.io.debugX1
-  unusedRegDebugRegs := regFile.io.debugRegs01234
   dontTouch(unusedRegDebugX1)
-  dontTouch(unusedRegDebugRegs)
 
-  // ***************************************************************************
   // Execution Units
-  // ***************************************************************************
-  // ALU 
   val alu = Module(new ALU32)
   alu.io.a := 0.U
   alu.io.b := 0.U
   alu.io.opcode := ALU32.Opcode.ADD
 
-  // Pipelined Multiplier (EX1 -> EX2 -> EX3) 3-cycle exact latency alignment
-  val mulUnit = Module(new ALUs.Mul32Pipelined(numCycles = 4))
+  val mulUnit = Module(new Mul32Pipelined(4))
   mulUnit.io.a := 0.U
   mulUnit.io.b := 0.U
   mulUnit.io.signedA := false.B
   mulUnit.io.signedB := false.B
 
-  // Branch Unit
   val branchUnit = Module(new BranchUnit)
-  branchUnit.io.rs1 := 0.U    // TODO: This is really rs1data not rs1
-  branchUnit.io.rs2 := 0.U    // TODO: This is really rs2data not rs2
+  branchUnit.io.rs1 := 0.U
+  branchUnit.io.rs2 := 0.U
   branchUnit.io.pc := 0.U
   branchUnit.io.imm := 0.S(32.W)
   branchUnit.io.branchOp := 0.U
@@ -247,40 +213,33 @@ class OctoNyteRV32IZmmulCore(val cosimulate: Boolean = false) extends Module {
   dontTouch(unusedBranchNextPc)
   dontTouch(unusedBranchMisaligned)
 
-  // Load Unit
   val loadUnit = Module(new LoadUnit)
   loadUnit.io.addr := 0.U
   loadUnit.io.dataIn := io.dataMemResp
   loadUnit.io.funct3 := 0.U
 
-  // Store Unit
   val storeUnit = Module(new StoreUnit)
   storeUnit.io.addr := 0.U
   storeUnit.io.data := 0.U
   storeUnit.io.storeType := 0.U
 
-
 // =============================
 // Fetch stage
 // =============================
-
-// Single fetch pipeline register
   val fetchReg = RegInit(0.U.asTypeOf(new FetchPipelineRegs(threadBits)))
   when (io.threadEnable(curThread)) {
     fetchReg.valid    := true.B
     fetchReg.threadId := curThread
     fetchReg.pc       := pcRegs(curThread)
     fetchReg.instr    := io.instrMem(31, 0)
-
     pcRegs(curThread) := pcRegs(curThread) + 4.U
   } .otherwise {
-    fetchReg.valid := false.B   // bubble
+    fetchReg.valid := false.B
   }
 
 // =============================
 // Decode stage
 // =============================
-
 val decodeReg = RegInit(0.U.asTypeOf(new DecodePipelineRegs(threadBits)))
 
 when (fetchReg.valid) {
@@ -290,10 +249,9 @@ when (fetchReg.valid) {
   decodeReg.fetchSignals.valid := false.B
 }
 
- // =============================
+// =============================
 // Dispatch stage
 // =============================
-
 val dispatchReg = RegInit(0.U.asTypeOf(new DispatchPipelineRegs(threadBits)))
 
 when (decodeReg.fetchSignals.valid) {
@@ -302,42 +260,32 @@ when (decodeReg.fetchSignals.valid) {
   dispatchReg.decodePipelineSignals.fetchSignals.valid := false.B
 }
 
-
-  // =============================
-// Register read stage (single-lane)
 // =============================
-
+// Register read stage
+// =============================
 val regReadReg = RegInit(0.U.asTypeOf(new RegisterReadPipelineRegs(threadBits)))
 
 when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   regReadReg.dispatchSignals := dispatchReg
-
-  // Register file read
   val tid = dispatchReg.decodePipelineSignals.fetchSignals.threadId
-
-  regFile.io.readThreadID(0) := tid
-  regFile.io.src1(0) := dispatchReg.decodePipelineSignals.decodeSignals.rs1
-  regFile.io.src2(0) := dispatchReg.decodePipelineSignals.decodeSignals.rs2
-
-  regReadReg.rs1Data := regFile.io.src1data(0)
-  regReadReg.rs2Data := regFile.io.src2data(0)
+  regFile.io.readThreadID := tid
+  regFile.io.readAddrs(0) := dispatchReg.decodePipelineSignals.decodeSignals.rs1
+  regFile.io.readAddrs(1) := dispatchReg.decodePipelineSignals.decodeSignals.rs2
+  regReadReg.rs1Data := regFile.io.readData(0)
+  regReadReg.rs2Data := regFile.io.readData(1)
 } .otherwise {
   regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
 }
 
-
- // =============================
-// Execute 1 stage (single-lane)
 // =============================
-
+// Execute 1 stage
+// =============================
   val exec1Reg = RegInit(0.U.asTypeOf(new Exec1PipelineRegs(threadBits)))
 
   when (regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.valid) {
 
-  val decodeSignals =
-    regReadReg.dispatchSignals.decodePipelineSignals.decodeSignals
-  val fetchSignals =
-    regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals
+  val decodeSignals = regReadReg.dispatchSignals.decodePipelineSignals.decodeSignals
+  val fetchSignals = regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals
 
   exec1Reg.regReadSignals := regReadReg
   exec1Reg.doRegFileWrite := false.B
@@ -345,38 +293,30 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   exec1Reg.ctrlTarget := 0.U
 
   // -----------------
-  // Pipelined Multiplier Feed (Combines identically alongside ALU)
+  // M-Extension Logic
   // -----------------
-  val isMExt = dispatchReg.decodePipelineSignals.fetchSignals.instr(6, 0) === RV32IDecode.OP_R && dispatchReg.decodePipelineSignals.fetchSignals.instr(31, 25) === "b0000001".U(7.W)
+  val isMExt = fetchSignals.instr(6, 0) === RV32IDecode.OP_R && fetchSignals.instr(31, 25) === "b0000001".U(7.W)
   val funct3 = fetchSignals.instr(14, 12)
   val isMulInstr = isMExt && (funct3 <= "b011".U)
 
   mulUnit.io.a := regReadReg.rs1Data
   mulUnit.io.b := regReadReg.rs2Data
-  mulUnit.io.signedA := (funct3 =/= "b011".U) // MULHU sets false
-  mulUnit.io.signedB := (funct3 =/= "b011".U) && (funct3 =/= "b010".U) // MULHU/MULHSU sets false
+  mulUnit.io.signedA := (funct3 =/= "b011".U)
+  mulUnit.io.signedB := (funct3 =/= "b011".U) && (funct3 =/= "b010".U)
+
 
   // -----------------
   // ALU / LUI / AUIPC
   // -----------------
-  when (decodeSignals.isALU ||
-        decodeSignals.isLUI ||
-        decodeSignals.isAUIPC) {
-
+  when ((decodeSignals.isALU && !isMulInstr) || decodeSignals.isLUI || decodeSignals.isAUIPC) {
     val opcode = fetchSignals.instr(6, 0)
-    val useImm =
-      (opcode === RV32IDecode.OP_I) ||
-      decodeSignals.isLUI ||
-      decodeSignals.isAUIPC
-
+    val useImm = (opcode === RV32IDecode.OP_I) || decodeSignals.isLUI || decodeSignals.isAUIPC
 
     val opA = Mux(decodeSignals.isAUIPC,
       fetchSignals.pc,
       Mux(decodeSignals.isLUI, 0.U, regReadReg.rs1Data))
 
-    val opB = Mux(useImm,
-      decodeSignals.imm,
-      regReadReg.rs2Data)
+    val opB = Mux(useImm, decodeSignals.imm, regReadReg.rs2Data)
 
     alu.io.a := opA
     alu.io.b := opB
@@ -391,13 +331,11 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
     exec1Reg.result := result
     exec1Reg.doRegFileWrite := true.B
   }
-
-  // ---- MUX (Zmmul / M-Extension) ----
+  // ---- MULTIPLIER (Zmmul / M-Extension) ----
   .elsewhen (isMulInstr) {
-    exec1Reg.result := 0.U // Ignored at WB when replaced by mulUnit out
+    exec1Reg.result := 0.U
     exec1Reg.doRegFileWrite := true.B
   }
-
   // ---- JAL ----
   .elsewhen (decodeSignals.isJAL) {
     exec1Reg.result := fetchSignals.pc + 4.U
@@ -405,17 +343,14 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
     exec1Reg.ctrlTaken := true.B
     exec1Reg.ctrlTarget := (fetchSignals.pc.asSInt + decodeSignals.imm.asSInt).asUInt
   }
-
   // ---- JALR ----
   .elsewhen (decodeSignals.isJALR) {
-    val target =
-      ((regReadReg.rs1Data.asSInt + decodeSignals.imm.asSInt).asUInt & ~1.U(32.W))
+    val target = ((regReadReg.rs1Data.asSInt + decodeSignals.imm.asSInt).asUInt & ~1.U(32.W))
     exec1Reg.result := fetchSignals.pc + 4.U
     exec1Reg.doRegFileWrite := true.B
     exec1Reg.ctrlTaken := true.B
     exec1Reg.ctrlTarget := target
   }
-
   // ---- BRANCH ----
   .elsewhen (decodeSignals.isBranch) {
     branchUnit.io.rs1 := regReadReg.rs1Data
@@ -428,7 +363,6 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
     exec1Reg.ctrlTaken := branchUnit.io.taken
     exec1Reg.ctrlTarget := branchUnit.io.target
   }
-
   // ---- LOAD ----
   .elsewhen (decodeSignals.isLoad) {
     val address = regReadReg.rs1Data + decodeSignals.imm
@@ -441,7 +375,6 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
     exec1Reg.result := loadUnit.io.dataOut
     exec1Reg.doRegFileWrite := true.B
   }
-
   // ---- STORE ----
   .elsewhen (decodeSignals.isStore) {
     val address = regReadReg.rs1Data + decodeSignals.imm
@@ -458,115 +391,65 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   }
 
   } .otherwise {
-    exec1Reg
-      .regReadSignals
-      .dispatchSignals
-      .decodePipelineSignals
-      .fetchSignals
-      .valid := false.B
+    exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
   }
 
   // =============================
-  // Execute 2 stage (pass-through)
+  // Execute 2 stage
   // =============================
-
  val exec2Reg = RegInit(0.U.asTypeOf(new Exec2PipelineRegs(threadBits)))
-
   when (exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid) {
     exec2Reg.exec1Signals := exec1Reg
   } .otherwise {
-    exec2Reg.exec1Signals
-      .regReadSignals
-      .dispatchSignals
-      .decodePipelineSignals
-      .fetchSignals
-      .valid := false.B
+    exec2Reg.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
   }
-  
-  
-
 
   // =============================
-  // Execute 3 stage (pass-through)
+  // Execute 3 stage
   // =============================
-
   val exec3Reg = RegInit(0.U.asTypeOf(new Exec3PipelineRegs(threadBits)))
-
     when (exec2Reg.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid) {
       exec3Reg.exec2Signals := exec2Reg
     } .otherwise {
-      exec3Reg.exec2Signals
-        .exec1Signals
-        .regReadSignals
-        .dispatchSignals
-        .decodePipelineSignals
-        .fetchSignals
-        .valid := false.B
+      exec3Reg.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
     }
 
   // =============================
   // Writeback stage
   // =============================
-
-  
 val wbReg = RegInit(0.U.asTypeOf(new WritebackPipelineRegs(threadBits)))
-
 when (exec3Reg.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid) {
   wbReg.exec3Signals := exec3Reg
 } .otherwise {
-  wbReg.exec3Signals
-    .exec2Signals
-    .exec1Signals
-    .regReadSignals
-    .dispatchSignals
-    .decodePipelineSignals
-    .fetchSignals
-    .valid := false.B
+  wbReg.exec3Signals.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
 }
-// -----------------------------
-// Writeback signal extraction
-// -----------------------------
-val wbFetch =
-  wbReg.exec3Signals.exec2Signals.exec1Signals
-    .regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals
 
-val wbDecode =
-  wbReg.exec3Signals.exec2Signals.exec1Signals
-    .regReadSignals.dispatchSignals.decodePipelineSignals.decodeSignals
+val wbFetch = wbReg.exec3Signals.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals
+val wbDecode = wbReg.exec3Signals.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.decodeSignals
+val wbExec = wbReg.exec3Signals.exec2Signals.exec1Signals
 
-val wbExec =
-  wbReg.exec3Signals.exec2Signals.exec1Signals
+val wbIsMExt = wbFetch.instr(6, 0) === RV32IDecode.OP_R && wbFetch.instr(31, 25) === "b0000001".U(7.W)
+val wbFunct3 = wbFetch.instr(14, 12)
+val wbIsMulInstr = wbIsMExt && (wbFunct3 <= "b011".U)
 
-val isMExt_WB = wbFetch.instr(6, 0) === RV32IDecode.OP_R && wbFetch.instr(31, 25) === "b0000001".U(7.W)
-val isMulInstr_WB = isMExt_WB && (wbFetch.instr(14, 12) <= "b011".U)
-val mulFunct3_WB = wbFetch.instr(14, 12)
-
-val mulResult_WB = MuxLookup(mulFunct3_WB, mulUnit.io.lo)(Seq(
-  "b000".U -> mulUnit.io.lo, // MUL
-  "b001".U -> mulUnit.io.hi, // MULH
-  "b010".U -> mulUnit.io.hi, // MULHSU
-  "b011".U -> mulUnit.io.hi  // MULHU
+val mulResult_WB = MuxLookup(wbFunct3, mulUnit.io.lo)(Seq(
+  "b000".U -> mulUnit.io.lo,
+  "b001".U -> mulUnit.io.hi,
+  "b010".U -> mulUnit.io.hi,
+  "b011".U -> mulUnit.io.hi
 ))
 
-  // -----------------------------
-// Architectural register writeback
-// -----------------------------
-when (wbFetch.valid &&
-      wbExec.doRegFileWrite &&
-      wbDecode.rd =/= 0.U) {
+val finalWBResult = Mux(wbIsMulInstr, mulResult_WB, wbExec.result)
 
-  val writeData = Mux(isMulInstr_WB, mulResult_WB, wbExec.result)
-
-  regFile.io.wen(0) := true.B
-  regFile.io.writeThreadID(0) := wbFetch.threadId
-  regFile.io.dst(0) := wbDecode.rd
-  regFile.io.dstData(0) := writeData
+when (wbFetch.valid && wbExec.doRegFileWrite && wbDecode.rd =/= 0.U) {
+  regFile.io.wens(0) := true.B
+  regFile.io.writeThreadID := wbFetch.threadId
+  regFile.io.writeAddrs(0) := wbDecode.rd
+  regFile.io.writeData(0) := finalWBResult
 }
-// -----------------------------
+
 // Control-flow commit
-// -----------------------------
-val ex1Fetch =
-  exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals
+val ex1Fetch = exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals
 val ex1Redirect = ex1Fetch.valid && exec1Reg.ctrlTaken
 
 // Resolve control flow in EX1 and squash younger work so taken redirects do not replay.
@@ -574,34 +457,23 @@ when (ex1Redirect) {
   pcRegs(ex1Fetch.threadId) := exec1Reg.ctrlTarget
 }
 
-when (wbFetch.valid &&
-      wbExec.doRegFileWrite &&
-      wbDecode.rd =/= 0.U) {
-
-  val writeData = Mux(isMulInstr_WB, mulResult_WB, wbExec.result)
-
-  when (wbDecode.rd === 1.U) { debugRegs1to4(wbFetch.threadId)(0) := writeData }
-    .elsewhen (wbDecode.rd === 2.U) { debugRegs1to4(wbFetch.threadId)(1) := writeData }
-    .elsewhen (wbDecode.rd === 3.U) { debugRegs1to4(wbFetch.threadId)(2) := writeData }
-    .elsewhen (wbDecode.rd === 4.U) { debugRegs1to4(wbFetch.threadId)(3) := writeData }
+when (wbFetch.valid && wbExec.doRegFileWrite && wbDecode.rd =/= 0.U) {
+  when (wbDecode.rd === 1.U) { debugRegs1to4(wbFetch.threadId)(0) := finalWBResult }
+    .elsewhen (wbDecode.rd === 2.U) { debugRegs1to4(wbFetch.threadId)(1) := finalWBResult }
+    .elsewhen (wbDecode.rd === 3.U) { debugRegs1to4(wbFetch.threadId)(2) := finalWBResult }
+    .elsewhen (wbDecode.rd === 4.U) { debugRegs1to4(wbFetch.threadId)(3) := finalWBResult }
 }
 
-// Keep writeback side-effect free for x0; avoid FIRRTL verification ops in generated RTL path.
+// Keep writeback side-effect free for x0
 when (wbFetch.valid && wbExec.doRegFileWrite && wbDecode.rd === 0.U) {
-  regFile.io.wen(0) := false.B
+  regFile.io.wens(0) := false.B
 }
 
-// -----------------
-// Debug control (single-lane)
-// -----------------
-
-val dbgFetch =
-  wbReg.exec3Signals.exec2Signals.exec1Signals
-    .regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals
-
-val dbgDecode =
-  wbReg.exec3Signals.exec2Signals.exec1Signals
-    .regReadSignals.dispatchSignals.decodePipelineSignals.decodeSignals
+// =====================================================
+// Debug control
+// =====================================================
+val dbgFetch = wbReg.exec3Signals.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals
+val dbgDecode = wbReg.exec3Signals.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.decodeSignals
 
 io.debugStageThreads(0) := fetchReg.threadId
 io.debugStageValids(0) := (fetchReg.valid).asUInt
@@ -631,18 +503,14 @@ io.debugCtrlIsJal := dbgDecode.isJAL
 io.debugCtrlIsJalr := dbgDecode.isJALR
 
 // =====================================================
-// DEBUG VISIBILITY (MUST MIRROR ARCH STATE)
+// DEBUG VISIBILITY
 // =====================================================
 for (t <- 0 until numThreads) {
-  // x0 is always 0
   io.debugRegs01234(t)(0) := 0.U
-
-  // x1–x4 from shadow regs
   io.debugRegs01234(t)(1) := debugRegs1to4(t)(0)
   io.debugRegs01234(t)(2) := debugRegs1to4(t)(1)
   io.debugRegs01234(t)(3) := debugRegs1to4(t)(2)
   io.debugRegs01234(t)(4) := debugRegs1to4(t)(3)
-
   io.debugRegX1(t) := debugRegs1to4(t)(0)
   io.debugPC(t)    := pcRegs(t)
 }

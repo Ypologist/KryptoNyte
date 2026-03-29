@@ -166,16 +166,18 @@ if [[ ! -x "$SIM_BUILD_SCRIPT" ]]; then
   exit 1
 fi
 
-# Ensure timed hierarchical RTL exists; generate via sbt if missing
+# Always clean stale RTL and simulation caches to ensure fresh builds
+echo "Cleaning stale simulation caches and forcing RTL generation via sbt $RTL_GEN_TASK ..."
+rm -f "$RTL_TOP"
+rm -rf "$SCRIPT_DIR/sim/build/${DUT_NAME}_obj"
+
+pushd "$REPO_ROOT/rtl" >/dev/null
+sbt "$RTL_GEN_TASK"
+popd >/dev/null
+
 if [[ ! -f "$RTL_TOP" ]]; then
-  echo "Timed RTL not found at $RTL_TOP. Attempting to generate via sbt $RTL_GEN_TASK ..."
-  pushd "$REPO_ROOT/rtl" >/dev/null
-  sbt "$RTL_GEN_TASK"
-  popd >/dev/null
-  if [[ ! -f "$RTL_TOP" ]]; then
-    echo "Failed to generate RTL for $PROCESSOR at $RTL_TOP" >&2
-    exit 1
-  fi
+  echo "Failed to generate RTL for $PROCESSOR at $RTL_TOP" >&2
+  exit 1
 fi
 
 # Dynamic suite builder based on feature set

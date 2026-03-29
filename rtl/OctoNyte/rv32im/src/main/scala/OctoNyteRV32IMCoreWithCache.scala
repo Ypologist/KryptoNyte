@@ -9,7 +9,7 @@ import Pipeline.ThreadScheduler
 import BranchUnit.BranchUnit
 import LoadUnit.LoadUnit
 import StoreUnit.StoreUnit
-import RegFiles.RegFileMTMultiWVec
+import RegFiles.RegFileMT2R1WMem
 
 
 // *********************************************************
@@ -75,8 +75,6 @@ class OctoNyteRV32IMCoreWithCache(val cosimulate: Boolean = false) extends Modul
   // Keep this aligned with OctoNyte tests, which drive a 4-wide (128b) instruction packet.
   // The core currently only consumes slot 0 (`instrMem(31,0)`), so the extra slots are ignored.
   val fetchWidth = 4
-  val regFileReadPorts = 2 * fetchWidth
-  val regFileWritePorts = fetchWidth
   val io = IO(new OctoNyteRV32IMCoreWithCacheIO(numThreads, fetchWidth, cosimulate))
   io.jtag_tdo := 0.U
   
@@ -179,23 +177,19 @@ class OctoNyteRV32IMCoreWithCache(val cosimulate: Boolean = false) extends Modul
 
 
   // ***********************************************************************************
-  // Multithreaded register file: 1 write port, 2 read groups (only port0 used for now)
+  // Multithreaded register file: 1 write port, 2 read ports
   // ***********************************************************************************
-  val regFile = Module(new RegFileMTMultiWVec(numThreads = numThreads, numWritePorts = regFileWritePorts, numReadPorts = regFileReadPorts))
-  regFile.io.readThreadID := VecInit(Seq.fill(regFileReadPorts)(0.U(threadBits.W)))
-  regFile.io.src1 := VecInit(Seq.fill(regFileReadPorts)(0.U(5.W)))
-  regFile.io.src2 := VecInit(Seq.fill(regFileReadPorts)(0.U(5.W)))
-  regFile.io.writeThreadID := VecInit(Seq.fill(regFileWritePorts)(0.U(threadBits.W)))
-  regFile.io.dst := VecInit(Seq.fill(regFileWritePorts)(0.U(5.W)))
-  regFile.io.wen := VecInit(Seq.fill(regFileWritePorts)(false.B))
-  regFile.io.dstData := VecInit(Seq.fill(regFileWritePorts)(0.U(32.W)))
+  val regFile = Module(new RegFileMT2R1WMem(numThreads = numThreads))
+  regFile.io.readThreadID := 0.U(threadBits.W)
+  regFile.io.readAddrs := VecInit(Seq.fill(2)(0.U(5.W)))
+  regFile.io.writeThreadID := 0.U(threadBits.W)
+  regFile.io.writeAddrs := VecInit(Seq.fill(1)(0.U(5.W)))
+  regFile.io.wens := VecInit(Seq.fill(1)(false.B))
+  regFile.io.writeData := VecInit(Seq.fill(1)(0.U(32.W)))
 
   val unusedRegDebugX1 = Wire(Vec(numThreads, UInt(32.W)))
-  val unusedRegDebugRegs = Wire(Vec(numThreads, Vec(5, UInt(32.W))))
   unusedRegDebugX1 := regFile.io.debugX1
-  unusedRegDebugRegs := regFile.io.debugRegs01234
   dontTouch(unusedRegDebugX1)
-  dontTouch(unusedRegDebugRegs)
 
   // ***************************************************************************
   // Execution Units
@@ -296,12 +290,12 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   // Register file read
   val tid = dispatchReg.decodePipelineSignals.fetchSignals.threadId
 
-  regFile.io.readThreadID(0) := tid
-  regFile.io.src1(0) := dispatchReg.decodePipelineSignals.decodeSignals.rs1
-  regFile.io.src2(0) := dispatchReg.decodePipelineSignals.decodeSignals.rs2
+  regFile.io.readThreadID := tid
+  regFile.io.readAddrs(0) := dispatchReg.decodePipelineSignals.decodeSignals.rs1
+  regFile.io.readAddrs(1) := dispatchReg.decodePipelineSignals.decodeSignals.rs2
 
-  regReadReg.rs1Data := regFile.io.src1data(0)
-  regReadReg.rs2Data := regFile.io.src2data(0)
+  regReadReg.rs1Data := regFile.io.readData(0)
+  regReadReg.rs2Data := regFile.io.readData(1)
 } .otherwise {
   regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
 }
@@ -502,10 +496,10 @@ when (wbFetch.valid &&
       wbExec.doRegFileWrite &&
       wbDecode.rd =/= 0.U) {
 
-  regFile.io.wen(0) := true.B
-  regFile.io.writeThreadID(0) := wbFetch.threadId
-  regFile.io.dst(0) := wbDecode.rd
-  regFile.io.dstData(0) := wbExec.result
+  regFile.io.wens(0) := true.B
+  regFile.io.writeThreadID := wbFetch.threadId
+  regFile.io.writeAddrs(0) := wbDecode.rd
+  regFile.io.writeData(0) := wbExec.result
 }
 // -----------------------------
 // Control-flow commit
