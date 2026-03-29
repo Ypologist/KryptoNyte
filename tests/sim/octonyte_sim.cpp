@@ -17,7 +17,7 @@ struct Options {
   std::string log;
   uint64_t max_cycles = 1'000'000;
   bool trace_stage = false;
-  uint32_t thread_mask = 0x1;  // enable only thread 0 by default
+  uint32_t thread_mask = 0xFF;  // enable all 8 threads by default
 };
 
 Options parseArgs(int argc, char** argv) {

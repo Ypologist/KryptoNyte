@@ -14,7 +14,7 @@ mkdir -p "$BUILD_DIR"
 rm -rf "$OBJ_DIR"
 mkdir -p "$OBJ_DIR"
 
-VERILOG_TOP="rtl/generators/generated/verilog_hierarchical_timed/OctoNyteRV32IZmmulCore.v"
+VERILOG_TOP="rtl/generators/generated_sim/verilog_hierarchical_timed/OctoNyteRV32IZmmulCore.v"
 RTL_SRC_DIRS=("rtl/OctoNyte/rv32i_Zmmul/src" "rtl/library/src")
 
 regen_rtl=0
@@ -41,7 +41,8 @@ verilator -cc "$VERILOG_TOP" \
   --Mdir "$OBJ_DIR" \
   --timescale-override 1ns/1ns \
   --trace \
-  --Wno-UNOPTFLAT \
+  -Wno-UNOPTFLAT \
+  -Wno-PINMISSING \
   --build \
   -CFLAGS "-O2 -std=c++17" \
   -LDFLAGS "-O2" \

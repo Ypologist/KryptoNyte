@@ -16,8 +16,8 @@ struct Options {
   std::string signature;
   std::string log;
   uint64_t max_cycles = 1'000'000;
-  bool trace_pc = false;
-  uint32_t thread_mask = 0xF;  // bit per thread; default all 4 threads enabled
+  bool trace_stage = false;
+  uint32_t thread_mask = 0xFF;  // enable all 8 threads by default
 };
 
 Options parseArgs(int argc, char** argv) {
@@ -34,8 +34,8 @@ Options parseArgs(int argc, char** argv) {
       opts.max_cycles = std::stoull(argv[++i]);
     } else if (arg == "--thread-mask" && i + 1 < argc) {
       opts.thread_mask = static_cast<uint32_t>(std::stoul(argv[++i], nullptr, 0));
-    } else if (arg == "--trace-pc") {
-      opts.trace_pc = true;
+    } else if (arg == "--trace-stage") {
+      opts.trace_stage = true;
     } else {
       throw std::invalid_argument("unknown or incomplete argument: " + arg);
     }
@@ -92,55 +92,67 @@ int main(int argc, char** argv) {
   std::array<uint32_t, kNumThreads> thread_pcs{};
   thread_pcs.fill(kMemBase);
 
-  // Apply thread mask to the DUT (bit i enables thread i)
+  auto captureThreadPcs = [&]() {
+    thread_pcs[0] = dut.io_debugPC_0;
+    thread_pcs[1] = dut.io_debugPC_1;
+    thread_pcs[2] = dut.io_debugPC_2;
+    thread_pcs[3] = dut.io_debugPC_3;
+    thread_pcs[4] = dut.io_debugPC_4;
+    thread_pcs[5] = dut.io_debugPC_5;
+    thread_pcs[6] = dut.io_debugPC_6;
+    thread_pcs[7] = dut.io_debugPC_7;
+  };
+
   auto driveThreadMask = [&]() {
     dut.io_threadEnable_0 = (options.thread_mask >> 0) & 0x1;
     dut.io_threadEnable_1 = (options.thread_mask >> 1) & 0x1;
     dut.io_threadEnable_2 = (options.thread_mask >> 2) & 0x1;
     dut.io_threadEnable_3 = (options.thread_mask >> 3) & 0x1;
+    dut.io_threadEnable_4 = (options.thread_mask >> 4) & 0x1;
+    dut.io_threadEnable_5 = (options.thread_mask >> 5) & 0x1;
+    dut.io_threadEnable_6 = (options.thread_mask >> 6) & 0x1;
+    dut.io_threadEnable_7 = (options.thread_mask >> 7) & 0x1;
   };
 
-  auto captureThreadPcs = [&]() {
-    thread_pcs[0] = dut.io_if_pc_0;
-    thread_pcs[1] = dut.io_if_pc_1;
-    thread_pcs[2] = dut.io_if_pc_2;
-    thread_pcs[3] = dut.io_if_pc_3;
-  };
-
-  auto driveMemory = [&]() {
+  uint32_t predictedFetchThread = 0;
+  uint32_t stageFetchThread = 0;
+  bool stageFetchValid = false;
+  uint32_t scheduledFetchThread = 0;
+  bool scheduledFetchEnabled = false;
+  uint32_t scheduledFetchAddr = kMemBase;
+  uint32_t scheduledInstr = 0x00000013;
+  auto driveInterfaces = [&]() {
     driveThreadMask();
-    // Barrel fetch: feed each thread from its own PC if enabled; otherwise feed NOP.
-    uint32_t ft = dut.io_fetchThread & 0x3;
-    if ((options.thread_mask >> ft) & 0x1) {
-      dut.io_instrMem = memory.read32(thread_pcs[ft]);
-    } else {
-      dut.io_instrMem = 0x00000013;  // NOP
-    }
+    stageFetchThread = dut.io_debugStageThreads_0 & 0x7;
+    stageFetchValid = dut.io_debugStageValids_0;
+
+    scheduledFetchThread = predictedFetchThread & 0x7;
+    scheduledFetchEnabled = ((options.thread_mask >> scheduledFetchThread) & 0x1) != 0;
+    scheduledFetchAddr = thread_pcs[scheduledFetchThread];
+    scheduledInstr = scheduledFetchEnabled ? memory.read32(scheduledFetchAddr) : 0x00000013;
+
+    dut.io_instrMem[0U] = scheduledInstr;
+    dut.io_instrMem[1U] = 0;
+    dut.io_instrMem[2U] = 0;
+    dut.io_instrMem[3U] = 0;
+
     dut.io_dataMemResp = memory.read32(dut.io_memAddr);
   };
 
   // Reset
   dut.reset = 1;
-  captureThreadPcs();
   for (int cycle = 0; cycle < kResetCycles; ++cycle) {
     dut.clock = 0;
-    driveMemory();
+    driveInterfaces();
     dut.eval();
     captureThreadPcs();
-    if (log.is_open() && dut.io_ctrlTaken) {
-      log << std::hex << "ctrl: taken=1 "
-          << "thread=" << static_cast<unsigned>(dut.io_ctrlThread)
-          << " from=0x" << dut.io_ctrlFromPC
-          << " target=0x" << dut.io_ctrlTarget
-          << " branch=" << static_cast<unsigned>(dut.io_ctrlIsBranch)
-          << " jal=" << static_cast<unsigned>(dut.io_ctrlIsJal)
-          << " jalr=" << static_cast<unsigned>(dut.io_ctrlIsJalr)
-          << std::dec << '\n';
-    }
+
     dut.clock = 1;
-    driveMemory();
+    driveInterfaces();
     dut.eval();
     captureThreadPcs();
+
+    predictedFetchThread = 0;
   }
   dut.reset = 0;
 
@@ -149,37 +161,16 @@ int main(int argc, char** argv) {
 
   for (uint64_t cycle = 0; cycle < options.max_cycles; ++cycle) {
     dut.clock = 0;
-    driveMemory();
+    driveInterfaces();
     dut.eval();
     captureThreadPcs();
 
     dut.clock = 1;
-    driveMemory();
+    driveInterfaces();
     dut.eval();
     captureThreadPcs();
-    if (log.is_open()) {
-      log << std::hex << "pcs post-eval: "
-          << "pc0=0x" << dut.io_if_pc_0 << " "
-          << "pc1=0x" << dut.io_if_pc_1 << " "
-          << "pc2=0x" << dut.io_if_pc_2 << " "
-          << "pc3=0x" << dut.io_if_pc_3
-          << " en=[" << static_cast<unsigned>(dut.io_threadEnable_0)
-          << static_cast<unsigned>(dut.io_threadEnable_1)
-          << static_cast<unsigned>(dut.io_threadEnable_2)
-          << static_cast<unsigned>(dut.io_threadEnable_3) << "]"
-          << std::dec << '\n';
 
-      if (dut.io_ctrlTaken) {
-        log << std::hex << "ctrl: taken=1 "
-            << "thread=" << static_cast<unsigned>(dut.io_ctrlThread)
-            << " from=0x" << dut.io_ctrlFromPC
-            << " target=0x" << dut.io_ctrlTarget
-            << " branch=" << static_cast<unsigned>(dut.io_ctrlIsBranch)
-            << " jal=" << static_cast<unsigned>(dut.io_ctrlIsJal)
-            << " jalr=" << static_cast<unsigned>(dut.io_ctrlIsJalr)
-            << std::dec << '\n';
-      }
-    }
+    predictedFetchThread = (predictedFetchThread + 1) % kNumThreads;
 
     const uint32_t addr = dut.io_memAddr;
     const uint32_t data = dut.io_memWrite;
@@ -195,21 +186,52 @@ int main(int argc, char** argv) {
     if (log.is_open()) {
       log << std::hex
           << "cycle=0x" << cycle
-          << " memAddr=0x" << addr
-          << " mask=0x" << mask
-          << " tohost=0x" << symbols.tohost;
-      if (options.trace_pc) {
-      log << " pc0=0x" << thread_pcs[0]
+          << " schedThread=0x" << scheduledFetchThread
+          << " schedEn=" << static_cast<unsigned>(scheduledFetchEnabled)
+          << " schedAddr=0x" << scheduledFetchAddr
+          << " schedInstr=0x" << scheduledInstr
+          << " stageThread=0x" << stageFetchThread
+          << " stageValid=" << stageFetchValid
+          << " pc0=0x" << thread_pcs[0]
           << " pc1=0x" << thread_pcs[1]
           << " pc2=0x" << thread_pcs[2]
           << " pc3=0x" << thread_pcs[3]
-          << " instr0=0x" << dut.io_if_instr_0
-          << " instr1=0x" << dut.io_if_instr_1
-          << " instr2=0x" << dut.io_if_instr_2
-          << " instr3=0x" << dut.io_if_instr_3
-          << " ft=" << static_cast<unsigned>(dut.io_fetchThread);
+          << " pc4=0x" << thread_pcs[4]
+          << " pc5=0x" << thread_pcs[5]
+          << " pc6=0x" << thread_pcs[6]
+          << " pc7=0x" << thread_pcs[7]
+          << " memAddr=0x" << addr
+          << " memMask=0x" << mask
+          << std::dec << '\n';
+
+      if (dut.io_debugExecValid &&
+          (dut.io_debugExecIsBranch || dut.io_debugExecIsJal || dut.io_debugExecIsJalr)) {
+        log << std::hex << "exec1: thread=0x" << static_cast<unsigned>(dut.io_debugExecThread)
+            << " pc=0x" << dut.io_debugExecPC
+            << " instr=0x" << dut.io_debugExecInstr
+            << " rs1=0x" << dut.io_debugExecRs1
+            << " rs2=0x" << dut.io_debugExecRs2
+            << " op=0x" << static_cast<unsigned>(dut.io_debugExecBranchOp)
+            << " taken=" << static_cast<unsigned>(dut.io_debugExecCtrlTaken)
+            << " target=0x" << dut.io_debugExecCtrlTarget
+            << " branch=" << static_cast<unsigned>(dut.io_debugExecIsBranch)
+            << " jal=" << static_cast<unsigned>(dut.io_debugExecIsJal)
+            << " jalr=" << static_cast<unsigned>(dut.io_debugExecIsJalr)
+            << std::dec << '\n';
       }
-      log << std::dec << '\n';
+
+      if (dut.io_debugCtrlValid &&
+          (dut.io_debugCtrlIsBranch || dut.io_debugCtrlIsJal || dut.io_debugCtrlIsJalr)) {
+        log << std::hex << "wb: thread=0x" << static_cast<unsigned>(dut.io_debugCtrlThread)
+            << " from=0x" << dut.io_debugCtrlFromPC
+            << " instr=0x" << dut.io_debugCtrlInstr
+            << " taken=" << static_cast<unsigned>(dut.io_debugCtrlTaken)
+            << " target=0x" << dut.io_debugCtrlTarget
+            << " branch=" << static_cast<unsigned>(dut.io_debugCtrlIsBranch)
+            << " jal=" << static_cast<unsigned>(dut.io_debugCtrlIsJal)
+            << " jalr=" << static_cast<unsigned>(dut.io_debugCtrlIsJalr)
+            << std::dec << '\n';
+      }
     }
 
     if (completed) {

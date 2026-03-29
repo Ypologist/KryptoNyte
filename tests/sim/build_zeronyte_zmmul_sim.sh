@@ -14,7 +14,7 @@ mkdir -p "$BUILD_DIR"
 rm -rf "$OBJ_DIR"
 mkdir -p "$OBJ_DIR"
 
-VERILOG_TOP="rtl/generators/generated/verilog_hierarchical_timed/ZeroNyteRV32IZmmulCore.v"
+VERILOG_TOP="rtl/generators/generated_sim/verilog_hierarchical_timed/ZeroNyteRV32IZmmulCore.v"
 if [[ ! -f "$VERILOG_TOP" ]]; then
   echo "Expected RTL at $VERILOG_TOP. Regenerate with 'sbt genZeroNyteZmmul' from rtl/." >&2
   exit 1

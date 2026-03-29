@@ -14,7 +14,7 @@ mkdir -p "$BUILD_DIR"
 rm -rf "$OBJ_DIR"
 mkdir -p "$OBJ_DIR"
 
-VERILOG_TOP="rtl/generators/generated/verilog_hierarchical_timed/TetraNyteRV32IZmmulCore.v"
+VERILOG_TOP="rtl/generators/generated_sim/verilog_hierarchical_timed/TetraNyteRV32IZmmulCore.v"
 RTL_SRC_DIRS=("rtl/TetraNyte/rv32i_Zmmul/src" "rtl/library/src")
 
 regen_rtl=0

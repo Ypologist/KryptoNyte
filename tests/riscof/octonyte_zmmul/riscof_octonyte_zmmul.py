@@ -8,17 +8,17 @@ from riscof.pluginTemplate import pluginTemplate
 logger = logging.getLogger()
 
 
-class tetranyte_zmmul(pluginTemplate):
-    __model__ = "tetranyte_zmmul-rv32i"
+class octonyte_zmmul(pluginTemplate):
+    __model__ = "octonyte_zmmul-rv32i"
     __version__ = "0.1"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         config: Dict = kwargs.get("config")
         if config is None:
-            raise SystemExit("tetranyte_zmmul plugin requires configuration")
+            raise SystemExit("octonyte_zmmul plugin requires configuration")
 
-        sim_name = config.get("sim", "tetranyte_zmmul_sim")
+        sim_name = config.get("sim", "octonyte_zmmul_sim")
         sim_dir = config.get("PATH", "")
         self.dut_exe = os.path.join(sim_dir, sim_name)
         if not os.path.isabs(self.dut_exe):
@@ -91,7 +91,7 @@ class tetranyte_zmmul(pluginTemplate):
 
             if self.target_run:
                 # Barrel threading stretches execution; allow configurable cycle budget.
-                max_cycles_env = os.environ.get("TETRANYTE_MAX_CYCLES")
+                max_cycles_env = os.environ.get("OCTONYTE_MAX_CYCLES")
                 try:
                     max_cycles = int(max_cycles_env) if max_cycles_env else 2_000_000
                 except ValueError:

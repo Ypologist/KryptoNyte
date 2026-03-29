@@ -4,6 +4,8 @@
 
 # Chisel generated Verilog (build artifacts, not source)
 **/generated/
+**/generated_sim/
+**/generated_prod/
 **/target/
 **/project/target/
 **/project/project/
