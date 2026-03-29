@@ -95,6 +95,9 @@ class ZeroNyteRV32ICore(val cosimulate: Boolean = false) extends Module {
   storeUnit.io.addr := effAddr
   storeUnit.io.data := r2Reg
   storeUnit.io.storeType := storeFunct3(1, 0)
+  
+  val unusedStoreMisaligned = WireDefault(storeUnit.io.misaligned)
+  dontTouch(unusedStoreMisaligned)
 
   // Legacy outputs still exposed for compatibility.
   memPort.io.legacy.valid := dec.isLoad || dec.isStore

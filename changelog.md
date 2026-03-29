@@ -1,3 +1,12 @@
+# 03/29/2026 15:03 - ZeroNyte Dead Code Elimination Pin Preservation
+
+**Why these changes were made:**
+* **`PINMISSING` Verilator Exceptions in ZeroNyte:** Following the earlier architectural upgrade mapping `io.misaligned` to `StoreUnit`, the foundational `ZeroNyte` core hierarchy inherently triggered Verilator's strict type-linting assertion (`Instance has missing pin: 'io_misaligned'`). Because the `ZeroNyte` implementation did not structurally read or depend on the memory alignment logic, Chisel's standard FIRRTL processing optimized the unmapped output wire down to zero (Dead Code Elimination). Consequently, the generated Verilog instantiation syntactically excluded the port mapping entirely, crashing local C++ simulation builds.
+
+**What the changes are:**
+* **Mock Assignment Bindings (`ZeroNyte*_Core.scala`):** Appended an explicit, unused `WireDefault` anchor (`unusedStoreMisaligned`) directly targeting the `storeUnit.io.misaligned` interface across the `rv32i`, `rv32i_Zmmul`, and `rv32im` core variants.
+* **`dontTouch()` Strict Port Mapping:** Explicitly guarded the mock wire payload with the `dontTouch()` pragma ensuring FIRRTL physically preserves the logical instantiation hookup into generated `.v` files transparently fulfilling Verilator's mandatory port schema mapping validations without compounding structural overhead or synthesizing unused logic safely.
+
 # 03/29/2026 14:47 - OctoNyte Zmmul Pipelined Multiplier Alignment
 
 **Why these changes were made:**
