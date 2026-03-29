@@ -1,3 +1,12 @@
+# 03/29/2026 05:22 - ZeroNyte Physical Design Config Sub-Profiles
+
+**Why these changes were made:**
+* **Routing Distances & Drive Strength Scaling Constraints:** Following structural synthesis, pulling floorplan utilization density significantly down (`FP_CORE_UTIL=45`) exposed long topological routing paths across a `430µm` grid, leading directly to systemic Max Slew and Max Cap `Sky130` violations against Yosys's default logic minimization templates (`"AREA 0"`).
+
+**What the changes are:**
+* **Config Bifurcation (`physical_design/config.ZeroNyteRV32ICore-high-density.json`):** Retained sparse `45%` core limits but explicitly broadened `CLOCK_PERIOD` linearly to `15.0ns` (~66MHz); eliminating timing pressure violations.
+* **Config Bifurcation (`physical_design/config.ZeroNyteRV32ICore-high-performance.json`):** Maintained `10.0ns` target frequency, bumped routing synthesis constraints (`DELAY 1`) guaranteeing explicit selection of high-drain internal standard buffers spanning complex traces functionally, and dynamically tightened die constraints structurally (`FP_CORE_UTIL=55`, `PL_TARGET_DENSITY_PCT=65`) pulling node clusters close enough effectively lowering logical `RC` parasitics globally natively avoiding timing slacks!
+
 # 03/28/2026 19:04 - OctoNyte Pipelined Multiplier Hardware
 
 **Why these changes were made:**
