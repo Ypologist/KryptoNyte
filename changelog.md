@@ -1,3 +1,20 @@
+# 03/28/2026 19:04 - OctoNyte Pipelined Multiplier Hardware
+
+**Why these changes were made:**
+* **OctoNyte Superscalar Architecture:** In preparation for expanding `OctoNyte` into a 4-issue 8-stage superscalar barrel processor natively, its execution pipeline topologically stretches across 3 discrete physical stages (`EX1 -> EX2 -> EX3`). 
+* **Retiming Tradeoffs:** A 3-cycle Pipelined Multiplier design efficiently allows the combinational multiplication matrix to topologically align with the `EX` stages seamlessly. By explicitly retiming logic exactly across 3 cycles, the product organically converges at the Writeback (`WB`) boundaries mathematically while gracefully allowing modern ASIC synthesizers (OpenLane/Yosys) to distribute netlist gating without introducing stall logic.
+
+**What the changes are:**
+* **`library/src/main/scala/ALUs/Mul32Pipelined.scala`:** Engineered a highly parameterizable combinational standard multiplier wrapped inherently within a Chisel `ShiftRegister` retiming barrier (`val numCycles: Int = 3`). Automatically tracks signed/unsigned boundaries seamlessly allowing upstream RTL generators to parameterize standard arithmetic latency on the fly.
+
+**Why these changes were made:**
+* **ZeroNyte Physical Design Floorplan Capacity:** The OpenLane 2 toolchain blocked structural synthesis of the `ZeroNyte` core with `[GPL-0302] Use a higher -density or re-floorplan with a larger core area` natively during the OpenROAD Global Placement stage. The netlist complexity organically breached the previously allocated combinatorial logic boundaries (`65%` target density across a `70%` core area).
+* **SBT Top-Level Task Hooking:** To cleanly compile the newly implemented multithreaded processor variants directly via terminal sequences natively, `build.sbt` globally required command alias assignments binding up to the task executor tree (e.g. `sbt genTetraNyteIM`).
+
+**What the changes are:**
+* **OpenLane Placement Tuning:** Re-authored `physical_design/config.ZeroNyteRV32ICore.json` to significantly open structural placement buffers. Lowered `FP_CORE_UTIL` to `60` (establishing a physically wider standard cell die grid layout base) while explicitly increasing `PL_TARGET_DENSITY_PCT` to `75` (giving internal combinational logic gates adequate local cell density tolerance over extended route topologies).
+* **SBT Command Registry:** Hooked `lazy val generateTetraNyteIMRTL` and `generateTetraNyteZmmulRTL` master Tasks into the top tier structure of point-to-point generators inside `build.sbt` natively and securely evaluated aliases `genTetraNyteIM` and `genTetraNyteZmmul` sequentially through `genAllRtl` master generation trees!
+
 # 03/28/2026 15:21 - TetraNyte Multi-Cycle Divider Pipeline Stall Resolution
 
 **Why these changes were made:**

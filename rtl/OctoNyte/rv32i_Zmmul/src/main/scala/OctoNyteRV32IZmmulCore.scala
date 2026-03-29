@@ -217,6 +217,13 @@ class OctoNyteRV32IZmmulCore extends Module {
   alu.io.b := 0.U
   alu.io.opcode := ALU32.Opcode.ADD
 
+  // Pipelined Multiplier (EX1 -> EX2 -> EX3) 3-cycle exact latency alignment
+  val mulUnit = Module(new ALUs.Mul32Pipelined(3))
+  mulUnit.io.a := 0.U
+  mulUnit.io.b := 0.U
+  mulUnit.io.signedA := false.B
+  mulUnit.io.signedB := false.B
+
   // Branch Unit
   val branchUnit = Module(new BranchUnit)
   branchUnit.io.rs1 := 0.U    // TODO: This is really rs1data not rs1
@@ -330,6 +337,18 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   exec1Reg.ctrlTarget := 0.U
 
   // -----------------
+  // Pipelined Multiplier Feed (Combines identically alongside ALU)
+  // -----------------
+  val isMExt = fetchSignals.instr(6, 0) === RV32IDecode.OP_R && fetchSignals.instr(31, 25) === "b0000001".U
+  val funct3 = fetchSignals.instr(14, 12)
+  val isMulInstr = isMExt && (funct3 <= "b011".U)
+
+  mulUnit.io.a := regReadReg.rs1Data
+  mulUnit.io.b := regReadReg.rs2Data
+  mulUnit.io.signedA := (funct3 =/= "b011".U) // MULHU sets false
+  mulUnit.io.signedB := (funct3 =/= "b011".U) && (funct3 =/= "b010".U) // MULHU/MULHSU sets false
+
+  // -----------------
   // ALU / LUI / AUIPC
   // -----------------
   when (decodeSignals.isALU ||
@@ -362,6 +381,12 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
         alu.io.result))
 
     exec1Reg.result := result
+    exec1Reg.doRegFileWrite := true.B
+  }
+
+  // ---- MUX (Zmmul / M-Extension) ----
+  .elsewhen (isMulInstr) {
+    exec1Reg.result := 0.U // Ignored at WB when replaced by mulUnit out
     exec1Reg.doRegFileWrite := true.B
   }
 
@@ -504,6 +529,17 @@ val wbDecode =
 val wbExec =
   wbReg.exec3Signals.exec2Signals.exec1Signals
 
+val isMExt_WB = wbFetch.instr(6, 0) === RV32IDecode.OP_R && wbFetch.instr(31, 25) === "b0000001".U
+val isMulInstr_WB = isMExt_WB && (wbFetch.instr(14, 12) <= "b011".U)
+val mulFunct3_WB = wbFetch.instr(14, 12)
+
+val mulResult_WB = MuxLookup(mulFunct3_WB, mulUnit.io.lo)(Seq(
+  "b000".U -> mulUnit.io.lo, // MUL
+  "b001".U -> mulUnit.io.hi, // MULH
+  "b010".U -> mulUnit.io.hi, // MULHSU
+  "b011".U -> mulUnit.io.hi  // MULHU
+))
+
   // -----------------------------
 // Architectural register writeback
 // -----------------------------
@@ -511,10 +547,12 @@ when (wbFetch.valid &&
       wbExec.doRegFileWrite &&
       wbDecode.rd =/= 0.U) {
 
+  val writeData = Mux(isMulInstr_WB, mulResult_WB, wbExec.result)
+
   regFile.io.wen(0) := true.B
   regFile.io.writeThreadID(0) := wbFetch.threadId
   regFile.io.dst(0) := wbDecode.rd
-  regFile.io.dstData(0) := wbExec.result
+  regFile.io.dstData(0) := writeData
 }
 // -----------------------------
 // Control-flow commit
@@ -537,10 +575,12 @@ when (wbFetch.valid &&
       wbExec.doRegFileWrite &&
       wbDecode.rd =/= 0.U) {
 
-  when (wbDecode.rd === 1.U) { debugRegs1to4(wbFetch.threadId)(0) := wbExec.result }
-    .elsewhen (wbDecode.rd === 2.U) { debugRegs1to4(wbFetch.threadId)(1) := wbExec.result }
-    .elsewhen (wbDecode.rd === 3.U) { debugRegs1to4(wbFetch.threadId)(2) := wbExec.result }
-    .elsewhen (wbDecode.rd === 4.U) { debugRegs1to4(wbFetch.threadId)(3) := wbExec.result }
+  val writeData = Mux(isMulInstr_WB, mulResult_WB, wbExec.result)
+
+  when (wbDecode.rd === 1.U) { debugRegs1to4(wbFetch.threadId)(0) := writeData }
+    .elsewhen (wbDecode.rd === 2.U) { debugRegs1to4(wbFetch.threadId)(1) := writeData }
+    .elsewhen (wbDecode.rd === 3.U) { debugRegs1to4(wbFetch.threadId)(2) := writeData }
+    .elsewhen (wbDecode.rd === 4.U) { debugRegs1to4(wbFetch.threadId)(3) := writeData }
 }
 
 // Keep writeback side-effect free for x0; avoid FIRRTL verification ops in generated RTL path.
