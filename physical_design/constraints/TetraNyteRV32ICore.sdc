@@ -6,26 +6,18 @@ set INPUT_PORTS [concat \
   [get_ports reset] \
   [get_ports io_threadEnable_*] \
   [get_ports io_instrMem*] \
-  [get_ports io_dataMemResp*]]
+  [get_ports io_dataMemResp*] \
+  [get_ports io_jtag_tck] \
+  [get_ports io_jtag_tms] \
+  [get_ports io_jtag_tdi] \
+  [get_ports io_jtag_trst_n]]
 set OUTPUT_PORTS [concat \
   [get_ports io_memAddr*] \
   [get_ports io_memWrite*] \
   [get_ports io_memMask*] \
   [get_ports io_memMisaligned] \
   [get_ports io_fetchThread*] \
-  [get_ports io_if_pc_*] \
-  [get_ports io_if_instr_*] \
-  [get_ports io_id_rs1Data_*] \
-  [get_ports io_id_rs2Data_*] \
-  [get_ports io_ex_aluResult_*] \
-  [get_ports io_mem_loadData_*] \
-  [get_ports io_ctrlTaken] \
-  [get_ports io_ctrlThread*] \
-  [get_ports io_ctrlFromPC*] \
-  [get_ports io_ctrlTarget*] \
-  [get_ports io_ctrlIsJal] \
-  [get_ports io_ctrlIsJalr] \
-  [get_ports io_ctrlIsBranch]]
+  [get_ports io_jtag_tdo]]
 set_input_delay 0.0 -clock [get_clocks core_clk] $INPUT_PORTS
 set_output_delay 0.0 -clock [get_clocks core_clk] $OUTPUT_PORTS
 
