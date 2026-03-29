@@ -202,6 +202,7 @@ int main(int argc, char** argv) {
           << " pc7=0x" << thread_pcs[7]
           << " memAddr=0x" << addr
           << " memMask=0x" << mask
+          << " data=0x" << data
           << std::dec << '\n';
 
       if (dut.io_debugExecValid &&

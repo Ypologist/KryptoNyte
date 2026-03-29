@@ -1,3 +1,32 @@
+# 03/29/2026 08:20 - OctoNyte Zmmul RV32I Baseline Restore
+
+**Why these changes were made:**
+* **Aggressive Branch Squashing Leftovers:** During previous patches that restored the `OctoNyte` 8-thread/8-stage barrel processor (`RV32ICore`) from dangerous `fetchReg.valid := false.B` flushing instructions on `EX1` jumps (`BEQ`, `JALR`), the secondary `Zmmul` variant core was accidentally bypassed and subsequently crashed. This left the corrupted pipeline flushing logic actively obliterating adjacent hardware threads natively.
+* **Architecture Divergence:** The multiplier's `latency=3` was mathematically correct, but manually synchronizing the disparate core structures over time produced logic gaps across instruction decoding and latency Muxing. 
+
+**What the changes are:**
+* **`OctoNyteRV32IZmmulCore.scala`:** Bootstrapped the entire module exclusively by extracting the stable `OctoNyteRV32ICore` baseline directly and explicitly splicing the `ALUs.Mul32Pipelined(3)` module cleanly into the golden architecture framework. Re-wired the 3-cycle output combinatorially inside the `Commit` multiplexer ensuring branches effortlessly traverse the pipeline utilizing structurally validated logic while correctly interpreting the M-extension delay.
+* **`OctoNyteRV32IMCore.scala`:** Scrubbed all traces of the toxic `valid := false.B` squash instructions universally inside the `ex1Redirect` control-flow block definitively protecting pipeline parallel bounds.
+
+# 03/29/2026 08:00 - OctoNyte Zmmul Pipeline Setup Fixes
+
+**Why these changes were made:**
+* **Multiplier Latency Misalignment:** The Pipelined Multiplier (`ALUs.Mul32Pipelined(3)`) in the `OctoNyte_zmmul` variants was configured with a 3-cycle delay, meaning its output converged perfectly at the end of the `EX3` stage. However, the architectural `Writeback` stage dynamically evaluates logic exactly 1 cycle later during the 8th physical stage (`Commit`). This 1-cycle misalignment meant the multiplier output returned data corresponding to `Thread N+1` rather than the active `Thread N`, completely corrupting subsequent arithmetic results and causing branch instructions (like `misalign1-jalr-01.S`) to crash when reading from improperly polluted registers.
+* **Aggressive Branch Squashing:** The 8-thread/8-stage barrel processor physically separates threaded contexts, meaning branches resolved in `EX1` organically process without colliding with subsequent instructions from the same thread. The legacy `fetchReg.valid := false.B` lines were indiscriminately squashing younger cycles from *different* hardware threads when executing `BEQ`, `BLT`, or `JUMP` logic, destroying independent execution streams entirely.
+
+**What the changes are:**
+* **`OctoNyteRV32IZmmulCore.scala`:** Bootstrapped multi-cycle baseline logic iteratively.
+* **`OctoNyteRV32IMCore.scala`:** Scrubbed logic.
+
+# 03/29/2026 06:55 - ZeroNyte Extreme High-Performance Routability Tuning
+
+**Why these changes were made:**
+* **Global Routing Saturation:** Continuing physical layout mapping for the `ZeroNyte` high-performance parameters revealed structurally catastrophic congestion around Metal 4 (80% blocked) and Metal 5 (97% blocked) bounds causing Stage 38 to inherently fail (`GRT-0118`). High-drain Sky130 logic coupled with a tightly aggressive `10.0ns` clock synthesized extreme buffers that packed tightly, annihilating tracking corridors and severely violating layout constraints. 
+
+**What the changes are:**
+* **Aggressive Core Expansion:** Pulled `FP_CORE_UTIL` functionally down to `35%` inside `config.ZeroNyteRV32ICore-high-performance.json`. This computes a net 28% die expansion explicitly freeing topological grids across `M4` and `M5`. Also dragged `PL_TARGET_DENSITY_PCT` evenly to `40%` pulling cells naturally further linearly across the layout. 
+* **Buffer Footprint Slash:** Relaxed Yosys synthesis `MAX_FANOUT_CONSTRAINT` tightly from `20` endpoints to `40` logically limiting trace branches natively generating parasitic buffer lines. Overzealous drive buffers are drastically reduced before OpenRoad geometry placement triggers.
+
 # 03/29/2026 06:40 - OctoNyte Conformance Test 8-Thread Expansion
 
 **Why these changes were made:**

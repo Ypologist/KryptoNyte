@@ -226,7 +226,7 @@ class OctoNyteRV32IZmmulCore(val cosimulate: Boolean = false) extends Module {
   alu.io.opcode := ALU32.Opcode.ADD
 
   // Pipelined Multiplier (EX1 -> EX2 -> EX3) 3-cycle exact latency alignment
-  val mulUnit = Module(new ALUs.Mul32Pipelined(3))
+  val mulUnit = Module(new ALUs.Mul32Pipelined(numCycles = 4))
   mulUnit.io.a := 0.U
   mulUnit.io.b := 0.U
   mulUnit.io.signedA := false.B
@@ -347,7 +347,7 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   // -----------------
   // Pipelined Multiplier Feed (Combines identically alongside ALU)
   // -----------------
-  val isMExt = fetchSignals.instr(6, 0) === RV32IDecode.OP_R && fetchSignals.instr(31, 25) === "b0000001".U
+  val isMExt = dispatchReg.decodePipelineSignals.fetchSignals.instr(6, 0) === RV32IDecode.OP_R && dispatchReg.decodePipelineSignals.fetchSignals.instr(31, 25) === "b0000001".U(7.W)
   val funct3 = fetchSignals.instr(14, 12)
   val isMulInstr = isMExt && (funct3 <= "b011".U)
 
@@ -537,7 +537,7 @@ val wbDecode =
 val wbExec =
   wbReg.exec3Signals.exec2Signals.exec1Signals
 
-val isMExt_WB = wbFetch.instr(6, 0) === RV32IDecode.OP_R && wbFetch.instr(31, 25) === "b0000001".U
+val isMExt_WB = wbFetch.instr(6, 0) === RV32IDecode.OP_R && wbFetch.instr(31, 25) === "b0000001".U(7.W)
 val isMulInstr_WB = isMExt_WB && (wbFetch.instr(14, 12) <= "b011".U)
 val mulFunct3_WB = wbFetch.instr(14, 12)
 
@@ -572,11 +572,6 @@ val ex1Redirect = ex1Fetch.valid && exec1Reg.ctrlTaken
 // Resolve control flow in EX1 and squash younger work so taken redirects do not replay.
 when (ex1Redirect) {
   pcRegs(ex1Fetch.threadId) := exec1Reg.ctrlTarget
-
-  fetchReg.valid := false.B
-  decodeReg.fetchSignals.valid := false.B
-  dispatchReg.decodePipelineSignals.fetchSignals.valid := false.B
-  regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
 }
 
 when (wbFetch.valid &&

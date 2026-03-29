@@ -534,11 +534,6 @@ val ex1Redirect = ex1Fetch.valid && exec1Reg.ctrlTaken
 // Resolve control flow in EX1 and squash younger work so taken redirects do not replay.
 when (ex1Redirect) {
   pcRegs(ex1Fetch.threadId) := exec1Reg.ctrlTarget
-
-  fetchReg.valid := false.B
-  decodeReg.fetchSignals.valid := false.B
-  dispatchReg.decodePipelineSignals.fetchSignals.valid := false.B
-  regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
 }
 
 when (wbFetch.valid &&
