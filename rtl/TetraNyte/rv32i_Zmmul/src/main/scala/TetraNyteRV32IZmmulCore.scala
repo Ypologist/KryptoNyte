@@ -35,7 +35,7 @@ class PipelineRegBundle extends Bundle {
   val memRdata = UInt(32.W)
 }
 
-class TetraNyteRV32IZmmulCoreIO(val numThreads: Int) extends Bundle {
+class TetraNyteRV32IZmmulCoreIO(val numThreads: Int, val cosimulate: Boolean = false) extends Bundle {
   val threadEnable = Input(Vec(numThreads, Bool()))
   val instrMem = Input(UInt(32.W))
   val dataMemResp = Input(UInt(32.W))
@@ -46,26 +46,34 @@ class TetraNyteRV32IZmmulCoreIO(val numThreads: Int) extends Bundle {
   val memMisaligned = Output(Bool())
 
   val fetchThread = Output(UInt(log2Ceil(numThreads).W))
-  val if_pc = Output(Vec(numThreads, UInt(32.W)))
-  val if_instr = Output(Vec(numThreads, UInt(32.W)))
-  val id_rs1Data = Output(Vec(numThreads, UInt(32.W)))
-  val id_rs2Data = Output(Vec(numThreads, UInt(32.W)))
-  val ex_aluResult = Output(Vec(numThreads, UInt(32.W)))
-  val mem_loadData = Output(Vec(numThreads, UInt(32.W)))
+  val if_pc = Output(Vec(numThreads, UInt((if(cosimulate) 32 else 0).W)))
+  val if_instr = Output(Vec(numThreads, UInt((if(cosimulate) 32 else 0).W)))
+  val id_rs1Data = Output(Vec(numThreads, UInt((if(cosimulate) 32 else 0).W)))
+  val id_rs2Data = Output(Vec(numThreads, UInt((if(cosimulate) 32 else 0).W)))
+  val ex_aluResult = Output(Vec(numThreads, UInt((if(cosimulate) 32 else 0).W)))
+  val mem_loadData = Output(Vec(numThreads, UInt((if(cosimulate) 32 else 0).W)))
 
   // Debug/control visibility
-  val ctrlTaken = Output(Bool())
-  val ctrlThread = Output(UInt(log2Ceil(numThreads).W))
-  val ctrlFromPC = Output(UInt(32.W))
-  val ctrlTarget = Output(UInt(32.W))
-  val ctrlIsJal = Output(Bool())
-  val ctrlIsJalr = Output(Bool())
-  val ctrlIsBranch = Output(Bool())
+  val ctrlTaken = Output(UInt((if(cosimulate) 1 else 0).W))
+  val ctrlThread = Output(UInt((if(cosimulate) log2Ceil(numThreads) else 0).W))
+  val ctrlFromPC = Output(UInt((if(cosimulate) 32 else 0).W))
+  val ctrlTarget = Output(UInt((if(cosimulate) 32 else 0).W))
+  val ctrlIsJal = Output(UInt((if(cosimulate) 1 else 0).W))
+  val ctrlIsJalr = Output(UInt((if(cosimulate) 1 else 0).W))
+  val ctrlIsBranch = Output(UInt((if(cosimulate) 1 else 0).W))
+
+  // JTAG Interface
+  val jtag_tck    = Input(UInt((if(!cosimulate) 1 else 0).W))
+  val jtag_tms    = Input(UInt((if(!cosimulate) 1 else 0).W))
+  val jtag_tdi    = Input(UInt((if(!cosimulate) 1 else 0).W))
+  val jtag_tdo    = Output(UInt((if(!cosimulate) 1 else 0).W))
+  val jtag_trst_n = Input(UInt((if(!cosimulate) 1 else 0).W))
 }
 
-class TetraNyteRV32IZmmulCore extends Module {
+class TetraNyteRV32IZmmulCore(val cosimulate: Boolean = false) extends Module {
   val numThreads = 4
-  val io = IO(new TetraNyteRV32IZmmulCoreIO(numThreads))
+  val io = IO(new TetraNyteRV32IZmmulCoreIO(numThreads, cosimulate))
+  io.jtag_tdo := 0.U
 
   // Per-thread PC registers and flush tracking
   val pcResetVec = VecInit(Seq.fill(numThreads)("h80000000".U(32.W)))
@@ -383,13 +391,13 @@ class TetraNyteRV32IZmmulCore extends Module {
   val jalrTargetEx = ((id_ex.rs1Data.asSInt + id_ex.imm.asSInt).asUInt & ~1.U(32.W))
 
   // Drive debug/control visibility outputs
-  io.ctrlTaken := branchTakenEx || jalTakenEx || jalrTakenEx
+  io.ctrlTaken := (branchTakenEx || jalTakenEx || jalrTakenEx).asUInt
   io.ctrlThread := id_ex.threadId
   io.ctrlFromPC := id_ex.pc
   io.ctrlTarget := Mux(branchTakenEx, branchTargetEx, Mux(jalTakenEx, jalTargetEx, jalrTargetEx))
-  io.ctrlIsBranch := branchTakenEx
-  io.ctrlIsJal := jalTakenEx
-  io.ctrlIsJalr := jalrTakenEx
+  io.ctrlIsBranch := branchTakenEx.asUInt
+  io.ctrlIsJal := jalTakenEx.asUInt
+  io.ctrlIsJalr := jalrTakenEx.asUInt
 
   when(branchTakenEx && io.threadEnable(id_ex.threadId)) {
     pcRegs(id_ex.threadId) := branchTargetEx
@@ -449,7 +457,7 @@ class TetraNyteRV32IZmmulCore extends Module {
   io.ex_aluResult := debugExAlu
   io.mem_loadData := debugMemLoad
   // Default debug outputs when no control transfer
-  when(!io.ctrlTaken) {
+  when(io.ctrlTaken === 0.U) {
     io.ctrlThread := 0.U
     io.ctrlFromPC := 0.U
     io.ctrlTarget := 0.U

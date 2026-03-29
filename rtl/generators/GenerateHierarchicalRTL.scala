@@ -59,11 +59,15 @@ case class RTLGeneratorConfig(
   
   // Cleanup options
   deleteIntermediateFiles: Boolean = false,
-  verbose: Boolean = true
+  verbose: Boolean = true,
+  cosimulate: Boolean = false
 ) {
   
   // Computed paths
-  def fullOutputRoot: String = if (Paths.get(outputRoot).isAbsolute) outputRoot else s"${System.getProperty("user.dir")}/$outputRoot"
+  def fullOutputRoot: String = {
+    val actualRoot = if (cosimulate && outputRoot == "generated") "generated_sim" else if (!cosimulate && outputRoot == "generated") "generated_prod" else outputRoot
+    if (Paths.get(actualRoot).isAbsolute) actualRoot else s"${System.getProperty("user.dir")}/$actualRoot"
+  }
   def fullFirrtlPath: String = s"$fullOutputRoot/$firrtlDir"
   def fullSystemVerilogPath: String = s"$fullOutputRoot/$systemVerilogDir"
   def fullVerilogPath: String = s"$fullOutputRoot/$verilogDir"
@@ -184,6 +188,9 @@ object GenerateHierarchicalRTL extends App {
         case "--cleanup" => 
           config = config.copy(deleteIntermediateFiles = true)
           i += 1
+        case "--cosimulate" =>
+          config = config.copy(cosimulate = true)
+          i += 1
         case "--quiet" => 
           config = config.copy(verbose = false)
           i += 1
@@ -213,6 +220,7 @@ Options:
   --standard-cell-lib <path>  Standard cell library file
   --optimize-asic             Enable ASIC optimization during synthesis
   --no-optimize              Disable ASIC optimization (default)
+  --cosimulate                Enable simulation specific debug telemetry and map to generated_sim
   --cleanup                   Delete intermediate files after generation
   --quiet                     Reduce output verbosity
   --help, -h                  Show this help message
@@ -259,13 +267,13 @@ Environment Variables:
     // This would be expanded based on the core family and variant
     config.coreFamily match {
       case "Library" => getLibraryModules(config.coreVariant)
-      case "ZeroNyte" => getZeroNyteModules(config.coreVariant)
+      case "ZeroNyte" => getZeroNyteModules(config.coreVariant, config.cosimulate)
       case "PipeNyte" => getPipeNyteModules(config.coreVariant)
-      case "TetraNyte" => getTetraNyteModules(config.coreVariant)
-      case "OctoNyte" => getOctoNyteModules(config.coreVariant)
+      case "TetraNyte" => getTetraNyteModules(config.coreVariant, config.cosimulate)
+      case "OctoNyte" => getOctoNyteModules(config.coreVariant, config.cosimulate)
       case _ => 
         println(s"Warning: Unknown core family ${config.coreFamily}, using ZeroNyte")
-        getZeroNyteModules(config.coreVariant)
+        getZeroNyteModules(config.coreVariant, config.cosimulate)
     }
   }
 
@@ -286,20 +294,20 @@ Environment Variables:
     }
   }
   
-  def getZeroNyteModules(variant: String): Seq[ModuleSpec] = {
+  def getZeroNyteModules(variant: String, cosimulate: Boolean): Seq[ModuleSpec] = {
     variant match {
       case "rv32i" =>
         getRV32ILibraryModules("ZeroNyte") ++ Seq(
-          ModuleSpec(() => new ZeroNyteRV32ICore, "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i"),
-          ModuleSpec(() => new ZeroNyteRV32ICoreWithCache, "ZeroNyteRV32ICoreWithCache", "Single-cycle RV32I core with I-cache", "ZeroNyte", "rv32i")
+          ModuleSpec(() => new ZeroNyteRV32ICore(cosimulate), "ZeroNyteRV32ICore", "Single-cycle RV32I core", "ZeroNyte", "rv32i"),
+          ModuleSpec(() => new ZeroNyteRV32ICoreWithCache(cosimulate), "ZeroNyteRV32ICoreWithCache", "Single-cycle RV32I core with I-cache", "ZeroNyte", "rv32i")
         )
       case "rv32i_Zmmul" =>
         getRV32ILibraryModules("ZeroNyteZmmul") ++ Seq(
-          ModuleSpec(() => new ZeroNyteRV32IZmmulCore, "ZeroNyteRV32IZmmulCore", "Single-cycle RV32I Zmmul core", "ZeroNyte", "rv32i_Zmmul")
+          ModuleSpec(() => new ZeroNyteRV32IZmmulCore(cosimulate), "ZeroNyteRV32IZmmulCore", "Single-cycle RV32I Zmmul core", "ZeroNyte", "rv32i_Zmmul")
         )
       case "rv32im" =>
         getRV32ILibraryModules("ZeroNyteIM") ++ Seq(
-          ModuleSpec(() => new ZeroNyteRV32IMCore, "ZeroNyteRV32IMCore", "Single-cycle RV32IM core", "ZeroNyte", "rv32im")
+          ModuleSpec(() => new ZeroNyteRV32IMCore(cosimulate), "ZeroNyteRV32IMCore", "Single-cycle RV32IM core", "ZeroNyte", "rv32im")
         )
       case _ => Seq.empty
     }
@@ -310,31 +318,41 @@ Environment Variables:
     Seq.empty
   }
   
-  def getTetraNyteModules(variant: String): Seq[ModuleSpec] = {
+  def getTetraNyteModules(variant: String, cosimulate: Boolean): Seq[ModuleSpec] = {
     variant match {
       case "rv32i" =>
         // Generate all building blocks plus the threaded core itself
         val libraryBlocks = getRV32ILibraryModules("TetraNyte")
         libraryBlocks :+
-          ModuleSpec(() => new TetraNyte.TetraNyteRV32ICore, "TetraNyteRV32ICore", "Four-thread barrel-threaded RV32I core", "TetraNyte", "rv32i")
+          ModuleSpec(() => new TetraNyte.TetraNyteRV32ICore(cosimulate), "TetraNyteRV32ICore", "Four-thread barrel-threaded RV32I core", "TetraNyte", "rv32i")
       case "rv32i_Zmmul" =>
         val libraryBlocks = getRV32ILibraryModules("TetraNyteZmmul")
         libraryBlocks :+
-          ModuleSpec(() => new TetraNyteRV32IZmmulCore, "TetraNyteRV32IZmmulCore", "Four-thread barrel-threaded RV32I Zmmul core", "TetraNyte", "rv32i_Zmmul")
+          ModuleSpec(() => new TetraNyteRV32IZmmulCore(cosimulate), "TetraNyteRV32IZmmulCore", "Four-thread barrel-threaded RV32I Zmmul core", "TetraNyte", "rv32i_Zmmul")
       case "rv32im" =>
         val libraryBlocks = getRV32ILibraryModules("TetraNyteIM")
         libraryBlocks :+
-          ModuleSpec(() => new TetraNyteRV32IMCore, "TetraNyteRV32IMCore", "Four-thread barrel-threaded RV32IM core", "TetraNyte", "rv32im")
+          ModuleSpec(() => new TetraNyteRV32IMCore(cosimulate), "TetraNyteRV32IMCore", "Four-thread barrel-threaded RV32IM core", "TetraNyte", "rv32im")
       case _ => Seq.empty
     }
   }
   
-  def getOctoNyteModules(variant: String): Seq[ModuleSpec] = {
+  def getOctoNyteModules(variant: String, cosimulate: Boolean): Seq[ModuleSpec] = {
     variant match {
       case "rv32i" =>
         val libraryBlocks = getRV32ILibraryModules("OctoNyte")
         libraryBlocks :+
-          ModuleSpec(() => new OctoNyteRV32ICore, "OctoNyteRV32ICore", "Eight-thread, 4-wide packet barrel-threaded RV32I core", "OctoNyte", "rv32i")
+          ModuleSpec(() => new OctoNyteRV32ICore(cosimulate), "OctoNyteRV32ICore", "Eight-thread, 4-wide packet barrel-threaded RV32I core", "OctoNyte", "rv32i")
+      case "rv32im" =>
+        import OctoNyte.OctoNyteRV32IMCore
+        val libraryBlocks = getRV32ILibraryModules("OctoNyteIM")
+        libraryBlocks :+
+          ModuleSpec(() => new OctoNyteRV32IMCore(cosimulate), "OctoNyteRV32IMCore", "Eight-thread, 4-wide packet barrel-threaded RV32IM core", "OctoNyte", "rv32im")
+      case "rv32i_Zmmul" =>
+        import OctoNyte.OctoNyteRV32IZmmulCore
+        val libraryBlocks = getRV32ILibraryModules("OctoNyteZmmul")
+        libraryBlocks :+
+          ModuleSpec(() => new OctoNyteRV32IZmmulCore(cosimulate), "OctoNyteRV32IZmmulCore", "Eight-thread, 4-wide packet barrel-threaded RV32I Zmmul core", "OctoNyte", "rv32i_Zmmul")
       case _ => Seq.empty
     }
   }

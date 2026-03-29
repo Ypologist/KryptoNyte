@@ -15,7 +15,7 @@ import RegFiles.RegFileMTMultiWVec
 // *********************************************************
 // Core IO Definition
 // *********************************************************
-class OctoNyteRV32IMCoreIO(val numThreads: Int, val fetchWidth: Int) extends Bundle {
+class OctoNyteRV32IMCoreIO(val numThreads: Int, val fetchWidth: Int, val cosimulate: Boolean = false) extends Bundle {
   private val threadBits = log2Ceil(numThreads)
 
   val threadEnable = Input(Vec(numThreads, Bool()))
@@ -27,32 +27,39 @@ class OctoNyteRV32IMCoreIO(val numThreads: Int, val fetchWidth: Int) extends Bun
   val memValid     = Output(Bool())
   val memMisaligned= Output(Bool())
 
-  val debugStageThreads = Output(Vec(8, UInt(threadBits.W)))
-  val debugStageValids  = Output(Vec(8, Bool()))
-  val debugPC           = Output(Vec(numThreads, UInt(32.W)))
-  val debugRegs01234    = Output(Vec(numThreads, Vec(5, UInt(32.W))))
-  val debugRegX1        = Output(Vec(numThreads, UInt(32.W)))
-  val debugCtrlValid    = Output(Bool())
-  val debugCtrlInstr    = Output(UInt(32.W))
-  val debugCtrlTaken    = Output(Bool())
-  val debugCtrlThread   = Output(UInt(threadBits.W))
-  val debugCtrlFromPC   = Output(UInt(32.W))
-  val debugCtrlTarget   = Output(UInt(32.W))
-  val debugCtrlIsBranch = Output(Bool())
-  val debugCtrlIsJal    = Output(Bool())
-  val debugCtrlIsJalr   = Output(Bool())
-  val debugExecValid    = Output(Bool())
-  val debugExecThread   = Output(UInt(threadBits.W))
-  val debugExecPC       = Output(UInt(32.W))
-  val debugExecInstr    = Output(UInt(32.W))
-  val debugExecIsBranch = Output(Bool())
-  val debugExecIsJal    = Output(Bool())
-  val debugExecIsJalr   = Output(Bool())
-  val debugExecBranchOp = Output(UInt(3.W))
-  val debugExecRs1      = Output(UInt(32.W))
-  val debugExecRs2      = Output(UInt(32.W))
-  val debugExecCtrlTaken = Output(Bool())
-  val debugExecCtrlTarget = Output(UInt(32.W))
+  val debugStageThreads = Output(Vec(8, UInt((if(cosimulate) threadBits else 0).W)))
+  val debugStageValids  = Output(Vec(8, UInt((if(cosimulate) 1 else 0).W)))
+  val debugPC           = Output(Vec(numThreads, UInt((if(cosimulate) 32 else 0).W)))
+  val debugRegs01234    = Output(Vec(numThreads, Vec(5, UInt((if(cosimulate) 32 else 0).W))))
+  val debugRegX1        = Output(Vec(numThreads, UInt((if(cosimulate) 32 else 0).W)))
+  val debugCtrlValid    = Output(UInt((if(cosimulate) 1 else 0).W))
+  val debugCtrlInstr    = Output(UInt((if(cosimulate) 32 else 0).W))
+  val debugCtrlTaken    = Output(UInt((if(cosimulate) 1 else 0).W))
+  val debugCtrlThread   = Output(UInt((if(cosimulate) threadBits else 0).W))
+  val debugCtrlFromPC   = Output(UInt((if(cosimulate) 32 else 0).W))
+  val debugCtrlTarget   = Output(UInt((if(cosimulate) 32 else 0).W))
+  val debugCtrlIsBranch = Output(UInt((if(cosimulate) 1 else 0).W))
+  val debugCtrlIsJal    = Output(UInt((if(cosimulate) 1 else 0).W))
+  val debugCtrlIsJalr   = Output(UInt((if(cosimulate) 1 else 0).W))
+  val debugExecValid    = Output(UInt((if(cosimulate) 1 else 0).W))
+  val debugExecThread   = Output(UInt((if(cosimulate) threadBits else 0).W))
+  val debugExecPC       = Output(UInt((if(cosimulate) 32 else 0).W))
+  val debugExecInstr    = Output(UInt((if(cosimulate) 32 else 0).W))
+  val debugExecIsBranch = Output(UInt((if(cosimulate) 1 else 0).W))
+  val debugExecIsJal    = Output(UInt((if(cosimulate) 1 else 0).W))
+  val debugExecIsJalr   = Output(UInt((if(cosimulate) 1 else 0).W))
+  val debugExecBranchOp = Output(UInt((if(cosimulate) 3 else 0).W))
+  val debugExecRs1      = Output(UInt((if(cosimulate) 32 else 0).W))
+  val debugExecRs2      = Output(UInt((if(cosimulate) 32 else 0).W))
+  val debugExecCtrlTaken = Output(UInt((if(cosimulate) 1 else 0).W))
+  val debugExecCtrlTarget = Output(UInt((if(cosimulate) 32 else 0).W))
+
+  // JTAG Interface
+  val jtag_tck    = Input(UInt((if(!cosimulate) 1 else 0).W))
+  val jtag_tms    = Input(UInt((if(!cosimulate) 1 else 0).W))
+  val jtag_tdi    = Input(UInt((if(!cosimulate) 1 else 0).W))
+  val jtag_tdo    = Output(UInt((if(!cosimulate) 1 else 0).W))
+  val jtag_trst_n = Input(UInt((if(!cosimulate) 1 else 0).W))
 }
 
 // ****************************************************************************************
@@ -106,14 +113,15 @@ class WritebackPipelineRegs(threadBits: Int) extends Bundle {
 // *********************************************************
 // OctoNyte RV32I Core Definition
 // *********************************************************
-class OctoNyteRV32IMCore extends Module {
+class OctoNyteRV32IMCore(val cosimulate: Boolean = false) extends Module {
   val numThreads = 8
   // Keep this aligned with OctoNyte tests, which drive a 4-wide (128b) instruction packet.
   // The core currently only consumes slot 0 (`instrMem(31,0)`), so the extra slots are ignored.
   val fetchWidth = 4
   val regFileReadPorts = 2 * fetchWidth
   val regFileWritePorts = fetchWidth
-  val io = IO(new OctoNyteRV32IMCoreIO(numThreads, fetchWidth))
+  val io = IO(new OctoNyteRV32IMCoreIO(numThreads, fetchWidth, cosimulate))
+  io.jtag_tdo := 0.U
   
 
   private val threadBits = log2Ceil(numThreads)
@@ -124,7 +132,7 @@ class OctoNyteRV32IMCore extends Module {
   // ===========================
   for (i <- 0 until 8) {
     io.debugStageThreads(i) := 0.U
-    io.debugStageValids(i)  := false.B
+    io.debugStageValids(i) := 0.U
   }
 
   for (t <- 0 until numThreads) {
@@ -135,27 +143,27 @@ class OctoNyteRV32IMCore extends Module {
     }
   }
 
-  io.debugCtrlValid    := false.B
+  io.debugCtrlValid    := 0.U
   io.debugCtrlInstr    := 0.U
-  io.debugCtrlTaken    := false.B
+  io.debugCtrlTaken    := 0.U
   io.debugCtrlThread   := 0.U
   io.debugCtrlFromPC   := 0.U
   io.debugCtrlTarget   := 0.U
-  io.debugCtrlIsBranch := false.B
-  io.debugCtrlIsJal    := false.B
-  io.debugCtrlIsJalr   := false.B
+  io.debugCtrlIsBranch := 0.U
+  io.debugCtrlIsJal    := 0.U
+  io.debugCtrlIsJalr   := 0.U
 
-  io.debugExecValid        := false.B
+  io.debugExecValid        := 0.U
   io.debugExecThread       := 0.U
   io.debugExecPC           := 0.U
   io.debugExecInstr        := 0.U
-  io.debugExecIsBranch     := false.B
-  io.debugExecIsJal        := false.B
-  io.debugExecIsJalr       := false.B
+  io.debugExecIsBranch     := 0.U
+  io.debugExecIsJal        := 0.U
+  io.debugExecIsJalr       := 0.U
   io.debugExecBranchOp     := 0.U
   io.debugExecRs1          := 0.U
   io.debugExecRs2          := 0.U
-  io.debugExecCtrlTaken    := false.B
+  io.debugExecCtrlTaken    := 0.U
   io.debugExecCtrlTarget   := 0.U
 
   // ================================================
@@ -561,21 +569,21 @@ val dbgDecode =
     .regReadSignals.dispatchSignals.decodePipelineSignals.decodeSignals
 
 io.debugStageThreads(0) := fetchReg.threadId
-io.debugStageValids(0) := fetchReg.valid
+io.debugStageValids(0) := (fetchReg.valid).asUInt
 io.debugStageThreads(1) := decodeReg.fetchSignals.threadId
-io.debugStageValids(1) := decodeReg.fetchSignals.valid
+io.debugStageValids(1) := (decodeReg.fetchSignals.valid).asUInt
 io.debugStageThreads(2) := dispatchReg.decodePipelineSignals.fetchSignals.threadId
-io.debugStageValids(2) := dispatchReg.decodePipelineSignals.fetchSignals.valid
+io.debugStageValids(2) := (dispatchReg.decodePipelineSignals.fetchSignals.valid).asUInt
 io.debugStageThreads(3) := regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.threadId
-io.debugStageValids(3) := regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.valid
+io.debugStageValids(3) := (regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.valid).asUInt
 io.debugStageThreads(4) := exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.threadId
-io.debugStageValids(4) := exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid
+io.debugStageValids(4) := (exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid).asUInt
 io.debugStageThreads(5) := exec2Reg.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.threadId
-io.debugStageValids(5) := exec2Reg.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid
+io.debugStageValids(5) := (exec2Reg.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid).asUInt
 io.debugStageThreads(6) := exec3Reg.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.threadId
-io.debugStageValids(6) := exec3Reg.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid
+io.debugStageValids(6) := (exec3Reg.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid).asUInt
 io.debugStageThreads(7) := dbgFetch.threadId
-io.debugStageValids(7) := dbgFetch.valid
+io.debugStageValids(7) := (dbgFetch.valid).asUInt
 
 io.debugCtrlValid := dbgFetch.valid
 io.debugCtrlInstr := dbgFetch.instr

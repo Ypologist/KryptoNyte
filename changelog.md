@@ -1,3 +1,13 @@
+# 03/29/2026 06:07 - Global Cosimulation Parameters and Zero-Width Debug Pruning
+
+**Why these changes were made:**
+* **Physical Design Optimization vs. Conformance Traceability:** The formal RISCOF architecture conformance suites dictate comprehensive state visibility natively (e.g., extracting enormous internal register-file mappings, physical block values, and program counters cycle-by-cycle). However, deploying these massive logical trace fabrics over silicon arrays actively introduces catastrophic routing congestion metrics inside structural tools like OpenROAD, severely bottlenecking native performance ceilings and physical area targets in production netlists.
+
+**What the changes are:**
+* **Chisel Zero-Width Condensation:** Introduced a global `cosimulate: Boolean = false` core instantiation parameter intrinsically into `GenerateHierarchicalRTL` and completely applied it across all top-level IO configurations within `ZeroNyte`, `TetraNyte`, and `OctoNyte`. By binding trace widths to `((if (cosimulate) 32 else 0).W)`, the FIRRTL compiler natively prunes dead debug paths out of standard physical design variants gracefully, massively improving OpenLane layouts without fragmenting codebases across standalone simulation and production projects.
+* **Production JTAG Porting:** Implemented explicit external JTAG IO boundaries (TCK, TMS, TDI, TDO, TRSTn) activated cleanly only during standardized non-simulation synthesis builds (`!cosimulate`). 
+* **Seamless Testbed Segregation:** Safely hard-linked the `--cosimulate` SBT runtime arguments deeply into `tests/run_riscv_conformance_tests.sh`, fundamentally isolating simulation evaluation outputs internally into `generated_sim/` and leaving default `generated_prod/` cleanly optimized!
+
 # 03/29/2026 05:22 - ZeroNyte Physical Design Config Sub-Profiles
 
 **Why these changes were made:**
