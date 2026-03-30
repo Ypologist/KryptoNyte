@@ -115,8 +115,8 @@ if [[ "$RUN_ALL" == "true" ]]; then
     "$0" --processor "$proc_name" > "$LOG_FILE" 2>&1
     set -e
     
-    PASSES=$(grep -c " : Passed$" "$LOG_FILE" || true)
-    FAILS=$(grep -c " : Failed$" "$LOG_FILE" || true)
+    PASSES=$(grep -c " : Passed" "$LOG_FILE" || true)
+    FAILS=$(grep -c " : Failed" "$LOG_FILE" || true)
     
     if [[ $PASSES -eq 0 && $FAILS -eq 0 ]]; then
       SUMMARY+=("❌ $proc_name: BUILD/SIM FAILED (Check nightly_logs/${proc_name}.log)")

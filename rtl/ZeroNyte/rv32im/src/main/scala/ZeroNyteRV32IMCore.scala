@@ -170,6 +170,9 @@ class ZeroNyteRV32IMCore(val cosimulate: Boolean = false) extends Module {
   memPort.io.legacy.writeData := storeUnit.io.memWrite
   memPort.io.legacy.writeMask := Mux(dec.isStore, storeUnit.io.mask, 0.U)
 
+  val unusedReadData = WireDefault(memPort.io.legacy.readData)
+  dontTouch(unusedReadData)
+
   memPort.io.passthroughMem.readData := io.dmem_rdata
   io.dmem_addr := memPort.io.passthroughMem.addr
   io.dmem_wdata := memPort.io.passthroughMem.writeData

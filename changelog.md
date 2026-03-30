@@ -1,3 +1,11 @@
+# 03/29/2026 21:42 - ZeroNyte-IM Legacy MemPort Pin Fix
+
+**Why these changes were made:**
+* **`PINMISSING` Output Wire Omission:** During the massive nightly suite execution, all variations passed except `zeronyte-im` which hard-crashed compiling for Verilator. The core identically suffered from a `PINMISSING` logic drop (`Instance has missing pin: 'io_legacy_readData'`), caused by an omission of dummy padding natively buffering `ZeroNyteMemPort.io_legacy_readData` inherently present in all primary sibling variants.
+
+**What the changes are:**
+* **`ZeroNyteRV32IMCore.scala` Patch:** Aligned the structural memory interface identically matching the `rv32i`/`rv32i_Zmmul` layouts by binding the dummy anchor `val unusedReadData = WireDefault(memPort.io.legacy.readData)` securely alongside the `dontTouch(unusedReadData)` pragma logically retaining the physical port definition across FIRRTL optimizers automatically satisfying static verification metrics reliably.
+
 # 03/29/2026 15:03 - ZeroNyte Dead Code Elimination Pin Preservation
 
 **Why these changes were made:**
