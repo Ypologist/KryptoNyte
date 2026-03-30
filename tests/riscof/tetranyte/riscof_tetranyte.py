@@ -98,7 +98,7 @@ class tetranyte(pluginTemplate):
                     max_cycles = 2_000_000
                 run_cmd = (
                     f"{self.dut_exe} --elf {elf_path} --signature {sig_path} "
-                    f"--log {log_path} --max-cycles {max_cycles}"
+                    f"--log {log_path} --max-cycles {max_cycles} --thread-mask 15"
                 )
             else:
                 run_cmd = "echo 'target run disabled'"

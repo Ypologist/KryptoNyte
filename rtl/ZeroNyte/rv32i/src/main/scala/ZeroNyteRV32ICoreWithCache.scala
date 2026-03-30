@@ -5,7 +5,7 @@ import chisel3.util._
 import Decoders.RV32IDecode
 import ALUs.ALU32
 
-class ZeroNyteRV32ICoreWithCache extends Module {
+class ZeroNyteRV32ICoreWithCache(val cosimulate: Boolean = false) extends Module {
   val io = IO(new Bundle {
     // Instruction Memory Interface
     val imem_addr = Output(UInt(32.W))
@@ -18,10 +18,19 @@ class ZeroNyteRV32ICoreWithCache extends Module {
     val dmem_wen = Output(Bool())
 
     // Debug Outputs
-    val pc_out    = Output(UInt(32.W))
-    val instr_out = Output(UInt(32.W))
-    val result    = Output(UInt(32.W))
+    val pc_out    = Output(UInt((if(cosimulate) 32 else 0).W))
+    val instr_out = Output(UInt((if(cosimulate) 32 else 0).W))
+    val result    = Output(UInt((if(cosimulate) 32 else 0).W))
+
+    // JTAG Interface
+    val jtag_tck    = Input(UInt((if(!cosimulate) 1 else 0).W))
+    val jtag_tms    = Input(UInt((if(!cosimulate) 1 else 0).W))
+    val jtag_tdi    = Input(UInt((if(!cosimulate) 1 else 0).W))
+    val jtag_tdo    = Output(UInt((if(!cosimulate) 1 else 0).W))
+    val jtag_trst_n = Input(UInt((if(!cosimulate) 1 else 0).W))
   })
+
+  io.jtag_tdo := 0.U
 
   // ---------- Program Counter ----------
   val pc = RegInit("h80000000".U(32.W))  // Start at RISC-V reset vector

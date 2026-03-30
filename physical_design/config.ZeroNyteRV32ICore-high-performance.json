@@ -1,0 +1,21 @@
+{
+  "DESIGN_NAME": "ZeroNyteRV32ICore",
+  
+  "VERILOG_FILES": [
+    "dir::src/ZeroNyteRV32ICore.v"
+  ],
+  
+  "CLOCK_PORT": "clock",
+  "CLOCK_PERIOD": 10.0,
+  
+  "FP_CORE_UTIL": 35,
+  "FP_ASPECT_RATIO": 1.0,
+  
+  "SYNTH_STRATEGY": "DELAY 1",
+  "MAX_FANOUT_CONSTRAINT": 40,
+  
+  "PL_TARGET_DENSITY_PCT": 40,
+  "PL_ROUTABILITY_DRIVEN": 1,
+  
+  "RT_MAX_LAYER": "met5"
+}

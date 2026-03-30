@@ -27,18 +27,19 @@ print_warning() { echo -e "${YELLOW}⚠️${NC} $1"; }
 print_error() { echo -e "${RED}❌${NC} $1"; exit 1; }
 
 # --- Default Configuration ---
-MODULE_NAME="ZeroNyteRV32ICore"
+MODULE_NAME="TetraNyteRV32ICore"
 CONFIG_BASE_FILE="config.base.json"
 CONFIG_MODULE_FILE=""
-OUTPUT_ROOT="_runs"
+OUTPUT_ROOT="${OPENLANE_OUTPUT_ROOT:-/tmp/kryptonyte_openlane_${USER}}"
 OPENLANE2_PATH="${OPENLANE2_ROOT:-/opt/skywater-pdk/openlane2}"
 VERBOSE=true
+USE_SUDO=false
 
 # Export environment variables for template substitution
 export MODULE_NAME
 export CLOCK_PORT="clock"
 export CLOCK_PERIOD="10.0"
-export CORE_UTILIZATION="0.7"
+export CORE_UTILIZATION="70"
 export ASPECT_RATIO="1.0"
 export PDK_VARIANT="sky130_fd_sc_hd"
 export SYNTHESIS_STRATEGY="AREA 0"
@@ -47,6 +48,60 @@ export GENERATE_GDS="true"
 export RUN_DRC="true"
 
 # --- Command-line Argument Parsing ---
+
+show_help() {
+    cat << EOF
+============================================================
+KryptoNyte Physical Design Flow
+============================================================
+
+Usage: $0 [options]
+
+Options:
+  --module-name <name>    Module to process (Required unless viewing help)
+  --config-base <file>    Base JSON config (default: config.base.json)
+  --config-module <file>  Module-specific JSON config (optional)
+  --output-root <path>    Output directory (default: /tmp/kryptonyte_openlane_\$USER)
+  --openlane2-path <path> OpenLane2 directory (default: /opt/skywater-pdk/openlane2)
+  --clock-period <ns>     Clock period in nanoseconds (default: 10.0)
+  --utilization <percent> Core utilization percentage (default: 70)
+  --use-sudo              Run nix-shell/openlane through sudo
+  --quiet                 Reduced verbosity
+  --help, -h              Show this help message
+
+------------------------------------------------------------
+Valid Target Modules for Synthesis:
+------------------------------------------------------------
+> Core Processors:
+  - TetraNyteRV32ICore           (Base 4-thread I Core)
+  - TetraNyteRV32IMCore          (Base 4-thread IM Core)
+  - TetraNyteRV32IZmmulCore      (Base 4-thread I+Zmmul Core)
+  - ZeroNyteRV32ICore            (Base single-thread I Core)
+  - ZeroNyteRV32IMCore           (Base single-thread IM Core)
+  - ZeroNyteRV32IZmmulCore       (Base single-thread I+Zmmul Core)
+
+> Hard Macro Generation Targets:
+  - RegFileMT2R1WMem             (TetraNyte Shared 2-Read 1-Write Register File)
+  - RegFileMT8R4WMem             (Superscalar 8-Read 4-Write Register File)
+  - RegFileMTMem                 (Base multithreaded monolithic RF)
+  - ICache                       (TetraNyte/ZeroNyte Instruction Cache)
+
+Examples:
+  ./generate_physical_design.sh --module-name RegFileMT2R1WMem
+  ./generate_physical_design.sh --module-name TetraNyteRV32ICore --clock-period 8.0 --utilization 65
+  ./generate_physical_design.sh --module-name ZeroNyteRV32ICore --use-sudo
+EOF
+    exit 0
+}
+
+if [[ $# -eq 0 ]]; then
+    echo -e "${YELLOW}Notice: No arguments provided. Displaying help menu.${NC}\n"
+    show_help
+fi
+
+# Reset MODULE_NAME to empty to enforce requiring it (or let it stay default if you want, but the user requested explicit safety)
+MODULE_NAME=""
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         --module-name) MODULE_NAME="$2"; export MODULE_NAME; shift 2 ;; 
@@ -56,39 +111,26 @@ while [[ $# -gt 0 ]]; do
         --openlane2-path) OPENLANE2_PATH="$2"; shift 2 ;;
         --clock-period) CLOCK_PERIOD="$2"; export CLOCK_PERIOD; shift 2 ;;
         --utilization) CORE_UTILIZATION="$2"; export CORE_UTILIZATION; shift 2 ;;
+        --use-sudo) USE_SUDO=true; shift ;;
         --quiet) VERBOSE=false; shift ;;
-        --help|-h) cat << EOF
-KryptoNyte Physical Design Flow
-
-Usage: $0 [options]
-
-Options:
-  --module-name <name>    Module to process (default: ZeroNyteRV32ICore)
-  --config-base <file>    Base JSON config (default: config.base.json)
-  --config-module <file>  Module-specific JSON config (optional)
-  --output-root <path>    Output directory (default: _runs)
-  --openlane2-path <path> OpenLane2 directory (default: /opt/skywater-pdk/openlane2)
-  --clock-period <ns>     Clock period in nanoseconds (default: 10.0)
-  --utilization <ratio>   Core utilization ratio (default: 0.7)
-  --quiet                 Reduced verbosity
-  --help, -h              Show this help message
-
-Examples:
-  ./generate_physical_design.sh --module-name ZeroNyteRV32ICore
-  ./generate_physical_design.sh --module-name ZeroNyteRV32ICore --clock-period 8.0
-EOF
-            exit 0 ;;
+        --help|-h) show_help ;;
         *) print_error "Unknown argument: $1" ;;
     esac
 done
 
+if [[ -z "$MODULE_NAME" ]]; then
+    print_error "You must specify a module to target using --module-name. Run with --help to see valid modules."
+fi
+
 # --- Configuration Loading and Processing ---
 load_and_process_config() {
     print_step "Loading and processing configurations..."
+    local module_config_is_default=false
 
     # Determine module config file if not provided
     if [ -z "$CONFIG_MODULE_FILE" ]; then
         CONFIG_MODULE_FILE="config.${MODULE_NAME}.json"
+        module_config_is_default=true
     fi
 
     # Check for jq
@@ -98,12 +140,56 @@ load_and_process_config() {
 
     # Check for config files
     [ ! -f "$CONFIG_BASE_FILE" ] && print_error "Base config file not found: $CONFIG_BASE_FILE"
-    [ ! -f "$CONFIG_MODULE_FILE" ] && print_error "Module config file not found: $CONFIG_MODULE_FILE"
 
-    # Merge configurations (module config overrides base config)
-    MERGED_CONFIG=$(jq -s '.[0] * .[1]' "$CONFIG_BASE_FILE" "$CONFIG_MODULE_FILE")
-    
-    print_success "Configurations loaded and merged."
+    if [ -f "$CONFIG_MODULE_FILE" ]; then
+        # Merge configurations (module config overrides base config)
+        MERGED_CONFIG=$(jq -s '.[0] * .[1]' "$CONFIG_BASE_FILE" "$CONFIG_MODULE_FILE")
+        print_success "Configurations loaded and merged."
+        return
+    fi
+
+    if [ "$module_config_is_default" != true ]; then
+        print_error "Module config file not found: $CONFIG_MODULE_FILE"
+    fi
+
+    local pnr_sdc_exists=false
+    local signoff_sdc_exists=false
+    [ -f "constraints/${MODULE_NAME}.sdc" ] && pnr_sdc_exists=true
+    [ -f "constraints/${MODULE_NAME}_signoff.sdc" ] && signoff_sdc_exists=true
+
+    local generated_module_config
+    generated_module_config=$(jq -n \
+        --arg module_name "$MODULE_NAME" \
+        --arg verilog_file "dir::src/${MODULE_NAME}.v" \
+        --arg clock_port "$CLOCK_PORT" \
+        --arg clock_period "$CLOCK_PERIOD" \
+        --arg core_utilization "$CORE_UTILIZATION" \
+        --arg aspect_ratio "$ASPECT_RATIO" \
+        --arg pdk_variant "$PDK_VARIANT" \
+        --arg pnr_sdc_file "dir::constraints/${MODULE_NAME}.sdc" \
+        --arg signoff_sdc_file "dir::constraints/${MODULE_NAME}_signoff.sdc" \
+        --argjson include_pnr_sdc "$pnr_sdc_exists" \
+        --argjson include_signoff_sdc "$signoff_sdc_exists" '
+        {
+          DESIGN_NAME: $module_name,
+          VERILOG_FILES: [$verilog_file],
+          CLOCK_PORT: $clock_port,
+          CLOCK_PERIOD: ($clock_period | tonumber),
+          FP_CORE_UTIL: ($core_utilization | tonumber),
+          FP_ASPECT_RATIO: ($aspect_ratio | tonumber),
+          STD_CELL_LIBRARY: $pdk_variant
+        }
+        + (if $include_pnr_sdc then {PNR_SDC_FILE: $pnr_sdc_file} else {} end)
+        + (if $include_signoff_sdc then {SIGNOFF_SDC_FILE: $signoff_sdc_file} else {} end)
+    ')
+
+    MERGED_CONFIG=$(jq -s --argjson module_config "$generated_module_config" '.[0] * $module_config' "$CONFIG_BASE_FILE")
+
+    print_warning "Module config file not found: $CONFIG_MODULE_FILE. Generated a default module config for $MODULE_NAME."
+    if [ "$pnr_sdc_exists" != true ] || [ "$signoff_sdc_exists" != true ]; then
+        print_warning "Module-specific SDC files were not found for $MODULE_NAME; the flow will use JSON clock settings only."
+    fi
+    print_success "Base configuration loaded with generated module defaults."
 }
 
 # --- Main Flow Functions ---
@@ -118,11 +204,19 @@ prepare_design_config() {
     local input_rtl="../rtl/generators/generated/verilog_hierarchical_timed/${MODULE_NAME}.v"
     local target_rtl="$src_dir/${MODULE_NAME}.v"
     
+    if [ ! -f "$input_rtl" ]; then
+        print_warning "RTL file not found: $input_rtl"
+        print_step "Attempting to generate missing RTL automatically via SBT..."
+        pushd "$RTL_DIR" > /dev/null
+        sbt generateRTL || print_error "SBT RTL generation failed! Check compiler logs."
+        popd > /dev/null
+    fi
+
     if [ -f "$input_rtl" ]; then
         cp "$input_rtl" "$target_rtl"
         print_success "RTL file copied: $input_rtl -> $target_rtl"
     else
-        print_error "RTL file not found: $input_rtl. Please generate RTL first."
+        print_error "RTL file STILL not found: $input_rtl. Is '$MODULE_NAME' spelled perfectly with correct capitalization?"
     fi
 
     # Copy constraint files if they exist
@@ -147,18 +241,32 @@ validate_configuration() {
     print_step "Validating configuration..."
     
     # Check OpenLane2 installation
-    if [ ! -d "$OPENLANE2_PATH" ]; then
+    if [ -d "$OPENLANE2_PATH" ]; then
+        OPENLANE2_SHELL_NIX="$OPENLANE2_PATH/shell.nix"
+        if [ ! -f "$OPENLANE2_SHELL_NIX" ]; then
+            print_error "OpenLane2 shell.nix not found at: $OPENLANE2_SHELL_NIX"
+        fi
+    elif [ -f "$OPENLANE2_PATH" ]; then
+        case "$OPENLANE2_PATH" in
+            */shell.nix|shell.nix)
+                OPENLANE2_SHELL_NIX="$OPENLANE2_PATH"
+                ;;
+            *)
+                print_error "OpenLane2 path points to a file, but it is not shell.nix: $OPENLANE2_PATH"
+                ;;
+        esac
+    else
         print_error "OpenLane2 path does not exist: $OPENLANE2_PATH"
-    fi
-    
-    # Check for Nix environment files
-    if [ ! -f "$OPENLANE2_PATH/flake.nix" ] && [ ! -f "$OPENLANE2_PATH/shell.nix" ]; then
-        print_error "OpenLane2 Nix environment not found at: $OPENLANE2_PATH"
     fi
     
     # Check nix-shell availability
     if ! command -v nix-shell >/dev/null 2>&1; then
         print_error "nix-shell not found - required for OpenLane2"
+    fi
+
+    # Warn when daemon socket likely needs elevated privileges
+    if [ "$USE_SUDO" != true ] && [ -d "/nix/var/nix/daemon-socket" ] && ! id -nG | grep -qw "nix-users"; then
+        print_warning "User '$USER' is not in nix-users; nix-shell may fail. Retry with --use-sudo or add your user to nix-users."
     fi
     
     # Check RTL file exists
@@ -184,23 +292,27 @@ run_openlane2_flow() {
     print_step "Design directory: $design_dir"
     print_step "Log file: $log_file"
 
-    # Change to the design directory to run OpenLane2
-    cd "$design_dir"
-    
-    if [ "$VERBOSE" = true ]; then
-        nix-shell "$OPENLANE2_PATH" --run "openlane config.json" 2>&1 | tee "$log_file"
-    else
-        nix-shell "$OPENLANE2_PATH" --run "openlane config.json" > "$log_file" 2>&1
+    # Avoid nix-shell fallback lookup of <nixpkgs>.bashInteractive on systems
+    # without configured channels/NIX_PATH.
+    local nix_build_shell="${NIX_BUILD_SHELL:-$(command -v bash)}"
+    local openlane_run_cmd="cd \"$design_dir\" && python3 \"$PHYSICAL_DESIGN_DIR/run_custom_floorplan.py\" config.json"
+    local nix_cmd=(env "NIX_BUILD_SHELL=$nix_build_shell" nix-shell --pure "$OPENLANE2_SHELL_NIX" --run "$openlane_run_cmd")
+    if [ "$USE_SUDO" = true ]; then
+        nix_cmd=(sudo env "NIX_BUILD_SHELL=$nix_build_shell" nix-shell --pure "$OPENLANE2_SHELL_NIX" --run "$openlane_run_cmd")
     fi
-
-    local exit_code=${PIPESTATUS[0]}
+    local exit_code=0
+    if [ "$VERBOSE" = true ]; then
+        "${nix_cmd[@]}" 2>&1 | tee "$log_file"
+        exit_code=${PIPESTATUS[0]}
+    else
+        "${nix_cmd[@]}" > "$log_file" 2>&1
+        exit_code=$?
+    fi
     if [ $exit_code -ne 0 ]; then
         print_error "OpenLane2 flow failed with exit code $exit_code. Check log: $log_file"
     fi
     print_success "OpenLane2 flow completed successfully."
     
-    # Return to original directory
-    cd "$PHYSICAL_DESIGN_DIR"
 }
 
 generate_final_reports() {
@@ -271,8 +383,11 @@ EOF
 main() {
     print_banner "Starting KryptoNyte OpenLane2 Physical Design Flow for $MODULE_NAME"
 
+    # Normalize execution location so run/report paths can stay relative.
+    cd "$PHYSICAL_DESIGN_DIR"
+
     # Setup paths
-    export FULL_OUTPUT_ROOT="$(pwd)/$OUTPUT_ROOT"
+    export FULL_OUTPUT_ROOT="$OUTPUT_ROOT"
     export RUNS_PATH="$FULL_OUTPUT_ROOT/runs"
     export REPORTS_PATH="$FULL_OUTPUT_ROOT/reports"
     mkdir -p "$RUNS_PATH" "$REPORTS_PATH"

@@ -14,7 +14,7 @@ mkdir -p "$BUILD_DIR"
 rm -rf "$OBJ_DIR"
 mkdir -p "$OBJ_DIR"
 
-VERILOG_TOP="rtl/generators/generated/verilog_hierarchical_timed/OctoNyteRV32ICore.v"
+VERILOG_TOP="rtl/generators/generated_sim/verilog_hierarchical_timed/OctoNyteRV32ICore.v"
 RTL_SRC_DIRS=("rtl/OctoNyte/rv32i/src" "rtl/library/src")
 
 regen_rtl=0
@@ -28,7 +28,7 @@ fi
 
 if [[ "$regen_rtl" -eq 1 ]]; then
   echo "Regenerating OctoNyte RTL..."
-  (cd "rtl" && sbt "generators/generateOctoNyteRTL")
+  (cd "rtl" && sbt "generators/runMain generators.GenerateHierarchicalRTL --core-family OctoNyte --core-variant rv32i --cosimulate")
 fi
 
 if [[ ! -f "$VERILOG_TOP" ]]; then

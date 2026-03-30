@@ -4,6 +4,8 @@
 
 # Chisel generated Verilog (build artifacts, not source)
 **/generated/
+**/generated_sim/
+**/generated_prod/
 **/target/
 **/project/target/
 **/project/project/
@@ -477,3 +479,6 @@ _runs/
 tests/riscof/riscv-arch-test/
 tests/riscof_work/I/
 tests/riscof_work/
+tests/smoke_suite/
+tests/full_test_log.txt
+yosys_log.txt

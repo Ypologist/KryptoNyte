@@ -1,0 +1,3 @@
+wb: thread=0x5 from=0x800001c0 instr=0xfe0505e7 taken=1 target=0x800001d4 branch=0 jal=0 jalr=1
+wb: thread=0x5 from=0x800001d8 instr=0x40006f taken=1 target=0x800001dc branch=0 jal=1 jalr=0
+wb: thread=0x5 from=0x8000020c instr=0x200006f taken=1 target=0x8000022c branch=0 jal=1 jalr=0
