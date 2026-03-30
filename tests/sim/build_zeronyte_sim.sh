@@ -25,6 +25,7 @@ verilator -cc "$VERILOG_TOP" \
   --Mdir "$OBJ_DIR" \
   --timescale-override 1ns/1ns \
   --trace \
+  --Wno-PINMISSING \
   --build \
   -CFLAGS "-O2 -std=c++17" \
   -LDFLAGS "-O2" \
