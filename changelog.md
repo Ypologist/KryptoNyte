@@ -1,3 +1,12 @@
+# 03/30/2026 06:49 - Repository Cleanup and Tracking Pruning
+
+**Why these changes were made:**
+* **Workspace Clutter:** The top-level repository accumulated widespread Python simulation traces (`log_*.txt`, `sig_*.txt`, `base_*.txt`, `nohup.out`) and scratchpad project folders (`tmp_test/`) over the last 48 hours natively during intensive multi-threaded architecture generation and debugging loops.
+
+**What the changes are:**
+* **Temporary Cache Flush:** Securely purged all dangling `.txt` test logs and detached `.py`/`tmp_test` directories manually from the root working directory tree.
+* **Git Untracking:** Issued `git rm -r --cached` across the artifacts ensuring the repository indexing logic officially stops watching and pushing localized intermediate execution dumps upstream.
+
 # 03/29/2026 21:42 - ZeroNyte-IM Legacy MemPort Pin Fix
 
 **Why these changes were made:**
