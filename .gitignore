@@ -482,3 +482,4 @@ tests/riscof_work/
 tests/smoke_suite/
 tests/full_test_log.txt
 yosys_log.txt
+rtl/generators/generated_prod/firrtl/OctoNyteRV32IZmmulCore.fir.mlir

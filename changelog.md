@@ -1,3 +1,20 @@
+# 04/02/2026 07:23 - Customization of Physical Design Output Directories
+
+**Why these changes were made:**
+* **Persistent Runs Storage:** The physical design generation script originally vaulted all OpenLane2 outputs dynamically into `/tmp`. During unforeseen system crashes, rebooting immediately scrubbed the volatile directory trace (including crucial `.gds` layouts and logs) and brutally forced time-consuming pipeline rebuilds.
+
+**What the changes are:**
+* **Default Directory Shift:** Modified `OUTPUT_ROOT` within `generate_physical_design.sh` to natively direct logs and output layers safely into the persistent, project-bound `physical_design/_runs` directory topology.
+* **Granular CLI Control Override:** Converted the legacy `--output-root` argument strictly into `--log-directory`. This allows granular user-level redirection structurally isolating outputs into transient scratchspaces (e.g., `/tmp`) strictly when commanded.
+
+# 04/02/2026 07:19 - OpenLane2 Macro Parsing Dangling Attribute Fix
+
+**Why these changes were made:**
+* **Unexpected End of File Syntax Errors:** During physical design synthesis, stripping hardened macro implementations (like `regs_128x32` and `RegFileMT2R1WMem`) from the generated RTL via Python regex was inadvertently leaving their preceding Yosys attributes (e.g., `(* src = ... *)`) behind. Because `regs_128x32` happened to be the final module cleanly written in the `.v` source file, deleting its core logic but stranding its metadata caused Yosys to crash during parsing with a literal `syntax error, unexpected end of file`.
+
+**What the changes are:**
+* **`generate_physical_design.sh` Regex Binding Update:** Upgraded the replacement `re.sub` instructions dynamically identifying macro bounds to additionally match and correctly consume all optional preceding `(* ... *)` attribute tag sequences (`(?s)(?:\(\*.*?\*\)\s*)*module`). This formally stops macro metadata chunks from detaching and crashing parsers at EOF boundaries.
+
 # 03/30/2026 06:49 - Repository Cleanup and Tracking Pruning
 
 **Why these changes were made:**

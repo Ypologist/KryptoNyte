@@ -30,7 +30,7 @@ print_error() { echo -e "${RED}❌${NC} $1"; exit 1; }
 MODULE_NAME="TetraNyteRV32ICore"
 CONFIG_BASE_FILE="config.base.json"
 CONFIG_MODULE_FILE=""
-OUTPUT_ROOT="${OPENLANE_OUTPUT_ROOT:-/tmp/kryptonyte_openlane_${USER}}"
+OUTPUT_ROOT="${OPENLANE_OUTPUT_ROOT:-$SCRIPT_DIR/_runs}"
 OPENLANE2_PATH="${OPENLANE2_ROOT:-/opt/skywater-pdk/openlane2}"
 VERBOSE=true
 USE_SUDO=false
@@ -61,7 +61,7 @@ Options:
   --module-name <name>    Module to process (Required unless viewing help)
   --config-base <file>    Base JSON config (default: config.base.json)
   --config-module <file>  Module-specific JSON config (optional)
-  --output-root <path>    Output directory (default: /tmp/kryptonyte_openlane_\$USER)
+  --log-directory <path>  Output directory (default: physical_design/_runs)
   --openlane2-path <path> OpenLane2 directory (default: /opt/skywater-pdk/openlane2)
   --clock-period <ns>     Clock period in nanoseconds (default: 10.0)
   --utilization <percent> Core utilization percentage (default: 70)
@@ -107,7 +107,7 @@ while [[ $# -gt 0 ]]; do
         --module-name) MODULE_NAME="$2"; export MODULE_NAME; shift 2 ;; 
         --config-base) CONFIG_BASE_FILE="$2"; shift 2 ;;
         --config-module) CONFIG_MODULE_FILE="$2"; shift 2 ;;
-        --output-root) OUTPUT_ROOT="$2"; shift 2 ;;
+        --log-directory) OUTPUT_ROOT="$2"; shift 2 ;;
         --openlane2-path) OPENLANE2_PATH="$2"; shift 2 ;;
         --clock-period) CLOCK_PERIOD="$2"; export CLOCK_PERIOD; shift 2 ;;
         --utilization) CORE_UTILIZATION="$2"; export CORE_UTILIZATION; shift 2 ;;
@@ -214,6 +214,21 @@ prepare_design_config() {
 
     if [ -f "$input_rtl" ]; then
         cp "$input_rtl" "$target_rtl"
+        if [ "$MODULE_NAME" != "RegFileMT2R1WMem" ] && grep -q "module RegFileMT2R1WMem" "$target_rtl"; then
+            python3 -c "
+import re
+with open('$target_rtl', 'r') as f: content = f.read()
+content = re.sub(r'(?s)(?:\(\*.*?\*\)\s*)*module RegFileMT2R1WMem\(.*?endmodule', '', content)
+content = re.sub(r'(?s)(?:\(\*.*?\*\)\s*)*module regs_128x32\(.*?endmodule', '', content)
+
+content = content.replace('.io_readAddrs(if_id[214:205])', '.io_readAddrs_0(if_id[209:205]), .io_readAddrs_1(if_id[214:210])')
+content = content.replace('.io_readData(_regFile_io_readData)', '.io_readData_0(_regFile_io_readData[31:0]), .io_readData_1(_regFile_io_readData[63:32])')
+content = content.replace('.io_wens(writeEnable)', '.io_wens_0(writeEnable)')
+content = content.replace('.io_writeAddrs(_regFile_io_writeAddrs_0_T)', '.io_writeAddrs_0(_regFile_io_writeAddrs_0_T)')
+content = content.replace('.io_writeData(wbData)', '.io_writeData_0(wbData)')
+with open('$target_rtl', 'w') as f: f.write(content)
+"
+        fi
         print_success "RTL file copied: $input_rtl -> $target_rtl"
     else
         print_error "RTL file STILL not found: $input_rtl. Is '$MODULE_NAME' spelled perfectly with correct capitalization?"

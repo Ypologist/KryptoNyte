@@ -18,6 +18,19 @@
 
   "RT_MAX_LAYER": "met4",
 
+  "MACROS": {
+    "RegFileMT2R1WMem": {
+      "gds": ["/tmp/kryptonyte_openlane_jglossner/runs/RegFileMT2R1WMem/runs/RUN_2026-04-01_06-33-19/final/gds/RegFileMT2R1WMem.gds"],
+      "lef": ["/tmp/kryptonyte_openlane_jglossner/runs/RegFileMT2R1WMem/runs/RUN_2026-04-01_06-33-19/final/lef/RegFileMT2R1WMem.lef"],
+      "nl": ["/tmp/kryptonyte_openlane_jglossner/runs/RegFileMT2R1WMem/runs/RUN_2026-04-01_06-33-19/final/nl/RegFileMT2R1WMem.nl.v"],
+      "lib": {
+        "*_tt_025C_1v80": ["/tmp/kryptonyte_openlane_jglossner/runs/RegFileMT2R1WMem/runs/RUN_2026-04-01_06-33-19/final/lib/nom_tt_025C_1v80/RegFileMT2R1WMem__nom_tt_025C_1v80.lib"],
+        "*_ss_100C_1v60": ["/tmp/kryptonyte_openlane_jglossner/runs/RegFileMT2R1WMem/runs/RUN_2026-04-01_06-33-19/final/lib/max_ss_100C_1v60/RegFileMT2R1WMem__max_ss_100C_1v60.lib"],
+        "*_ff_n40C_1v95": ["/tmp/kryptonyte_openlane_jglossner/runs/RegFileMT2R1WMem/runs/RUN_2026-04-01_06-33-19/final/lib/min_ff_n40C_1v95/RegFileMT2R1WMem__min_ff_n40C_1v95.lib"]
+      }
+    }
+  },
+
   "PNR_SDC_FILE": "dir::constraints/TetraNyteRV32ICore.sdc",
   "SIGNOFF_SDC_FILE": "dir::constraints/TetraNyteRV32ICore_signoff.sdc"
 }
