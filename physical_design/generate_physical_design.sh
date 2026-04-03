@@ -216,16 +216,35 @@ prepare_design_config() {
         cp "$input_rtl" "$target_rtl"
         if [ "$MODULE_NAME" != "RegFileMT2R1WMem" ] && grep -q "module RegFileMT2R1WMem" "$target_rtl"; then
             python3 -c "
-import re
 with open('$target_rtl', 'r') as f: content = f.read()
-content = re.sub(r'(?s)(?:\(\*.*?\*\)\s*)*module RegFileMT2R1WMem\(.*?endmodule', '', content)
-content = re.sub(r'(?s)(?:\(\*.*?\*\)\s*)*module regs_128x32\(.*?endmodule', '', content)
+
+def strip_mod(text, mod_name):
+    while True:
+        start = text.find('module ' + mod_name + '(')
+        if start == -1: break
+        end = text.find('endmodule', start)
+        if end == -1: break
+        end += 9
+        idx = start
+        while idx > 0:
+            while idx > 0 and text[idx-1].isspace(): idx -= 1
+            if idx >= 2 and text[idx-2:idx] == '*)':
+                op = text.rfind('(*', 0, idx)
+                if op != -1: idx = op
+                else: break
+            else: break
+        text = text[:idx] + text[end:]
+    return text
+
+content = strip_mod(content, 'RegFileMT2R1WMem')
+content = strip_mod(content, 'regs_128x32')
 
 content = content.replace('.io_readAddrs(if_id[214:205])', '.io_readAddrs_0(if_id[209:205]), .io_readAddrs_1(if_id[214:210])')
 content = content.replace('.io_readData(_regFile_io_readData)', '.io_readData_0(_regFile_io_readData[31:0]), .io_readData_1(_regFile_io_readData[63:32])')
 content = content.replace('.io_wens(writeEnable)', '.io_wens_0(writeEnable)')
 content = content.replace('.io_writeAddrs(_regFile_io_writeAddrs_0_T)', '.io_writeAddrs_0(_regFile_io_writeAddrs_0_T)')
 content = content.replace('.io_writeData(wbData)', '.io_writeData_0(wbData)')
+content = content.replace('.io_debugX1(unusedRegDebugX1)', '.io_debugX1_0(unusedRegDebugX1[31:0]), .io_debugX1_1(unusedRegDebugX1[63:32]), .io_debugX1_2(unusedRegDebugX1[95:64]), .io_debugX1_3(unusedRegDebugX1[127:96])')
 with open('$target_rtl', 'w') as f: f.write(content)
 "
         fi
@@ -394,6 +413,43 @@ EOF
     fi
 }
 
+resolve_macro_paths() {
+    print_step "Resolving latest macro paths..."
+    # A dedicated macro resolution override for RegFileMT2R1WMem
+    local regfile_dir="$PHYSICAL_DESIGN_DIR/_runs/runs/RegFileMT2R1WMem/runs"
+    if [ -d "$regfile_dir" ]; then
+        local latest_run=$(ls -td "$regfile_dir"/RUN_* 2>/dev/null | head -n 1)
+        if [ -n "$latest_run" ]; then
+            print_success "Found latest RegFileMT2R1WMem run: $latest_run"
+            
+            local final_dir="$latest_run/results/final"
+            if [ ! -d "$final_dir/gds" ]; then
+                final_dir="$latest_run/final"
+            fi
+            
+            MERGED_CONFIG=$(echo "$MERGED_CONFIG" | jq --arg final_dir "$final_dir" '
+                .MACROS.RegFileMT2R1WMem = {
+                    "instances": {
+                        "regFile": {
+                            "location": [7000, 11000],
+                            "orientation": "N"
+                        }
+                    },
+                    "gds": [($final_dir + "/gds/RegFileMT2R1WMem.gds")],
+                    "lef": [($final_dir + "/lef/RegFileMT2R1WMem.lef")],
+                    "nl": [($final_dir + "/nl/RegFileMT2R1WMem.nl.v")],
+                    "lib": {
+                        "*_tt_025C_1v80": [($final_dir + "/lib/nom_tt_025C_1v80/RegFileMT2R1WMem__nom_tt_025C_1v80.lib")],
+                        "*_ss_100C_1v60": [($final_dir + "/lib/max_ss_100C_1v60/RegFileMT2R1WMem__max_ss_100C_1v60.lib")],
+                        "*_ff_n40C_1v95": [($final_dir + "/lib/min_ff_n40C_1v95/RegFileMT2R1WMem__min_ff_n40C_1v95.lib")]
+                    }
+                }
+            ')
+            print_success "Injected dynamic MACROS configuration for RegFileMT2R1WMem"
+        fi
+    fi
+}
+
 # --- Main Execution ---
 main() {
     print_banner "Starting KryptoNyte OpenLane2 Physical Design Flow for $MODULE_NAME"
@@ -409,6 +465,7 @@ main() {
 
     validate_configuration
     load_and_process_config
+    resolve_macro_paths
     prepare_design_config
     run_openlane2_flow
     generate_final_reports

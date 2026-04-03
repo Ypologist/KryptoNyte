@@ -1,3 +1,21 @@
+# 04/03/2026 08:24 - OpenLane 2 Macro Manual Placement Initialization
+
+**Why these changes were made:**
+* **`[PDN-0234] regFile has not been placed and fixed` Exceptions:** During Stage 20 of the OpenLane 2 flow, the PDN generation phase aborted because the underlying `OpenROAD.MacroPlacement` and `OpenROAD.CutRows` routines failed to automatically assign physical geometries to the `regFile` macro bounding box. Because OpenLane 2 stringently requires macros to have an explicit coordinate origin established before constructing Power Delivery Networks around them, the unset `regFile` caused a fatal layout exception.
+
+**What the changes are:**
+* **`generate_physical_design.sh` Dynamic Placement Rules:** Updated the dynamic `jq` configuration payload targeting the `RegFileMT2R1WMem` macro definitions. Injected an explicit `"instances": { "regFile": { "location": [7000, 11000], "orientation": "N" } }` mapping automatically placing the register file in the horizontal center of the `15,000`x`15,000` micron die grid, while anchoring it physically up high on the Y-axis. This optimally bypasses auto-placer failures while concurrently guaranteeing standard arithmetic ALU slices have unimpeded layout sovereignty natively directly beneath the massive register bank.
+
+# 04/03/2026 08:01 - OpenLane2 Macro Instantiation Unbundling Fix
+
+**Why these changes were made:**
+* **`io_debugX1` Pin Missing Errors:** When synthesizing the new hardened `RegFileMT2R1WMem` macro using OpenLane/Yosys, the toolchain inherently "unbundled" multi-dimensional arrays or wide scalar vectors into individual split output ports (e.g., pulling a unified `128`-bit port into `io_debugX1_0`, `io_debugX1_1`, `io_debugX1_2`, and `io_debugX1_3`). Although the top-level `TetraNyteRV32ICore` RTL successfully maps these debug ports to an unused internal wire safely omitting them from the global boundary interface, when swapping the hard macro in, Yosys strictly matched the original single-port instantiation (`.io_debugX1(unusedRegDebugX1)`) against the unbundled physical boundary definition and failed instantiation entirely logging `does not have a port named 'io_debugX1'`.
+* **Outdated Array Replacement String:** The custom python logic script injected into `generate_physical_design.sh` to correct macro instantiation signatures was strictly programmed to substitute flattened array indices against an older RTL baseline (e.g., `io_readAddrs(if_id[214:205])`). Due to recent Chisel compiler shifts, the newly generated RTL used implicit bitwise concatenations for vector mappings (`io_readAddrs({if_id[...], if_id[...]})`), completely skipping the regex match algorithm implicitly stranding parameters.
+
+**What the changes are:**
+* **`generate_physical_design.sh` AST Vector Substitutions:** Appended new Python regex logic immediately resolving the legacy `unusedRegDebugX1` connection into explicit 32-bit sliced wire maps (`.io_debugX1_0(unusedRegDebugX1[31:0]), ... [127:96]`) functionally matching the synthesized macro unbundling behavior identically preventing missing pin evaluation drops.
+* **Simulator Syntax Reversion:** Discovered that the FIRRTL compiler natively structures instantiated vectors as literal flat concatenated objects like `{if_id...}` when strictly rendering `generated_prod/` outputs. However, since the OpenLane pipeline natively inherits execution wrappers from `generated/verilog_hierarchical_timed/` (which defaults to raw unbundled vectors internally simulating debug timings `if_id[214:205]`), the script replacements must strictly remain synchronized solely matching that `_timed` target artifact behavior respectively.
+
 # 04/02/2026 07:23 - Customization of Physical Design Output Directories
 
 **Why these changes were made:**
