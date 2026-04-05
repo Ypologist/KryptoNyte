@@ -11,5 +11,8 @@
   "MAX_FANOUT_CONSTRAINT": 20,
   "PL_TARGET_DENSITY_PCT": 55,
   "FP_PIN_ORDER_CFG": "dir::constraints/pin_order.mrf.cfg",
+  "FP_PDN_CORE_RING": true,
+  "FP_PDN_CORE_RING_VOFFSET": 1.4,
+  "FP_PDN_CORE_RING_HOFFSET": 0.6,
   "RT_MAX_LAYER": "met4"
 }

@@ -198,6 +198,11 @@ prepare_design_config() {
     
     local design_dir="$RUNS_PATH/$MODULE_NAME"
     local src_dir="$design_dir/src"
+    local constraints_dir="$design_dir/constraints"
+
+    # Refresh staged inputs on every invocation so deleted files do not persist
+    # across runs while preserving historical artifacts under design_dir/runs.
+    rm -rf "$src_dir" "$constraints_dir"
     mkdir -p "$src_dir"
 
     # Copy RTL file to design source directory
@@ -239,6 +244,7 @@ def strip_mod(text, mod_name):
 content = strip_mod(content, 'RegFileMT2R1WMem')
 content = strip_mod(content, 'regs_128x32')
 
+content = content.replace('.clock(clock),', '.clock(clock), .reset(reset),')
 content = content.replace('.io_readAddrs(if_id[214:205])', '.io_readAddrs_0(if_id[209:205]), .io_readAddrs_1(if_id[214:210])')
 content = content.replace('.io_readData(_regFile_io_readData)', '.io_readData_0(_regFile_io_readData[31:0]), .io_readData_1(_regFile_io_readData[63:32])')
 content = content.replace('.io_wens(writeEnable)', '.io_wens_0(writeEnable)')
@@ -415,6 +421,10 @@ EOF
 
 resolve_macro_paths() {
     print_step "Resolving latest macro paths..."
+    if [ "$MODULE_NAME" = "RegFileMT2R1WMem" ]; then
+        print_success "Target module is RegFileMT2R1WMem; skipping self-macro injection"
+        return
+    fi
     # A dedicated macro resolution override for RegFileMT2R1WMem
     local regfile_dir="$PHYSICAL_DESIGN_DIR/_runs/runs/RegFileMT2R1WMem/runs"
     if [ -d "$regfile_dir" ]; then
@@ -427,11 +437,19 @@ resolve_macro_paths() {
                 final_dir="$latest_run/final"
             fi
             
+            # Dynamically merge the exact macro dependencies natively
             MERGED_CONFIG=$(echo "$MERGED_CONFIG" | jq --arg final_dir "$final_dir" '
+                .PDN_MACRO_CONNECTIONS = ["regFile VPWR VGND VPWR VGND"] |
+                .FP_PDN_VOFFSET = 23.28 |
+                .FP_PDN_HOFFSET = 2.64 |
+                .FP_MACRO_HORIZONTAL_HALO = 10.12 |
+                .FP_MACRO_VERTICAL_HALO = 10.88 |
+                .PL_MAX_DISPLACEMENT_X = 1500 |
+                .PL_MAX_DISPLACEMENT_Y = 1500 |
                 .MACROS.RegFileMT2R1WMem = {
                     "instances": {
                         "regFile": {
-                            "location": [7000, 11000],
+                            "location": [100.28, 100.64],
                             "orientation": "N"
                         }
                     },
