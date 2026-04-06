@@ -86,6 +86,7 @@ Valid Target Modules for Synthesis:
 
 > Hard Macro Generation Targets:
   - RegFileMT2R1WMem             (TetraNyte Shared 2-Read 1-Write Register File)
+  - RegFile2R1WMem               (ZeroNyte Dedicated 1-Thread 2-Read 1-Write Register File)
   - RegFileMT8R4WMem             (Superscalar 8-Read 4-Write Register File)
   - RegFileMTMem                 (Base multithreaded monolithic RF)
   - ICache                       (TetraNyte/ZeroNyte Instruction Cache)
@@ -724,88 +725,102 @@ EOF
 
 resolve_macro_paths() {
     print_step "Resolving latest macro paths..."
-    if [ "$MODULE_NAME" = "RegFileMT2R1WMem" ]; then
-        print_success "Target module is RegFileMT2R1WMem; skipping self-macro injection"
-        return
-    fi
-    # A dedicated macro resolution override for RegFileMT2R1WMem
-    local regfile_dir="$PHYSICAL_DESIGN_DIR/_runs/runs/RegFileMT2R1WMem/runs"
-    if [ -d "$regfile_dir" ]; then
-        local latest_run=""
-        local final_dir=""
-        local candidate_run=""
-        local macro_lef=""
-        while IFS= read -r candidate_run; do
-            [ -n "$candidate_run" ] || continue
 
-            final_dir=$(materialize_run_final_dir "$candidate_run" "RegFileMT2R1WMem" || true)
-            if [ -n "$final_dir" ]; then
-                latest_run="$candidate_run"
-                break
-            fi
+    _inject_macro() {
+        local macro_name="$1"
 
-            print_warning "Skipping unusable RegFileMT2R1WMem run: $candidate_run"
-        done < <(ls -td "$regfile_dir"/RUN_* 2>/dev/null || true)
-
-        if [ -z "$latest_run" ]; then
-            print_error "No completed RegFileMT2R1WMem macro run with final artifacts found under $regfile_dir"
+        if [ "$MODULE_NAME" = "$macro_name" ]; then
+            print_success "Target module is $macro_name; skipping self-macro injection"
+            return
         fi
 
-        print_success "Using RegFileMT2R1WMem macro run: $latest_run"
-        macro_lef=$(create_regfile_macro_abstract_lef "$final_dir/lef/RegFileMT2R1WMem.lef")
+        # Check if the RTL actually instantiates this macro
+        if ! grep -E -q "module $macro_name" "$target_rtl" 2>/dev/null; then
+            return
+        fi
 
-        # Dynamically merge the exact macro dependencies natively
-        MERGED_CONFIG=$(echo "$MERGED_CONFIG" | jq --arg final_dir "$final_dir" --arg macro_lef "$macro_lef" '
-            .PDN_MACRO_CONNECTIONS = ["regFile VPWR VGND VPWR VGND"] |
-            .FP_PDN_VPITCH = 341.45 |
-            .FP_PDN_HPITCH = 340.04 |
-            .FP_PDN_VOFFSET = 102.8 |
-            .FP_PDN_HOFFSET = 109.32 |
-            .FP_MACRO_HORIZONTAL_HALO = 10.12 |
-            .FP_MACRO_VERTICAL_HALO = 10.88 |
-            .PL_MAX_DISPLACEMENT_X = 1500 |
-            .PL_MAX_DISPLACEMENT_Y = 1500 |
-            .MACROS.RegFileMT2R1WMem = {
-                "instances": {
-                    "regFile": {
-                        "location": [100.28, 780.72],
-                        "orientation": "N"
+        local regfile_dir="$PHYSICAL_DESIGN_DIR/_runs/runs/$macro_name/runs"
+        if [ -d "$regfile_dir" ]; then
+            local latest_run=""
+            local final_dir=""
+            local candidate_run=""
+            local macro_lef=""
+            while IFS= read -r candidate_run; do
+                [ -n "$candidate_run" ] || continue
+
+                final_dir=$(materialize_run_final_dir "$candidate_run" "$macro_name" || true)
+                if [ -n "$final_dir" ]; then
+                    latest_run="$candidate_run"
+                    break
+                fi
+
+                print_warning "Skipping unusable $macro_name run: $candidate_run"
+            done < <(ls -td "$regfile_dir"/RUN_* 2>/dev/null || true)
+
+            if [ -z "$latest_run" ]; then
+                print_error "No completed $macro_name macro run with final artifacts found under $regfile_dir"
+                exit 1
+            fi
+
+            print_success "Using $macro_name macro run: $latest_run"
+            macro_lef=$(create_regfile_macro_abstract_lef "$final_dir/lef/$macro_name.lef")
+
+            # Dynamically merge the exact macro dependencies natively
+            MERGED_CONFIG=$(echo "$MERGED_CONFIG" | jq --arg final_dir "$final_dir" --arg macro_lef "$macro_lef" --arg macro_name "$macro_name" '
+                .PDN_MACRO_CONNECTIONS = ["regFile VPWR VGND VPWR VGND"] |
+                .FP_PDN_VPITCH = 341.45 |
+                .FP_PDN_HPITCH = 340.04 |
+                .FP_PDN_VOFFSET = 102.8 |
+                .FP_PDN_HOFFSET = 109.32 |
+                .FP_MACRO_HORIZONTAL_HALO = 10.12 |
+                .FP_MACRO_VERTICAL_HALO = 10.88 |
+                .PL_MAX_DISPLACEMENT_X = 1500 |
+                .PL_MAX_DISPLACEMENT_Y = 1500 |
+                .MACROS[$macro_name] = {
+                    "instances": {
+                        "regFile": {
+                            "location": [100.28, 780.72],
+                            "orientation": "N"
+                        }
+                    },
+                    "gds": [($final_dir + "/gds/" + $macro_name + ".gds")],
+                    "lef": [$macro_lef],
+                    "nl": [($final_dir + "/nl/" + $macro_name + ".nl.v")],
+                    "spef": {
+                        "nom_*": [($final_dir + "/spef/nom/" + $macro_name + ".nom.spef")],
+                        "min_*": [($final_dir + "/spef/min/" + $macro_name + ".min.spef")],
+                        "max_*": [($final_dir + "/spef/max/" + $macro_name + ".max.spef")]
+                    },
+                    "lib": {
+                        "nom_tt_025C_1v80": [($final_dir + "/lib/nom_tt_025C_1v80/" + $macro_name + "__nom_tt_025C_1v80.lib")],
+                        "nom_ss_100C_1v60": [($final_dir + "/lib/nom_ss_100C_1v60/" + $macro_name + "__nom_ss_100C_1v60.lib")],
+                        "nom_ff_n40C_1v95": [($final_dir + "/lib/nom_ff_n40C_1v95/" + $macro_name + "__nom_ff_n40C_1v95.lib")],
+                        "min_tt_025C_1v80": [($final_dir + "/lib/min_tt_025C_1v80/" + $macro_name + "__min_tt_025C_1v80.lib")],
+                        "min_ss_100C_1v60": [($final_dir + "/lib/min_ss_100C_1v60/" + $macro_name + "__min_ss_100C_1v60.lib")],
+                        "min_ff_n40C_1v95": [($final_dir + "/lib/min_ff_n40C_1v95/" + $macro_name + "__min_ff_n40C_1v95.lib")],
+                        "max_tt_025C_1v80": [($final_dir + "/lib/max_tt_025C_1v80/" + $macro_name + "__max_tt_025C_1v80.lib")],
+                        "max_ss_100C_1v60": [($final_dir + "/lib/max_ss_100C_1v60/" + $macro_name + "__max_ss_100C_1v60.lib")],
+                        "max_ff_n40C_1v95": [($final_dir + "/lib/max_ff_n40C_1v95/" + $macro_name + "__max_ff_n40C_1v95.lib")]
+                    },
+                    "sdf": {
+                        "nom_tt_025C_1v80": [($final_dir + "/sdf/nom_tt_025C_1v80/" + $macro_name + "__nom_tt_025C_1v80.sdf")],
+                        "nom_ss_100C_1v60": [($final_dir + "/sdf/nom_ss_100C_1v60/" + $macro_name + "__nom_ss_100C_1v60.sdf")],
+                        "nom_ff_n40C_1v95": [($final_dir + "/sdf/nom_ff_n40C_1v95/" + $macro_name + "__nom_ff_n40C_1v95.sdf")],
+                        "min_tt_025C_1v80": [($final_dir + "/sdf/min_tt_025C_1v80/" + $macro_name + "__min_tt_025C_1v80.sdf")],
+                        "min_ss_100C_1v60": [($final_dir + "/sdf/min_ss_100C_1v60/" + $macro_name + "__min_ss_100C_1v60.sdf")],
+                        "min_ff_n40C_1v95": [($final_dir + "/sdf/min_ff_n40C_1v95/" + $macro_name + "__min_ff_n40C_1v95.sdf")],
+                        "max_tt_025C_1v80": [($final_dir + "/sdf/max_tt_025C_1v80/" + $macro_name + "__max_tt_025C_1v80.sdf")],
+                        "max_ss_100C_1v60": [($final_dir + "/sdf/max_ss_100C_1v60/" + $macro_name + "__max_ss_100C_1v60.sdf")],
+                        "max_ff_n40C_1v95": [($final_dir + "/sdf/max_ff_n40C_1v95/" + $macro_name + "__max_ff_n40C_1v95.sdf")]
                     }
-                },
-                "gds": [($final_dir + "/gds/RegFileMT2R1WMem.gds")],
-                "lef": [$macro_lef],
-                "nl": [($final_dir + "/nl/RegFileMT2R1WMem.nl.v")],
-                "spef": {
-                    "nom_*": [($final_dir + "/spef/nom/RegFileMT2R1WMem.nom.spef")],
-                    "min_*": [($final_dir + "/spef/min/RegFileMT2R1WMem.min.spef")],
-                    "max_*": [($final_dir + "/spef/max/RegFileMT2R1WMem.max.spef")]
-                },
-                "lib": {
-                    "nom_tt_025C_1v80": [($final_dir + "/lib/nom_tt_025C_1v80/RegFileMT2R1WMem__nom_tt_025C_1v80.lib")],
-                    "nom_ss_100C_1v60": [($final_dir + "/lib/nom_ss_100C_1v60/RegFileMT2R1WMem__nom_ss_100C_1v60.lib")],
-                    "nom_ff_n40C_1v95": [($final_dir + "/lib/nom_ff_n40C_1v95/RegFileMT2R1WMem__nom_ff_n40C_1v95.lib")],
-                    "min_tt_025C_1v80": [($final_dir + "/lib/min_tt_025C_1v80/RegFileMT2R1WMem__min_tt_025C_1v80.lib")],
-                    "min_ss_100C_1v60": [($final_dir + "/lib/min_ss_100C_1v60/RegFileMT2R1WMem__min_ss_100C_1v60.lib")],
-                    "min_ff_n40C_1v95": [($final_dir + "/lib/min_ff_n40C_1v95/RegFileMT2R1WMem__min_ff_n40C_1v95.lib")],
-                    "max_tt_025C_1v80": [($final_dir + "/lib/max_tt_025C_1v80/RegFileMT2R1WMem__max_tt_025C_1v80.lib")],
-                    "max_ss_100C_1v60": [($final_dir + "/lib/max_ss_100C_1v60/RegFileMT2R1WMem__max_ss_100C_1v60.lib")],
-                    "max_ff_n40C_1v95": [($final_dir + "/lib/max_ff_n40C_1v95/RegFileMT2R1WMem__max_ff_n40C_1v95.lib")]
-                },
-                "sdf": {
-                    "nom_tt_025C_1v80": [($final_dir + "/sdf/nom_tt_025C_1v80/RegFileMT2R1WMem__nom_tt_025C_1v80.sdf")],
-                    "nom_ss_100C_1v60": [($final_dir + "/sdf/nom_ss_100C_1v60/RegFileMT2R1WMem__nom_ss_100C_1v60.sdf")],
-                    "nom_ff_n40C_1v95": [($final_dir + "/sdf/nom_ff_n40C_1v95/RegFileMT2R1WMem__nom_ff_n40C_1v95.sdf")],
-                    "min_tt_025C_1v80": [($final_dir + "/sdf/min_tt_025C_1v80/RegFileMT2R1WMem__min_tt_025C_1v80.sdf")],
-                    "min_ss_100C_1v60": [($final_dir + "/sdf/min_ss_100C_1v60/RegFileMT2R1WMem__min_ss_100C_1v60.sdf")],
-                    "min_ff_n40C_1v95": [($final_dir + "/sdf/min_ff_n40C_1v95/RegFileMT2R1WMem__min_ff_n40C_1v95.sdf")],
-                    "max_tt_025C_1v80": [($final_dir + "/sdf/max_tt_025C_1v80/RegFileMT2R1WMem__max_tt_025C_1v80.sdf")],
-                    "max_ss_100C_1v60": [($final_dir + "/sdf/max_ss_100C_1v60/RegFileMT2R1WMem__max_ss_100C_1v60.sdf")],
-                    "max_ff_n40C_1v95": [($final_dir + "/sdf/max_ff_n40C_1v95/RegFileMT2R1WMem__max_ff_n40C_1v95.sdf")]
                 }
-            }
-        ')
-        print_success "Injected dynamic MACROS configuration for RegFileMT2R1WMem"
-    fi
+            ')
+            print_success "Injected dynamic MACROS configuration for $macro_name"
+        fi
+    }
+
+    _inject_macro "RegFileMT2R1WMem"
+    _inject_macro "RegFile2R1WMem"
 }
 
 # --- Main Execution ---

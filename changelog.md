@@ -8,6 +8,7 @@
 * **Debug Logic Removal:** Extracted the extraneous `debugX1` probe mapping directly out of `RegFileMTMem.scala` entirely, successfully simplifying the physical IO matrix layout boundaries.
 * **Single-Thread Macro Integration:** Created `RegFile2R1WMem`, a dedicated single-threaded variant mathematically mapping natively to exactly 32 registers.
 * **Core Replacements:** Re-wired `ZeroNyteRV32ICore`, `ZeroNyteRV32IMCore`, and `ZeroNyteRV32IZmmulCore` to structurally instantiate the optimized `RegFile2R1WMem` component rather than the heavy `MT` equivalent, successfully unlocking single-threaded physical footprints dynamically shrinking core layout area overhead.
+* **TetraNyte/OctoNyte Compilation Fixes:** Stripped all legacy bindings to the obsolete `.debugX1` array globally across `TetraNyte` and `OctoNyte` target architectures (`RV32I`, `RV32IM`, `RV32i_Zmmul`, and `WithCache` blocks). Removed dangling `unusedRegDebugX1` assignments enabling clean validation logic arrays via `sbt generateRTL`.
 * **Physical Design Generator Handlers:** Re-programmed `generate_physical_design.sh` boundary-injection parsing expressions dynamically porting Python AST unbundling regex rules to support the new `RegFile2R1WMem` wrapper synchronously alongside existing multi-thread structures for streamlined macro hardening. Extensively incorporated its explicit payload registration sequentially into `GenerateHierarchicalRTL`.
 
 # 04/05/2026 17:56 - RegFile Pin-Map Re-Evaluation & Top-Level Orientation Lock
