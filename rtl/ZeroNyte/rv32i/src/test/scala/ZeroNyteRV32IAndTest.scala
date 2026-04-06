@@ -9,7 +9,7 @@ class ZeroNyteRV32IAndTest extends AnyFlatSpec {
   behavior of "ZeroNyteCore (AND instructions)"
 
   it should "produce correct results for AND/ANDI sequences" in {
-    simulate(new ZeroNyteRV32ICore) { dut =>
+    simulate(new ZeroNyteRV32ICore(cosimulate = true)) { dut =>
       val mask32 = 0xFFFFFFFFL
 
       def driveTLIdle(): Unit = {

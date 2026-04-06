@@ -13,7 +13,7 @@ class OctoNyteRV32ICoreTest extends AnyFlatSpec {
   private def dumpState(cycle: Int, label: String, dut: OctoNyteRV32ICore): Unit = {
     val stageNames = Seq("pc", "dec", "dis", "rr", "ex1", "ex2", "ex3", "wb")
     val stageTh = dut.io.debugStageThreads.map(_.peek().litValue.toInt)
-    val stageVal= dut.io.debugStageValids.map(_.peek().litToBoolean)
+    val stageVal= dut.io.debugStageValids.map(_.peek().litValue != 0)
     val stageSummary = stageNames.indices.map { i =>
       val v = if (stageVal(i)) "V" else "-"
       s"${stageNames(i)}:${stageTh(i)}$v"
@@ -39,7 +39,7 @@ class OctoNyteRV32ICoreTest extends AnyFlatSpec {
 
   it should "execute ADDI x1,x0,1 across all threads using the single issue slot" in {
     logger.info("Test: Stream a single-slot ADDI x1,x0,1 every cycle (other slots are NOPs). Each thread repeatedly executes it, so x1 should converge to (and remain) 1 once writeback starts.")
-    simulate(new OctoNyteRV32ICore) { dut =>
+    simulate(new OctoNyteRV32ICore(cosimulate = true)) { dut =>
       for (i <- 0 until 8) { dut.io.threadEnable(i).poke(true.B) }
       dut.io.dataMemResp.poke(0.U)
 
@@ -70,7 +70,7 @@ class OctoNyteRV32ICoreTest extends AnyFlatSpec {
 
   it should "accumulate ADDI x1,x1,1 results equally across threads" in {
     logger.info("Test: Stream a single-slot ADDI x1,x1,1 every cycle (other slots are NOPs). Each thread repeatedly executes it, so x1 should increase over time at roughly the same rate across threads.")
-    simulate(new OctoNyteRV32ICore) { dut =>
+    simulate(new OctoNyteRV32ICore(cosimulate = true)) { dut =>
       for (i <- 0 until 8) { dut.io.threadEnable(i).poke(true.B) }
       dut.io.dataMemResp.poke(0.U)
 
