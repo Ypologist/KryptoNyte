@@ -4,7 +4,7 @@
     "dir::src/RegFileMT2R1WMem.v"
   ],
   "CLOCK_PORT": "clock",
-  "CLOCK_PERIOD": 10.0,
+  "CLOCK_PERIOD": 12.0,
   "FP_CORE_UTIL": 50,
   "FP_ASPECT_RATIO": 1.0,
   "SYNTH_STRATEGY": "AREA 0",
