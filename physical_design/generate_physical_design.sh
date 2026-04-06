@@ -457,7 +457,7 @@ prepare_design_config() {
     mkdir -p "$src_dir"
 
     # Copy RTL file to design source directory
-    local input_rtl="../rtl/generators/generated/verilog_hierarchical_timed/${MODULE_NAME}.v"
+    local input_rtl="../rtl/generators/generated_prod/verilog_hierarchical_timed/${MODULE_NAME}.v"
     local target_rtl="$src_dir/${MODULE_NAME}.v"
     
     if [ ! -f "$input_rtl" ]; then
@@ -574,7 +574,7 @@ validate_configuration() {
     fi
     
     # Check RTL file exists
-    local input_rtl="../rtl/generators/generated/verilog_hierarchical_timed/${MODULE_NAME}.v"
+    local input_rtl="../rtl/generators/generated_prod/verilog_hierarchical_timed/${MODULE_NAME}.v"
     if [ ! -f "$input_rtl" ]; then
         print_error "RTL file not found: $input_rtl. Please generate RTL first using the RTL generation scripts."
     fi
@@ -779,7 +779,7 @@ resolve_macro_paths() {
                 .MACROS[$macro_name] = {
                     "instances": {
                         "regFile": {
-                            "location": [100.28, 780.72],
+                            "location": (if $macro_name == "RegFile2R1WMem" then [40.0, 40.0] else [100.28, 780.72] end),
                             "orientation": "N"
                         }
                     },
