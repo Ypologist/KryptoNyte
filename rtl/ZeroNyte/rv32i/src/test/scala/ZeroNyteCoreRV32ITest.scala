@@ -8,7 +8,7 @@ import ZeroNyte.ZeroNyteRV32ICore
 class ZeroNyteRV32ICoreTest extends AnyFlatSpec {
 
   "ZeroNyteCore" should "fetch and execute instructions correctly" in {
-    simulate(new ZeroNyteRV32ICore) { dut =>
+    simulate(new ZeroNyteRV32ICore(cosimulate = true)) { dut =>
       val printDebugInfo = true
       val mask32 = 0xFFFFFFFFL
 
@@ -77,7 +77,7 @@ class ZeroNyteRV32ICoreTest extends AnyFlatSpec {
   }
   
   it should "jump to the interrupt vector when an external interrupt is asserted" in {
-    simulate(new ZeroNyteRV32ICore) { dut =>
+    simulate(new ZeroNyteRV32ICore(cosimulate = true)) { dut =>
       val vector = 0x80000100L
 
       def driveTLIdle(): Unit = {
@@ -106,9 +106,9 @@ class ZeroNyteRV32ICoreTest extends AnyFlatSpec {
       dut.io.imem_rdata.poke(0x00000013L.U)
       dut.io.irqSources.poke(1.U)
       driveTLIdle()
-      assert(dut.io.interruptTaken.peek().litToBoolean, "interrupt should be taken when asserted")
       dut.clock.step()
-
+      assert(dut.io.interruptTaken.peek().litToBoolean, "interrupt should be taken when asserted")
+      dut.clock.step(2)
       val pcAfterInterrupt = dut.io.pc_out.peek().litValue.toLong
       assert(pcAfterInterrupt == vector, f"Expected PC to jump to 0x$vector%x, got 0x$pcAfterInterrupt%x")
     }

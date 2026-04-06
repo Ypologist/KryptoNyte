@@ -17,5 +17,7 @@
   "PL_TARGET_DENSITY_PCT": 40,
   "PL_ROUTABILITY_DRIVEN": 1,
   
-  "RT_MAX_LAYER": "met5"
+  "RT_MAX_LAYER": "met5",
+  "PNR_SDC_FILE": "dir::constraints/ZeroNyteRV32ICore.sdc",
+  "SIGNOFF_SDC_FILE": "dir::constraints/ZeroNyteRV32ICore_signoff.sdc"
 }

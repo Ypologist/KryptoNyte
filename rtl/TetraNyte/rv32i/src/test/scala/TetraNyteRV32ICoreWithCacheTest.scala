@@ -6,7 +6,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 
 class TetraNyteRV32ICoreWithCacheTest extends AnyFlatSpec {
   "TetraNyteRV32ICore" should "simulate 4-threaded ALU, Load, Store, and Branch operations" in {
-    simulate(new TetraNyteRV32ICoreWithCache) { dut =>
+    simulate(new TetraNyteRV32ICoreWithCache(cosimulate = true)) { dut =>
 
       val numThreads = 4
       val threadPCs = Array.fill(numThreads)(0L)
@@ -95,7 +95,7 @@ class TetraNyteRV32ICoreWithCacheTest extends AnyFlatSpec {
   }
 
   it should "branch on equal and take the correct path" in {
-    simulate(new TetraNyteRV32ICoreWithCache) { dut =>
+    simulate(new TetraNyteRV32ICoreWithCache(cosimulate = true)) { dut =>
       val numThreads = 4
       val threadPCs = Array.fill(numThreads)(0L)
       val nop = 0x00000013L

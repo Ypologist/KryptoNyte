@@ -44,6 +44,7 @@ lazy val commonSettings = Seq(
   // Fork a new JVM for running and testing to apply javaOptions
   run / fork := true,
   Test / fork := true,
+  Test / parallelExecution := false,
 
   // Java Options for forked JVMs (run and test)
   javaOptions ++= Seq(

@@ -59,7 +59,7 @@ class ZeroNyteRV32IZmmulCore(val cosimulate: Boolean = false) extends Module {
   io.instr_out := instr
 
   // ---------- Register File ----------
-  val regFile = Module(new RegFiles.RegFileMT2R1WMem(width = 32, depth = 32, numThreads = 1))
+  val regFile = Module(new RegFiles.RegFile2R1WMem(width = 32, depth = 32))
   regFile.io.readThreadID := 0.U
   regFile.io.writeThreadID := 0.U
 

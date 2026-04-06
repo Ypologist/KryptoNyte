@@ -11,7 +11,7 @@ class OctoNyteRV32ICoreIDTest extends AnyFlatSpec {
   private val logger = LoggerFactory.getLogger(getClass)
 
   it should "execute ADDI x1, x0, <thread_id> for each thread correctly" in {
-    simulate(new OctoNyteRV32ICore) { dut =>
+    simulate(new OctoNyteRV32ICore(cosimulate = true)) { dut =>
       // Enable all threads
       for (i <- 0 until 8) { dut.io.threadEnable(i).poke(true.B) }
       dut.io.dataMemResp.poke(0.U)
