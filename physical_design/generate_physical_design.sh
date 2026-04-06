@@ -725,6 +725,7 @@ EOF
 
 resolve_macro_paths() {
     print_step "Resolving latest macro paths..."
+    local target_rtl="$PHYSICAL_DESIGN_DIR/_runs/runs/$MODULE_NAME/src/${MODULE_NAME}.v"
 
     _inject_macro() {
         local macro_name="$1"
@@ -735,7 +736,7 @@ resolve_macro_paths() {
         fi
 
         # Check if the RTL actually instantiates this macro
-        if ! grep -E -q "module $macro_name" "$target_rtl" 2>/dev/null; then
+        if ! grep -E -q "\b$macro_name\b" "$target_rtl" 2>/dev/null; then
             return
         fi
 
@@ -779,7 +780,7 @@ resolve_macro_paths() {
                 .MACROS[$macro_name] = {
                     "instances": {
                         "regFile": {
-                            "location": (if $macro_name == "RegFile2R1WMem" then [40.0, 40.0] else [100.28, 780.72] end),
+                            "location": (if $macro_name == "RegFile2R1WMem" then [42.0, 42.0] else [100.28, 780.72] end),
                             "orientation": "N"
                         }
                     },
