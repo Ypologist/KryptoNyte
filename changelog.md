@@ -1,3 +1,15 @@
+# 04/06/2026 06:40 - ZeroNyte Single-Threaded Register File Optimization
+
+**Why these changes were made:**
+* **Excessive Area/Power Overhead in Single-Threaded Cores:** The `ZeroNyte` core lineup is strictly single-threaded, but was previously instantiating the multithreaded `RegFileMT2R1WMem` (parameterized for 1 thread). Because the physical design flow relies on pre-hardened register file macros, feeding `ZeroNyte` the 4-thread `RegFileMT2R1WMem` physical macro essentially forced it to pay the silicon area and power penalty for 128 hardware registers when it mathematically only utilizes 32. 
+* **Synthesis Debug Overhead:** The base `RegFileMTMem` included an undocumented `io_debugX1` debug port mapping logic block, which forced an unneeded extra wide data vector directly onto the active standard core output pins, aggravating synthesis and routing congestion natively without providing simulation value.
+
+**What the changes are:**
+* **Debug Logic Removal:** Extracted the extraneous `debugX1` probe mapping directly out of `RegFileMTMem.scala` entirely, successfully simplifying the physical IO matrix layout boundaries.
+* **Single-Thread Macro Integration:** Created `RegFile2R1WMem`, a dedicated single-threaded variant mathematically mapping natively to exactly 32 registers.
+* **Core Replacements:** Re-wired `ZeroNyteRV32ICore`, `ZeroNyteRV32IMCore`, and `ZeroNyteRV32IZmmulCore` to structurally instantiate the optimized `RegFile2R1WMem` component rather than the heavy `MT` equivalent, successfully unlocking single-threaded physical footprints dynamically shrinking core layout area overhead.
+* **Physical Design Generator Handlers:** Re-programmed `generate_physical_design.sh` boundary-injection parsing expressions dynamically porting Python AST unbundling regex rules to support the new `RegFile2R1WMem` wrapper synchronously alongside existing multi-thread structures for streamlined macro hardening. Extensively incorporated its explicit payload registration sequentially into `GenerateHierarchicalRTL`.
+
 # 04/05/2026 17:56 - RegFile Pin-Map Re-Evaluation & Top-Level Orientation Lock
 
 **Why these changes were made:**

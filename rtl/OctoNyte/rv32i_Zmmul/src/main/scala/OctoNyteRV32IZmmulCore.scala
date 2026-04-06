@@ -183,9 +183,7 @@ class OctoNyteRV32IZmmulCore(val cosimulate: Boolean = false) extends Module {
   regFile.io.wens := VecInit(Seq.fill(1)(false.B))
   regFile.io.writeData := VecInit(Seq.fill(1)(0.U(32.W)))
 
-  val unusedRegDebugX1 = Wire(Vec(numThreads, UInt(32.W)))
-  unusedRegDebugX1 := regFile.io.debugX1
-  dontTouch(unusedRegDebugX1)
+
 
   // Execution Units
   val alu = Module(new ALU32)

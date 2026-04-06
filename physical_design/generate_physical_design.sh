@@ -469,7 +469,7 @@ prepare_design_config() {
 
     if [ -f "$input_rtl" ]; then
         cp "$input_rtl" "$target_rtl"
-        if [ "$MODULE_NAME" != "RegFileMT2R1WMem" ] && grep -q "module RegFileMT2R1WMem" "$target_rtl"; then
+        if [[ "$MODULE_NAME" != "RegFileMT2R1WMem" && "$MODULE_NAME" != "RegFile2R1WMem" ]] && grep -E -q "module RegFile(MT)?2R1WMem" "$target_rtl"; then
             python3 -c "
 with open('$target_rtl', 'r') as f: content = f.read()
 
@@ -492,15 +492,28 @@ def strip_mod(text, mod_name):
     return text
 
 content = strip_mod(content, 'RegFileMT2R1WMem')
+content = strip_mod(content, 'RegFile2R1WMem')
 content = strip_mod(content, 'regs_128x32')
+content = strip_mod(content, 'regs_32x32')
 
-content = content.replace('.clock(clock),', '.clock(clock), .reset(reset),')
-content = content.replace('.io_readAddrs(if_id[214:205])', '.io_readAddrs_0(if_id[209:205]), .io_readAddrs_1(if_id[214:210])')
-content = content.replace('.io_readData(_regFile_io_readData)', '.io_readData_0(_regFile_io_readData[31:0]), .io_readData_1(_regFile_io_readData[63:32])')
-content = content.replace('.io_wens(writeEnable)', '.io_wens_0(writeEnable)')
-content = content.replace('.io_writeAddrs(_regFile_io_writeAddrs_0_T)', '.io_writeAddrs_0(_regFile_io_writeAddrs_0_T)')
-content = content.replace('.io_writeData(wbData)', '.io_writeData_0(wbData)')
-content = content.replace('.io_debugX1(unusedRegDebugX1)', '.io_debugX1_0(unusedRegDebugX1[31:0]), .io_debugX1_1(unusedRegDebugX1[63:32]), .io_debugX1_2(unusedRegDebugX1[95:64]), .io_debugX1_3(unusedRegDebugX1[127:96])')
+import re
+content = re.sub(r'(RegFile(?:MT)?2R1WMem\s+\w+\s*\(\s*\n?\s*\.clock\(clock\)),', r'\1, .reset(reset),', content)
+def fix_read_addrs(m):
+    val = m.group(1).strip()
+    match = re.match(r'(.+)\[(\d+):(\d+)\]', val)
+    if match:
+        name, hi, lo = match.group(1), int(match.group(2)), int(match.group(3))
+        mid = (hi + lo) // 2
+        return f'.io_readAddrs_0({name}[{mid}:{lo}]), .io_readAddrs_1({name}[{hi}:{mid+1}])'
+    return f'.io_readAddrs_0({val}[4:0]), .io_readAddrs_1({val}[9:5])'
+
+content = re.sub(r'\.io_readAddrs\((.*?)\)', fix_read_addrs, content)
+content = re.sub(r'\.io_readData\((.*?)\)', r'.io_readData_0(\1[31:0]), .io_readData_1(\1[63:32])', content)
+content = re.sub(r'\.io_wens\((.*?)\)', r'.io_wens_0(\1)', content)
+content = re.sub(r'\.io_writeAddrs\((.*?)\)', r'.io_writeAddrs_0(\1)', content)
+content = re.sub(r'\.io_writeData\((.*?)\)', r'.io_writeData_0(\1)', content)
+content = re.sub(r'\.io_debugX1\((.*?)\)', r'.io_debugX1_0(\1[31:0]), .io_debugX1_1(\1[63:32]), .io_debugX1_2(\1[95:64]), .io_debugX1_3(\1[127:96])', content)
+
 with open('$target_rtl', 'w') as f: f.write(content)
 "
         fi

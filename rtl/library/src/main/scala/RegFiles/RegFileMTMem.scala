@@ -52,8 +52,6 @@ class RegFileMTMem(
     val wens          = Input(Vec(numWritePorts, Bool()))
     val writeData     = Input(Vec(numWritePorts, UInt(width.W)))
     
-    // Debug: expose x1 per thread for simple inspection
-    val debugX1       = Output(Vec(numThreads, UInt(width.W)))
   })
 
   // Create the register file using Mem (asynchronous reads)
@@ -74,9 +72,4 @@ class RegFileMTMem(
     io.readData(i) := Mux(io.readAddrs(i) === 0.U, 0.U, regs.read(effectiveSrc))
   }
 
-  // Debug view of x1 per thread (register index 1)
-  for (t <- 0 until numThreads) {
-    val idx = t * depth + 1
-    io.debugX1(t) := regs.read(idx.U)
-  }
 }

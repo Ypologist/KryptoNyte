@@ -95,9 +95,7 @@ class TetraNyteRV32ICore(val cosimulate: Boolean = false) extends Module {
 
   // Shared multithreaded register file
   val regFile = Module(new RegFileMT2R1WMem(numThreads = numThreads))
-  val unusedRegDebugX1 = Wire(Vec(numThreads, UInt(32.W)))
-  unusedRegDebugX1 := regFile.io.debugX1
-  dontTouch(unusedRegDebugX1)
+
 
   // Debug mirrors to expose last-seen per-thread stage values
   val debugIfInstr = RegInit(VecInit(Seq.fill(numThreads)(0.U(32.W))))

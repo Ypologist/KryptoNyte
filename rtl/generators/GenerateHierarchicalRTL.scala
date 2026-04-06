@@ -19,7 +19,7 @@ import ALUs.ALU32
 import BranchUnit.BranchUnit
 import Decoders.RV32IDecodeModule
 import LoadUnit.LoadUnit
-import RegFiles.{RegFileMT2R1WMem, RegFileMT2R1WVec}
+import RegFiles.{RegFile2R1WMem, RegFileMT2R1WMem, RegFileMT2R1WVec}
 import StoreUnit.StoreUnit
 import TetraNyte.{TetraNyteRV32ICore, TetraNyteRV32IMCore, TetraNyteRV32IZmmulCore}
 import ZeroNyte.{ZeroNyteRV32ICore, ZeroNyteRV32ICoreWithCache, ZeroNyteRV32IZmmulCore, ZeroNyteRV32IMCore}
@@ -284,6 +284,7 @@ Environment Variables:
     ModuleSpec(() => new StoreUnit, "StoreUnit", "Store unit with mask generation", family, "rv32i"),
     ModuleSpec(() => new RegFileMT2R1WVec(), "RegFileMT2R1WVec", "Multithreaded 2R1W register file", family, "rv32i"),
     ModuleSpec(() => new RegFileMT2R1WMem(), "RegFileMT2R1WMem", "Memory-based multithreaded 2R1W register file", family, "rv32i"),
+    ModuleSpec(() => new RegFile2R1WMem(), "RegFile2R1WMem", "Memory-based singlethreaded 2R1W register file", family, "rv32i"),
     ModuleSpec(() => new RV32IDecodeModule, "RV32IDecodeModule", "RV32I instruction decoder", family, "rv32i")
   )
   
