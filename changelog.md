@@ -1,3 +1,12 @@
+# 04/06/2026 09:12 - Macro East Pin Spreading Constraints
+
+**Why these changes were made:**
+* **Residual KLayout Spacing Drops:** The top-level ZeroNyte physical design run successfully eliminated the PDN geometry overlay bugs. However, `4` isolated `met5 spacing < 1.6um` DRC errors remained dynamically spanning the entire West-to-East core width precisely localized horizontally between `Y=120um` and `Y=125um`.
+* **5-Micron Pin Packing Constraints:** Diagnosed the OpenLane pin assignment defaults. Even though we forcefully decoupled the macro pins geometrically to the `#E` bound, OpenLane inherently packed all `96` sequential Read/Write data signals brutally into the absolute tightest legal margin dynamically allowed. This mathematically forced 96 thick data paths into an impossibly narrow `5.0um` logical window internally crossing the core. As the top-level zero router attempted to hook the Western-placed ALU into this 5-micron slip natively across `met5`, it failed explicitly the 1.6um minimum trace spacing isolating tracks dynamically across.
+
+**What the changes are:**
+* **Native Distance Spreading:** Injected an `"FP_IO_MIN_DISTANCE": 3` generic parameter dynamically directly inside `config.RegFile2R1WMem.json`. Because OpenLane spreads properties based on `FP_IO_MIN_DISTANCE`, the 96 massive datapath pins are uniformly mathematically forced apart into independent $3.0um$ structural gaps. This geometrically forces the East data array to organically spread completely across $\sim 288 \mu m$ vertical array spanning effectively the entire `357 \times 357` macro height uniformly. This unconditionally alleviates the dense $5um$ internal pinch-point and naturally gives the Detailed Router structurally uninhibited geometry room to cleanly path the `met5` layout traces across.
+
 # 04/06/2026 08:52 - Macro PDN Grid Alignment Fix
 
 **Why these changes were made:**
