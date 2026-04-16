@@ -32,9 +32,9 @@ Builds CoreMark for the KryptoNyte cores and runs Spike + RTL to compare signatu
 
 Options:
   --iterations <n>     CoreMark iterations (default: $ITERATIONS)
-  --processor <name>   zeronyte or tetranyte (default: tetranyte)
-  --thread-mask <mask> Enable a specific TetraNyte thread mask (default: 0x1)
-  --all-threads        Run TetraNyte 4 times (thread0..thread3)
+  --processor <name>   zeronyte, tetranyte, or octonyte (default: tetranyte)
+  --thread-mask <mask> Enable a specific thread mask for TetraNyte/OctoNyte (default: 0x1)
+  --all-threads        Sweep hardware threads (TetraNyte: 4, OctoNyte: 8)
   --max-cycles <n>     RTL max cycles (default: $MAX_CYCLES)
   --out-dir <path>     Output root (default: $DEFAULT_OUT_DIR)
   --skip-spike         Skip Spike reference run
@@ -104,10 +104,12 @@ fi
 declare -A SIM_BUILD
 SIM_BUILD[zeronyte]="$REPO_ROOT/tests/sim/build_zeronyte_sim.sh"
 SIM_BUILD[tetranyte]="$REPO_ROOT/tests/sim/build_tetranyte_sim.sh"
+SIM_BUILD[octonyte]="$REPO_ROOT/tests/sim/build_octonyte_sim.sh"
 
 declare -A SIM_BIN
 SIM_BIN[zeronyte]="$REPO_ROOT/tests/sim/build/zeronyte_sim"
 SIM_BIN[tetranyte]="$REPO_ROOT/tests/sim/build/tetranyte_sim"
+SIM_BIN[octonyte]="$REPO_ROOT/tests/sim/build/octonyte_sim"
 
 if [[ -z "${SIM_BUILD[$PROCESSOR]:-}" ]]; then
   echo "Unsupported processor: $PROCESSOR" >&2
@@ -172,7 +174,7 @@ run_label() {
   local rtl_sig="$run_dir/${PROCESSOR}.signature"
   local rtl_log="$run_dir/${PROCESSOR}.log"
   local cmd=("${SIM_BIN[$PROCESSOR]}" --elf "$elf_path" --signature "$rtl_sig" --log "$rtl_log" --max-cycles "$MAX_CYCLES")
-  if [[ "$PROCESSOR" == "tetranyte" && -n "$mask" ]]; then
+  if [[ "$PROCESSOR" == "tetranyte" || "$PROCESSOR" == "octonyte" ]] && [[ -n "$mask" ]]; then
     cmd+=(--thread-mask "$mask")
   fi
   echo "[coremark] Running $PROCESSOR (label=$label mask=${mask:-n/a})..."
@@ -195,11 +197,17 @@ declare -a RUN_LABELS
 declare -a RUN_MASKS
 declare -a RUN_TAGS
 
-if [[ "$PROCESSOR" == "tetranyte" ]]; then
+if [[ "$PROCESSOR" == "tetranyte" || "$PROCESSOR" == "octonyte" ]]; then
   if [[ "$RUN_ALL_THREADS" -eq 1 ]]; then
-    RUN_LABELS=(thread0 thread1 thread2 thread3)
-    RUN_MASKS=(0x1 0x2 0x4 0x8)
-    RUN_TAGS=(1 2 4 8)
+    if [[ "$PROCESSOR" == "tetranyte" ]]; then
+      RUN_LABELS=(thread0 thread1 thread2 thread3)
+      RUN_MASKS=(0x1 0x2 0x4 0x8)
+      RUN_TAGS=(1 2 4 8)
+    else
+      RUN_LABELS=(thread0 thread1 thread2 thread3 thread4 thread5 thread6 thread7)
+      RUN_MASKS=(0x1 0x2 0x4 0x8 0x10 0x20 0x40 0x80)
+      RUN_TAGS=(1 2 4 8 16 32 64 128)
+    fi
   else
     mask=${THREAD_MASK:-0x1}
     RUN_LABELS=("mask_${mask}")
