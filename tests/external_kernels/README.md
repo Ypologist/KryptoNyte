@@ -32,12 +32,45 @@ translates the upstream build artifacts into our Spike/ZeroNyte signature flow.
 
 ```bash
 tests/external_kernels/run_beebs.sh --benchmark cnt
+tests/external_kernels/run_beebs.sh --benchmark cnt --processor tetranyte --thread-mask 0x1
 ```
 
 The script applies the Zeronyte signature patch if needed, configures BEEBS for
 riscv32 (ri5cy chip, generic board), builds the requested benchmark, and runs
-Spike and ZeroNyte back-to-back. Artifacts land under
-`tests/output/external/beebs/<benchmark>`.
+Spike and the selected RTL core back-to-back (ZeroNyte by default). For the
+barrel-threaded TetraNyte core the runner automatically relaxes the max-cycle
+limit (4x the ZeroNyte default) and you can optionally pass `--thread-mask`
+to experiment with different thread enables. Artifacts land under
+`tests/output/external/beebs/<benchmark>` with individual logs and signatures
+per processor.
+
+### CoreMark workflow
+
+- Clone CoreMark via `tests/external_kernels/clone_all.sh` which places the
+  repository under `../external-kernels/coremark`.
+- Run `tests/external_kernels/run_coremark.sh` to build and execute the bare
+  metal port for Spike and the RTL cores. Example invocations:
+
+```bash
+# Single-threaded TetraNyte run (default thread 0)
+tests/external_kernels/run_coremark.sh --iterations 1 --processor tetranyte
+
+# Sweep all four hardware threads sequentially
+tests/external_kernels/run_coremark.sh --iterations 1 --processor tetranyte --all-threads
+
+# Run on ZeroNyte instead of TetraNyte
+tests/external_kernels/run_coremark.sh --processor zeronyte --max-cycles 5000000
+```
+
+The script copies the maintained `coremark_port` into the external clone,
+builds with the RV32 bare-metal toolchain, captures a Spike reference
+signature, and then runs the requested RTL simulator(s). Each TetraNyte run is
+rebuilt with a `COREMARK_THREAD_LABEL` tag so the four hardware contexts
+produce four distinct signatures. You can either pick a specific
+`--thread-mask` (e.g. `0x2` for thread 1) or pass `--all-threads` to iterate
+over masks `0x1`, `0x2`, `0x4`, and `0x8` sequentially; each iteration stores
+its own Spike and RTL logs/signatures under
+`tests/output/external/coremark/<label>/`.
 
 ## Cloning helper
 

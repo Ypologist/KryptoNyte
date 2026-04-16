@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -15,6 +16,9 @@ struct Options {
   std::string signature;
   std::string log;
   uint64_t max_cycles = 1000000;
+  uint64_t log_start_cycle = 0;
+  uint64_t log_stop_cycle = std::numeric_limits<uint64_t>::max();
+  bool log_debug_traces = false;
 };
 
 Options parseArgs(int argc, char** argv) {
@@ -29,12 +33,21 @@ Options parseArgs(int argc, char** argv) {
       opts.log = argv[++i];
     } else if (arg == "--max-cycles" && i + 1 < argc) {
       opts.max_cycles = std::stoull(argv[++i]);
+    } else if (arg == "--log-start-cycle" && i + 1 < argc) {
+      opts.log_start_cycle = std::stoull(argv[++i]);
+    } else if (arg == "--log-stop-cycle" && i + 1 < argc) {
+      opts.log_stop_cycle = std::stoull(argv[++i]);
+    } else if (arg == "--log-debug") {
+      opts.log_debug_traces = true;
     } else {
       throw std::invalid_argument("unknown or incomplete argument: " + arg);
     }
   }
   if (opts.elf.empty() || opts.signature.empty()) {
     throw std::invalid_argument("--elf and --signature are required");
+  }
+  if (opts.log_stop_cycle < opts.log_start_cycle) {
+    throw std::invalid_argument("--log-stop-cycle must be >= --log-start-cycle");
   }
   return opts;
 }
@@ -120,13 +133,32 @@ int main(int argc, char** argv) {
       }
     }
 
-    if (log.is_open()) {
+    if (log.is_open() && cycle >= options.log_start_cycle && cycle <= options.log_stop_cycle) {
       log << std::hex
           << "cycle=0x" << cycle
           << " pc=0x" << dut.io_pc_out
           << " instr=0x" << dut.io_instr_out
-          << " result=0x" << dut.io_result
-          << std::dec << '\n';
+          << " result=0x" << dut.io_result;
+
+      if (options.log_debug_traces) {
+        log << " aluA=0x" << dut.io_debug_aluA
+            << " aluB=0x" << dut.io_debug_aluB
+            << " aluOpcode=0x" << static_cast<uint64_t>(dut.io_debug_aluOpcode)
+            << " effAddr=0x" << dut.io_debug_effAddr
+            << " dmemAddr=0x" << dut.io_dmem_addr
+            << " dmemWData=0x" << dut.io_dmem_wdata
+            << " dmemWEn=" << (dut.io_dmem_wen ? 1 : 0)
+            << " storeData=0x" << dut.io_debug_memWriteData
+            << " storeMask=0x" << static_cast<uint64_t>(dut.io_debug_memWriteMask)
+            << " branchTaken=" << (dut.io_debug_branchTaken ? 1 : 0)
+            << " branchTarget=0x" << dut.io_debug_branchTarget
+            << " divActive=" << (dut.io_debug_divActive ? 1 : 0)
+            << " divDone=" << (dut.io_debug_divDone ? 1 : 0)
+            << " divDividend=0x" << dut.io_debug_divDividend
+            << " divDivisor=0x" << dut.io_debug_divDivisor;
+      }
+
+      log << std::dec << '\n';
     }
 
     if (completed) {

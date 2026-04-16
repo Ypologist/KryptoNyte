@@ -20,23 +20,30 @@ ISA=${ISA:-rv32i}
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") --benchmark <name> [--out-dir <path>] [--max-cycles <count>] [--force-configure]
+Usage: $(basename "$0") --benchmark <name> [--out-dir <path>] [--max-cycles <count>] [--force-configure] [--processor <name>] [--thread-mask <mask>]
 
-Builds and runs the requested BEEBS benchmark using Spike (reference) and ZeroNyte RTL.
+Builds and runs the requested BEEBS benchmark using Spike (reference) and the selected RTL core.
 Requires the BEEBS repository at $BEEBS_ROOT (clone via tests/external_kernels/clone_all.sh).
 
 Options:
   --benchmark <name>   Benchmark directory under beebs/src (e.g. cnt, fir, qsort).
   --out-dir <path>     Output directory for artifacts (defaults to tests/output/external/beebs/<name>).
-  --max-cycles <n>     Cycle limit for zeronyte_sim (default: 1000000).
+  --max-cycles <n>     Cycle limit for the RTL simulator (default: 1000000).
   --force-configure    Re-run ./configure even if config.status exists.
+  --processor <name>   RTL simulator to use (zeronyte or tetranyte; default: zeronyte).
+  --thread-mask <mask> Thread enable bitmask for TetraNyte (e.g. 0x1 for thread0).
 USAGE
 }
 
 BENCH=""
 OUT_DIR=""
-MAX_CYCLES=1000000
+DEFAULT_MAX_CYCLES=1000000
+MAX_CYCLES=$DEFAULT_MAX_CYCLES
+MAX_CYCLES_OVERRIDDEN=0
+BENCH_CYCLE_OVERRIDE=0
 FORCE_CONFIGURE=0
+PROCESSOR="zeronyte"
+THREAD_MASK="${TETRANYTE_THREAD_MASK:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -50,11 +57,28 @@ while [[ $# -gt 0 ]]; do
       ;;
     --max-cycles)
       MAX_CYCLES="$2"
+      MAX_CYCLES_OVERRIDDEN=1
       shift 2
       ;;
     --force-configure)
       FORCE_CONFIGURE=1
       shift
+      ;;
+    --processor)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --processor requires an argument." >&2
+        exit 1
+      fi
+      PROCESSOR="$2"
+      shift 2
+      ;;
+    --thread-mask)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --thread-mask requires a value (e.g. 0x1)." >&2
+        exit 1
+      fi
+      THREAD_MASK="$2"
+      shift 2
       ;;
     --help|-h)
       usage
@@ -74,6 +98,19 @@ if [[ -z "$BENCH" ]]; then
   exit 1
 fi
 
+if [[ "$MAX_CYCLES_OVERRIDDEN" -eq 0 ]]; then
+  case "$BENCH" in
+    whetstone)
+      MAX_CYCLES=30000000
+      BENCH_CYCLE_OVERRIDE=1
+      echo "[beebs] Applying benchmark-specific max cycle limit: $MAX_CYCLES"
+      ;;
+    *)
+      MAX_CYCLES=$DEFAULT_MAX_CYCLES
+      ;;
+  esac
+fi
+
 if [[ ! -d "$BEEBS_ROOT" ]]; then
   echo "BEEBS repository not found at $BEEBS_ROOT. Run tests/external_kernels/clone_all.sh first." >&2
   exit 1
@@ -82,6 +119,38 @@ fi
 if [[ ! -f "$PATCH_FILE" ]]; then
   echo "Missing patch file: $PATCH_FILE" >&2
   exit 1
+fi
+
+SIM_NAME=""
+SIM_BUILD_SCRIPT=""
+SIM_BINARY=""
+
+case "$PROCESSOR" in
+  zeronyte)
+    SIM_NAME="ZeroNyte"
+    SIM_BUILD_SCRIPT="$REPO_ROOT/tests/sim/build_zeronyte_sim.sh"
+    SIM_BINARY="$REPO_ROOT/tests/sim/build/zeronyte_sim"
+    ;;
+  tetranyte)
+    SIM_NAME="TetraNyte"
+    SIM_BUILD_SCRIPT="$REPO_ROOT/tests/sim/build_tetranyte_sim.sh"
+    SIM_BINARY="$REPO_ROOT/tests/sim/build/tetranyte_sim"
+    ;;
+  *)
+    echo "Unsupported processor: $PROCESSOR" >&2
+    exit 1
+    ;;
+esac
+
+if [[ ! -x "$SIM_BUILD_SCRIPT" ]]; then
+  echo "Simulation build script not found for $PROCESSOR: $SIM_BUILD_SCRIPT" >&2
+  exit 1
+fi
+
+if [[ "$MAX_CYCLES_OVERRIDDEN" -eq 0 && "$BENCH_CYCLE_OVERRIDE" -eq 0 && "$PROCESSOR" == "tetranyte" ]]; then
+  TETRANYTE_CYCLE_MULTIPLIER=4
+  MAX_CYCLES=$((DEFAULT_MAX_CYCLES * TETRANYTE_CYCLE_MULTIPLIER))
+  echo "[beebs] Applying tetranyte-specific max cycle limit: $MAX_CYCLES"
 fi
 
 ensure_patch_applied() {
@@ -161,8 +230,8 @@ mkdir -p "$OUT_DIR"
 
 SPIKE_SIG="$OUT_DIR/spike.signature"
 SPIKE_LOG="$OUT_DIR/spike.log"
-RTL_SIG="$OUT_DIR/zeronyte.signature"
-RTL_LOG="$OUT_DIR/zeronyte.log"
+RTL_SIG="$OUT_DIR/${PROCESSOR}.signature"
+RTL_LOG="$OUT_DIR/${PROCESSOR}.log"
 
 echo "[beebs] Running Spike reference..."
 "$SPIKE_BIN" \
@@ -172,17 +241,28 @@ echo "[beebs] Running Spike reference..."
   "$ELF_PATH" \
   >"$SPIKE_LOG" 2>&1
 
-ZERONYTE_SIM="$REPO_ROOT/tests/sim/build/zeronyte_sim"
-if [[ ! -x "$ZERONYTE_SIM" ]]; then
-  "$REPO_ROOT/tests/sim/build_zeronyte_sim.sh"
+if [[ ! -x "$SIM_BINARY" ]]; then
+  "$SIM_BUILD_SCRIPT"
 fi
 
-echo "[beebs] Running ZeroNyte RTL..."
-"$ZERONYTE_SIM" \
-  --elf "$ELF_PATH" \
-  --signature "$RTL_SIG" \
-  --log "$RTL_LOG" \
+if [[ ! -x "$SIM_BINARY" ]]; then
+  echo "Simulator binary not found at $SIM_BINARY" >&2
+  exit 1
+fi
+
+SIM_CMD=(
+  "$SIM_BINARY"
+  --elf "$ELF_PATH"
+  --signature "$RTL_SIG"
+  --log "$RTL_LOG"
   --max-cycles "$MAX_CYCLES"
+)
+if [[ "$PROCESSOR" == "tetranyte" && -n "$THREAD_MASK" ]]; then
+  SIM_CMD+=(--thread-mask "$THREAD_MASK")
+fi
+
+echo "[beebs] Running $SIM_NAME RTL..."
+"${SIM_CMD[@]}"
 
 echo "[beebs] Comparing signatures..."
 if cmp -s "$SPIKE_SIG" "$RTL_SIG"; then
