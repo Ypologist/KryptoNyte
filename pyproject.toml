@@ -1,0 +1,11 @@
+[project]
+name = "kryptonyte"
+version = "0.1.0"
+description = "Development and verification dependencies for the KryptoNyte RISC-V processor family."
+requires-python = ">=3.12"
+dependencies = [
+    "riscv-config @ git+https://github.com/riscv/riscv-config.git",
+    "riscv-isac @ git+https://github.com/riscv/riscv-isac.git",
+    "riscof @ git+https://github.com/riscv/riscof.git",
+]
+

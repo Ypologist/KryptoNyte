@@ -21,10 +21,11 @@ Create a normal github codespace. By default, sbt and gcc are installed.
 
 1. OS prerequisites: sudo .devcontainer/00_install_ubuntu_packages.sh
 2. Basic SBT/Scala tools: .devcontainer/install_sbt_and_gcc.sh
-3. RTL tools: .devcontainer/install_rtl_tools.sh
-4. RISCV compiler toolchain: .devcontainer/install_riscv_compiler_tools.sh
-5. Conformance tests: .devcontainer/install_riscv_conformance_tests.sh
-6. Physical design: .devcontainer/install_physical_design_tools.sh
+3. Python dependencies: uv sync
+4. RTL tools: .devcontainer/install_rtl_tools.sh
+5. RISCV compiler packages, Spike, and pk: .devcontainer/install_riscv_compiler_tools.sh
+6. Conformance tests: .devcontainer/install_riscv_conformance_tests.sh
+7. Physical design: .devcontainer/install_physical_design_tools.sh
 
 The install scripts place repo-owned tools under `.venv`. Source `.devcontainer/dev_env.sh`
 in the current shell to use the installed tools immediately.

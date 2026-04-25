@@ -141,6 +141,7 @@ int main(int argc, char** argv) {
           << " result=0x" << dut.io_result;
 
       if (options.log_debug_traces) {
+#ifdef KRYPTONYTE_HAS_ZERONYTE_DEBUG_IO
         log << " aluA=0x" << dut.io_debug_aluA
             << " aluB=0x" << dut.io_debug_aluB
             << " aluOpcode=0x" << static_cast<uint64_t>(dut.io_debug_aluOpcode)
@@ -156,6 +157,9 @@ int main(int argc, char** argv) {
             << " divDone=" << (dut.io_debug_divDone ? 1 : 0)
             << " divDividend=0x" << dut.io_debug_divDividend
             << " divDivisor=0x" << dut.io_debug_divDivisor;
+#else
+        log << " debugIo=unavailable";
+#endif
       }
 
       log << std::dec << '\n';

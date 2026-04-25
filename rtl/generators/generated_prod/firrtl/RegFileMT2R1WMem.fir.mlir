@@ -17,7 +17,7 @@ module {
       %9 = firrtl.subindex %6[0] : !firrtl.vector<uint<32>, 1>
       %10 = firrtl.subindex %5[0] : !firrtl.vector<uint<1>, 1>
       %11 = firrtl.subindex %4[0] : !firrtl.vector<uint<5>, 1>
-      %regs_MPORT, %regs_io_readData_0_MPORT, %regs_io_readData_1_MPORT = firrtl.mem  Undefined {depth = 128 : i64, name = "regs", portNames = ["MPORT", "io_readData_0_MPORT", "io_readData_1_MPORT"], readLatency = 0 : i32, writeLatency = 1 : i32} : !firrtl.bundle<addr: uint<7>, en: uint<1>, clk: clock, data: uint<32>, mask: uint<1>>, !firrtl.bundle<addr: uint<7>, en: uint<1>, clk: clock, data flip: uint<32>>, !firrtl.bundle<addr: uint<7>, en: uint<1>, clk: clock, data flip: uint<32>>
+      %regs_MPORT, %regs_io_readData_0_MPORT, %regs_io_readData_1_MPORT = firrtl.mem Undefined {depth = 128 : i64, name = "regs", portNames = ["MPORT", "io_readData_0_MPORT", "io_readData_1_MPORT"], readLatency = 0 : i32, writeLatency = 1 : i32} : !firrtl.bundle<addr: uint<7>, en: uint<1>, clk: clock, data: uint<32>, mask: uint<1>>, !firrtl.bundle<addr: uint<7>, en: uint<1>, clk: clock, data flip: uint<32>>, !firrtl.bundle<addr: uint<7>, en: uint<1>, clk: clock, data flip: uint<32>>
       %12 = firrtl.subfield %regs_MPORT[addr] : !firrtl.bundle<addr: uint<7>, en: uint<1>, clk: clock, data: uint<32>, mask: uint<1>>
       %13 = firrtl.subfield %regs_MPORT[en] : !firrtl.bundle<addr: uint<7>, en: uint<1>, clk: clock, data: uint<32>, mask: uint<1>>
       %14 = firrtl.subfield %regs_MPORT[clk] : !firrtl.bundle<addr: uint<7>, en: uint<1>, clk: clock, data: uint<32>, mask: uint<1>>

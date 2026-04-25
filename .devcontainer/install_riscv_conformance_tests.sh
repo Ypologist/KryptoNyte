@@ -16,7 +16,8 @@ source "$SCRIPT_DIR/common_install.sh"
 VERBOSE=true
 UPGRADE_MODE=false
 INSTALL_DIR="$KRYPTONYTE_TOOLS_DIR/riscv-conformance"
-ARCH_TEST_VERSION="main"  # Can be changed to specific tag/commit
+ARCH_TEST_VERSION="old-framework-3.x"  # RISCOF-compatible riscv-test-suite layout.
+RISCOF_PLUGINS_VERSION="main"
 SPIKE_VERSION="master"
 PK_VERSION="master"
 
@@ -28,6 +29,7 @@ BUILD_TESTS=true
 # Installation status tracking
 UV_INSTALLED=false
 ARCH_TESTS_INSTALLED=false
+RISCOF_PLUGINS_INSTALLED=false
 SPIKE_INSTALLED=false
 PK_INSTALLED=false
 TOOLCHAIN_AVAILABLE=false
@@ -66,6 +68,10 @@ while [[ $# -gt 0 ]]; do
             SPIKE_VERSION="$2"
             shift 2
             ;;
+        --riscof-plugins-version)
+            RISCOF_PLUGINS_VERSION="$2"
+            shift 2
+            ;;
         --pk-version)
             PK_VERSION="$2"
             shift 2
@@ -92,6 +98,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --upgrade                Force upgrade/reinstall of existing tools"
             echo "  --install-dir DIR        Installation directory (default: $KRYPTONYTE_TOOLS_DIR/riscv-conformance)"
             echo "  --arch-test-version V    RISC-V arch test version/branch (default: main)"
+            echo "  --riscof-plugins-version V"
+            echo "                           RISCOF plugins version/branch (default: main)"
             echo "  --spike-version V        Spike simulator version/branch (default: master)"
             echo "  --pk-version V           Proxy kernel version/branch (default: master)"
             echo "  --no-spike               Skip Spike simulator installation"
@@ -250,6 +258,17 @@ check_arch_tests() {
         return 0
     else
         print_step "RISC-V Architecture Tests not found"
+        return 1
+    fi
+}
+
+# Function to check if RISCOF reference plugins are installed
+check_riscof_plugins() {
+    if [ -d "$INSTALL_DIR/riscof-plugins/spike_simple" ] && [ -f "$INSTALL_DIR/riscof-plugins/spike_simple/riscof_spike_simple.py" ]; then
+        print_step "Found RISCOF plugins at: $INSTALL_DIR/riscof-plugins"
+        return 0
+    else
+        print_step "RISCOF plugins not found"
         return 1
     fi
 }
@@ -453,14 +472,16 @@ install_arch_tests() {
             source "$KRYPTONYTE_VENV/bin/activate"
         fi
         
-        print_step "Installing Python dependencies for test framework"
-        if [ -f "requirements.txt" ]; then
-            if command_exists uv && [ "$UV_INSTALLED" = true ]; then
-                uv pip install -r requirements.txt
+        print_step "Installing Python dependencies with uv sync"
+        if [ -f "$KRYPTONYTE_REPO_ROOT/pyproject.toml" ]; then
+            if [ -x "$KRYPTONYTE_VENV/bin/uv" ] && [ "$UV_INSTALLED" = true ]; then
+                (cd "$KRYPTONYTE_REPO_ROOT" && "$KRYPTONYTE_VENV/bin/uv" sync)
             else
-                print_warning "UV not available, falling back to venv pip"
-                "$KRYPTONYTE_VENV/bin/python" -m pip install -r requirements.txt
+                print_error "uv is required to install Python dependencies. Run install_uv or check $KRYPTONYTE_VENV/bin/uv."
+                return 1
             fi
+        else
+            print_warning "No pyproject.toml found at $KRYPTONYTE_REPO_ROOT; skipping Python dependency sync"
         fi
         
         print_step "Setting up test environment"
@@ -490,6 +511,44 @@ EOF
     # Mark as successfully installed
     ARCH_TESTS_INSTALLED=true
     print_success "RISC-V Architecture Tests installed"
+}
+
+# Function to install standalone RISCOF plugins
+install_riscof_plugins() {
+    print_banner "Installing RISCOF Reference Plugins" "$PURPLE"
+
+    local plugins_dir="$INSTALL_DIR/riscof-plugins"
+
+    if [ "$UPGRADE_MODE" = false ] && check_riscof_plugins >/dev/null 2>&1; then
+        print_success "RISCOF plugins already installed - skipping"
+        RISCOF_PLUGINS_INSTALLED=true
+        return 0
+    fi
+
+    if [ "$UPGRADE_MODE" = true ] && [ -d "$plugins_dir" ]; then
+        print_step "Upgrade mode: removing existing RISCOF plugins"
+        run_cmd rm -rf "$plugins_dir"
+    fi
+
+    print_step "Cloning RISCOF plugins repository"
+    if [ -d "$plugins_dir" ]; then
+        print_step "Updating existing repository"
+        cd "$plugins_dir"
+        git fetch origin
+        git checkout "$RISCOF_PLUGINS_VERSION"
+        git pull origin "$RISCOF_PLUGINS_VERSION"
+    else
+        git clone --depth 1 --branch "$RISCOF_PLUGINS_VERSION" \
+            https://gitlab.com/incoresemi/riscof-plugins.git "$plugins_dir"
+    fi
+
+    if [ ! -f "$plugins_dir/spike_simple/riscof_spike_simple.py" ]; then
+        print_error "spike_simple RISCOF plugin not found at $plugins_dir/spike_simple"
+        return 1
+    fi
+
+    RISCOF_PLUGINS_INSTALLED=true
+    print_success "RISCOF reference plugins installed"
 }
 
 # Function to install Spike simulator
@@ -712,6 +771,7 @@ source "$KRYPTONYTE_REPO_ROOT/.devcontainer/dev_env.sh"
 # Conformance Test Root Directories
 export RISCV_CONFORMANCE_ROOT="$INSTALL_DIR"
 export RISCV_ARCH_TEST_ROOT="$INSTALL_DIR/riscv-arch-test"
+export RISCV_PLUGIN_ROOT="$INSTALL_DIR/riscof-plugins"
 
 # Simulator and tools
 export SPIKE_ROOT="$KRYPTONYTE_TOOLS_DIR/riscv"
@@ -763,6 +823,7 @@ export RISCV_TEST_SUITE="rv32i_m"
 
 # KryptoNyte specific configurations
 export KRYPTONYTE_CONFORMANCE_ROOT="\$RISCV_ARCH_TEST_ROOT"
+export KRYPTONYTE_RISCOF_PLUGIN_ROOT="\$RISCV_PLUGIN_ROOT"
 export KRYPTONYTE_TEST_CONFIG="\$RISCV_ARCH_TEST_ROOT/kryptonyte_config.yaml"
 
 # Python path for test framework
@@ -920,6 +981,13 @@ verify_installation() {
         print_error "RISC-V Architecture Tests installation failed"
         ((errors++))
     fi
+
+    if [ "$RISCOF_PLUGINS_INSTALLED" = true ]; then
+        print_success "RISCOF plugins installation completed successfully"
+    else
+        print_error "RISCOF plugins installation failed"
+        ((errors++))
+    fi
     
     # Check Spike installation status
     if [ "$INSTALL_SPIKE" = true ]; then
@@ -980,6 +1048,7 @@ verify_installation() {
         echo -e "\n${CYAN}📋 Component Status Summary:${NC}"
         [ "$UV_INSTALLED" = true ] && echo -e "  🐍 UV Python Manager: ${GREEN}✅ Installed${NC}" || echo -e "  🐍 UV Python Manager: ${YELLOW}⚠️  Not Available${NC}"
         echo -e "  📚 Architecture Tests: ${GREEN}✅ Installed${NC}"
+        [ "$RISCOF_PLUGINS_INSTALLED" = true ] && echo -e "  🔌 RISCOF Plugins: ${GREEN}✅ Installed${NC}"
         [ "$INSTALL_SPIKE" = true ] && [ "$SPIKE_INSTALLED" = true ] && echo -e "  🔧 Spike Simulator: ${GREEN}✅ Installed${NC}"
         [ "$INSTALL_PK" = true ] && [ "$PK_INSTALLED" = true ] && echo -e "  ⚙️  Proxy Kernel: ${GREEN}✅ Installed${NC}"
         [ "$TOOLCHAIN_AVAILABLE" = true ] && echo -e "  🛠️  RISC-V Toolchain: ${GREEN}✅ Available${NC}"
@@ -989,6 +1058,7 @@ verify_installation() {
         echo -e "  📂 Conformance Root: ${WHITE}$INSTALL_DIR${NC}"
         echo -e "  🐍 Python Environment: ${WHITE}$KRYPTONYTE_VENV${NC}"
         echo -e "  📚 Architecture Tests: ${WHITE}$INSTALL_DIR/riscv-arch-test${NC}"
+        echo -e "  🔌 RISCOF Plugins: ${WHITE}$INSTALL_DIR/riscof-plugins${NC}"
         [ "$INSTALL_SPIKE" = true ] && echo -e "  🔧 Spike Simulator: ${WHITE}$KRYPTONYTE_TOOLS_DIR/riscv/bin/spike${NC}"
         [ "$INSTALL_PK" = true ] && echo -e "  ⚙️  Proxy Kernel: ${WHITE}$KRYPTONYTE_TOOLS_DIR/riscv/bin/pk${NC}"
         echo -e "  🌍 Environment File: ${WHITE}$KRYPTONYTE_VENV/riscv_conformance_env${NC}"
@@ -1009,6 +1079,7 @@ verify_installation() {
         
         echo -e "\n${CYAN}💥 Failed Components:${NC}"
         [ "$ARCH_TESTS_INSTALLED" != true ] && echo -e "  📚 Architecture Tests: ${RED}❌ Failed${NC}"
+        [ "$RISCOF_PLUGINS_INSTALLED" != true ] && echo -e "  🔌 RISCOF Plugins: ${RED}❌ Failed${NC}"
         [ "$INSTALL_SPIKE" = true ] && [ "$SPIKE_INSTALLED" != true ] && echo -e "  🔧 Spike Simulator: ${RED}❌ Failed${NC}"
         [ "$INSTALL_PK" = true ] && [ "$PK_INSTALLED" != true ] && echo -e "  ⚙️  Proxy Kernel: ${RED}❌ Failed${NC}"
         
@@ -1036,6 +1107,7 @@ main() {
     echo -e "${CYAN}Installation Configuration:${NC}"
     echo -e "  Install Directory: ${WHITE}$INSTALL_DIR${NC}"
     echo -e "  Arch Test Version: ${WHITE}$ARCH_TEST_VERSION${NC}"
+    echo -e "  RISCOF Plugins Version: ${WHITE}$RISCOF_PLUGINS_VERSION${NC}"
     echo -e "  Install Spike: ${WHITE}$INSTALL_SPIKE${NC}"
     echo -e "  Install PK: ${WHITE}$INSTALL_PK${NC}"
     echo -e "  Build Tests: ${WHITE}$BUILD_TESTS${NC}"
@@ -1049,6 +1121,7 @@ main() {
     local arch_tests_found=false
     local spike_found=false
     local pk_found=false
+    local riscof_plugins_found=false
     local toolchain_found=false
     
     if check_uv >/dev/null 2>&1; then
@@ -1063,6 +1136,13 @@ main() {
         arch_tests_found=true
     else
         echo -e "  📚 Architecture Tests: ${RED}Not Found${NC}"
+    fi
+
+    if check_riscof_plugins >/dev/null 2>&1; then
+        echo -e "  🔌 RISCOF Plugins: ${GREEN}Found${NC}"
+        riscof_plugins_found=true
+    else
+        echo -e "  🔌 RISCOF Plugins: ${RED}Not Found${NC}"
     fi
     
     if check_spike >/dev/null 2>&1; then
@@ -1106,6 +1186,7 @@ main() {
     install_uv
     check_riscv_toolchain
     install_arch_tests
+    install_riscof_plugins
     install_spike
     install_pk
     create_test_runners

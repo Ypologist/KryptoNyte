@@ -2,6 +2,8 @@ FROM ubuntu:24.04
 
 # Set non-interactive mode for APT to avoid prompts
 ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
 # Update and install OS-level prerequisites. Project-owned tools are installed
 # later into the repo-local .venv by the install scripts.

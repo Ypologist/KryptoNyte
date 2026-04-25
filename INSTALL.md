@@ -60,13 +60,18 @@ source .devcontainer/dev_env.sh
 Then install the remaining tool groups as needed:
 
 ```bash
+uv sync
 .devcontainer/install_rtl_tools.sh
 .devcontainer/install_riscv_compiler_tools.sh
 .devcontainer/install_riscv_conformance_tests.sh
 .devcontainer/install_physical_design_tools.sh
 ```
 
-The RISC-V compiler build is long-running and can take tens of minutes.
+Python development and conformance-test dependencies are managed by `uv sync`
+from `pyproject.toml`.
+
+The RISC-V compiler installer uses Ubuntu's prebuilt `gcc-riscv64-unknown-elf`
+and `binutils-riscv64-unknown-elf` packages, then builds Spike and pk locally.
 
 ## Option 2: Manual Docker
 
@@ -82,6 +87,7 @@ Inside the container, run:
 ```bash
 .devcontainer/install_sbt_and_gcc.sh
 source .devcontainer/dev_env.sh
+uv sync
 .devcontainer/install_rtl_tools.sh
 .devcontainer/install_riscv_compiler_tools.sh
 .devcontainer/install_riscv_conformance_tests.sh
@@ -110,6 +116,7 @@ Then install repo-owned tools:
 ```bash
 .devcontainer/install_sbt_and_gcc.sh
 source .devcontainer/dev_env.sh
+uv sync
 .devcontainer/install_rtl_tools.sh
 .devcontainer/install_riscv_compiler_tools.sh
 .devcontainer/install_riscv_conformance_tests.sh
@@ -124,7 +131,7 @@ source .devcontainer/dev_env.sh
 |-- sdkman/                      # Java, SBT, Scala
 |-- tools/
 |   |-- oss-cad-suite/           # Yosys, nextpnr, and related RTL tools
-|   |-- riscv/                   # RISC-V GNU toolchain, Spike, pk
+|   |-- riscv/                   # Repo-local Spike and pk builds
 |   |-- riscv-conformance/       # RISC-V architecture/conformance tests
 |   `-- skywater-pdk/            # SkyWater PDK, Open PDKs, Magic, OpenLane2 checkout
 `-- physical_design/             # OpenLane2 run output, reports, generated configs
