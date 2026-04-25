@@ -8,14 +8,14 @@ PATCH_FILE="$SCRIPT_DIR/beebs_signature.patch"
 BEEBS_CONFIG_LOG="$BEEBS_ROOT/config.status"
 LINKER_SCRIPT="$REPO_ROOT/tests/functional_tests/link.ld"
 
-RISCV_PREFIX=${RISCV_PREFIX:-/opt/riscv/bin/riscv64-unknown-elf-}
+RISCV_PREFIX=${RISCV_PREFIX:-$REPO_ROOT/.venv/tools/riscv/bin/riscv64-unknown-elf-}
 RISCV_GCC=${RISCV_GCC:-${RISCV_PREFIX}gcc}
 RISCV_AR=${RISCV_AR:-${RISCV_PREFIX}ar}
 RISCV_RANLIB=${RISCV_RANLIB:-${RISCV_PREFIX}ranlib}
 RISCV_OBJDUMP=${RISCV_OBJDUMP:-${RISCV_PREFIX}objdump}
 RISCV_OBJCOPY=${RISCV_OBJCOPY:-${RISCV_PREFIX}objcopy}
 
-SPIKE_BIN=${SPIKE_BIN:-/opt/riscv/bin/spike}
+SPIKE_BIN=${SPIKE_BIN:-$REPO_ROOT/.venv/tools/riscv/bin/spike}
 ISA=${ISA:-rv32i}
 
 usage() {

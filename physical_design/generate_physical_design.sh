@@ -30,8 +30,8 @@ print_error() { echo -e "${RED}❌${NC} $1"; exit 1; }
 MODULE_NAME="TetraNyteRV32ICore"
 CONFIG_BASE_FILE="config.base.json"
 CONFIG_MODULE_FILE=""
-OUTPUT_ROOT="${OPENLANE_OUTPUT_ROOT:-$SCRIPT_DIR/_runs}"
-OPENLANE2_PATH="${OPENLANE2_ROOT:-/opt/skywater-pdk/openlane2}"
+OUTPUT_ROOT="${OPENLANE_OUTPUT_ROOT:-$PROJECT_ROOT/.venv/physical_design}"
+OPENLANE2_PATH="${OPENLANE2_ROOT:-$PROJECT_ROOT/.venv/tools/skywater-pdk/openlane2}"
 VERBOSE=true
 USE_SUDO=false
 
@@ -65,8 +65,9 @@ Options:
   --module-name <name>    Module to process (Required unless viewing help)
   --config-base <file>    Base JSON config (default: config.base.json)
   --config-module <file>  Module-specific JSON config (optional)
-  --log-directory <path>  Output directory (default: physical_design/_runs)
-  --openlane2-path <path> OpenLane2 directory (default: /opt/skywater-pdk/openlane2)
+  --log-directory <path>  Output directory (default: .venv/physical_design)
+  --output-root <path>    Alias for --log-directory
+  --openlane2-path <path> OpenLane2 directory (default: .venv/tools/skywater-pdk/openlane2)
   --clock-period <ns>     Clock period in nanoseconds (default: 10.0)
   --utilization <percent> Core utilization percentage (default: 70)
   --use-sudo              Run nix-shell/openlane through sudo
@@ -112,7 +113,7 @@ while [[ $# -gt 0 ]]; do
         --module-name) MODULE_NAME="$2"; export MODULE_NAME; shift 2 ;; 
         --config-base) CONFIG_BASE_FILE="$2"; shift 2 ;;
         --config-module) CONFIG_MODULE_FILE="$2"; shift 2 ;;
-        --log-directory) OUTPUT_ROOT="$2"; shift 2 ;;
+        --log-directory|--output-root) OUTPUT_ROOT="$2"; shift 2 ;;
         --openlane2-path) OPENLANE2_PATH="$2"; shift 2 ;;
         --clock-period) CLOCK_PERIOD="$2"; export CLOCK_PERIOD; shift 2 ;;
         --utilization) CORE_UTILIZATION="$2"; export CORE_UTILIZATION; shift 2 ;;
@@ -725,7 +726,7 @@ EOF
 
 resolve_macro_paths() {
     print_step "Resolving latest macro paths..."
-    local target_rtl="$PHYSICAL_DESIGN_DIR/_runs/runs/$MODULE_NAME/src/${MODULE_NAME}.v"
+    local target_rtl="$RUNS_PATH/$MODULE_NAME/src/${MODULE_NAME}.v"
 
     _inject_macro() {
         local macro_name="$1"
@@ -740,7 +741,7 @@ resolve_macro_paths() {
             return
         fi
 
-        local regfile_dir="$PHYSICAL_DESIGN_DIR/_runs/runs/$macro_name/runs"
+        local regfile_dir="$RUNS_PATH/$macro_name/runs"
         if [ -d "$regfile_dir" ]; then
             local latest_run=""
             local final_dir=""

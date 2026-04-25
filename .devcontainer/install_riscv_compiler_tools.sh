@@ -6,12 +6,17 @@
 # Builds everything from source for maximum compatibility
 #######################################
 
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/common_install.sh"
+
 # Script configuration
-USE_SUDO=false
 VERBOSE=true
 UPGRADE_MODE=false
-INSTALL_PREFIX="/opt/riscv"
-BUILD_DIR="/tmp/riscv-build"
+INSTALL_PREFIX="$KRYPTONYTE_TOOLS_DIR/riscv"
+BUILD_DIR="$KRYPTONYTE_VENV/build/riscv"
 JOBS=$(nproc)
 
 # Component versions
@@ -43,10 +48,6 @@ NC='\033[0m' # No Color
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --with-sudo)
-            USE_SUDO=true
-            shift
-            ;;
         --quiet)
             VERBOSE=false
             shift
@@ -101,12 +102,11 @@ while [[ $# -gt 0 ]]; do
             echo "Native RISC-V Toolchain, Spike, and PK Builder for KryptoNyte"
             echo ""
             echo "Options:"
-            echo "  --with-sudo              Use sudo for commands requiring elevated privileges"
             echo "  --quiet                  Reduce output verbosity"
             echo "  --upgrade                Force rebuild of existing components"
             echo "  --clean                  Clean build directories before building"
-            echo "  --prefix DIR             Installation prefix (default: /opt/riscv)"
-            echo "  --build-dir DIR          Build directory (default: /tmp/riscv-build)"
+            echo "  --prefix DIR             Installation prefix (default: $KRYPTONYTE_TOOLS_DIR/riscv)"
+            echo "  --build-dir DIR          Build directory (default: $KRYPTONYTE_VENV/build/riscv)"
             echo "  --jobs N                 Number of parallel jobs (default: $(nproc))"
             echo "  --toolchain-version V    RISC-V toolchain version (default: 2024.02.02)"
             echo "  --spike-version V        Spike simulator version (default: master)"
@@ -126,13 +126,13 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Examples:"
             echo "  Build everything:"
-            echo "    $0 --with-sudo"
+            echo "    $0"
             echo ""
             echo "  Build with custom prefix:"
-            echo "    $0 --with-sudo --prefix /usr/local/riscv"
+            echo "    $0 --prefix \$PWD/.venv/tools/riscv-custom"
             echo ""
             echo "  Rebuild everything:"
-            echo "    $0 --with-sudo --upgrade --clean"
+            echo "    $0 --upgrade --clean"
             echo ""
             exit 0
             ;;
@@ -144,13 +144,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Function to execute commands with optional sudo
+# Function to execute commands
 run_cmd() {
-    if [ "$USE_SUDO" = true ]; then
-        sudo "$@"
-    else
-        "$@"
-    fi
+    "$@"
 }
 
 # Function to print large banner messages
@@ -204,30 +200,6 @@ command_exists() {
 check_requirements() {
     print_step "Checking system requirements for native RISC-V toolchain build"
     
-    # Install all required dependencies upfront if using sudo
-    if [ "$USE_SUDO" = true ]; then
-        print_step "Installing build dependencies"
-        
-        sudo apt-get update
-        
-        print_step "Installing essential build tools"
-        sudo apt-get install -y \
-            build-essential git make gcc g++ autoconf automake autotools-dev cmake ninja-build \
-            pkg-config curl wget unzip tar gzip
-        
-        print_step "Installing toolchain build dependencies"
-        sudo apt-get install -y \
-            libmpc-dev libmpfr-dev libgmp-dev zlib1g-dev libexpat1-dev libglib2.0-dev \
-            libncurses-dev libssl-dev
-        
-        print_step "Installing additional build utilities"
-        sudo apt-get install -y \
-            gawk bison flex texinfo gperf libtool patchutils bc m4 device-tree-compiler \
-            python3 python3-dev python3-pip
-        
-        print_success "All build dependencies installed"
-    fi
-    
     # Verify critical build tools
     print_step "Verifying build environment"
     
@@ -241,9 +213,7 @@ check_requirements() {
     
     if [ ${#missing_tools[@]} -ne 0 ]; then
         print_error "Missing required tools: ${missing_tools[*]}"
-        if [ "$USE_SUDO" = false ]; then
-            print_error "Run with --with-sudo to automatically install dependencies"
-        fi
+        print_error "Install OS prerequisites with: sudo .devcontainer/00_install_ubuntu_packages.sh"
         exit 1
     fi
     
@@ -260,6 +230,7 @@ check_requirements() {
 # Function to setup build environment
 setup_build_env() {
     print_step "Setting up build environment"
+    ensure_local_venv
     
     # Create build directory
     if [ "$CLEAN_BUILD" = true ] || [ "$UPGRADE_MODE" = true ]; then
@@ -277,11 +248,6 @@ setup_build_env() {
     fi
     
     run_cmd mkdir -p "$INSTALL_PREFIX"
-    
-    # Fix ownership if using sudo
-    if [ "$USE_SUDO" = true ]; then
-        sudo chown -R $USER:$USER "$INSTALL_PREFIX" 2>/dev/null || true
-    fi
     
     # Set environment variables for build
     export PATH="$INSTALL_PREFIX/bin:$PATH"
@@ -458,7 +424,7 @@ build_pk() {
     print_step "Using toolchain: $CC"
     
     # Configure and build with proper ISA extensions
-    # Install directly to /opt/riscv/bin like Spike
+    # Install directly into the selected repo-local RISC-V prefix.
     export CFLAGS="-march=rv64imac_zicsr_zifencei -mabi=lp64"
     export CXXFLAGS="-march=rv64imac_zicsr_zifencei -mabi=lp64"
     ../configure --prefix="$INSTALL_PREFIX" --host=riscv64-unknown-elf --with-arch=rv64imac_zicsr_zifencei
@@ -492,12 +458,15 @@ build_pk() {
 setup_environment() {
     print_banner "Setting up environment" "$PURPLE"
     
-    local env_file="$HOME/.riscv_native_env"
+    local env_file="$KRYPTONYTE_VENV/riscv_native_env"
     
     print_step "Creating environment configuration file"
     cat > "$env_file" << EOF
 # Native RISC-V Toolchain Environment Variables
 # Source this file or add to your shell profile (.bashrc, .zshrc, etc.)
+
+# KryptoNyte repo-local environment
+source "$KRYPTONYTE_REPO_ROOT/.devcontainer/dev_env.sh"
 
 # RISC-V Installation
 export RISCV="$INSTALL_PREFIX"
@@ -522,9 +491,9 @@ EOF
     
     # Add to shell profile if possible
     local shell_profile=""
-    if [ -n "$BASH_VERSION" ]; then
+    if [ -n "${BASH_VERSION:-}" ]; then
         shell_profile="$HOME/.bashrc"
-    elif [ -n "$ZSH_VERSION" ]; then
+    elif [ -n "${ZSH_VERSION:-}" ]; then
         shell_profile="$HOME/.zshrc"
     fi
     
@@ -537,6 +506,8 @@ EOF
             print_success "Environment setup added to shell profile"
         fi
     fi
+
+    add_dev_env_to_shell_profile
     
     print_success "Environment configuration complete"
     
@@ -594,10 +565,10 @@ verify_installation() {
         
         echo -e "\n${CYAN}📁 Installation Location:${NC}"
         echo -e "  📂 Install Prefix: ${WHITE}$INSTALL_PREFIX${NC}"
-        echo -e "  🌍 Environment File: ${WHITE}$HOME/.riscv_native_env${NC}"
+        echo -e "  🌍 Environment File: ${WHITE}$KRYPTONYTE_VENV/riscv_native_env${NC}"
         
         echo -e "\n${CYAN}🚀 Next Steps:${NC}"
-        echo -e "  1. Load environment: ${WHITE}source ~/.riscv_native_env${NC}"
+        echo -e "  1. Load environment: ${WHITE}source $KRYPTONYTE_VENV/riscv_native_env${NC}"
         echo -e "  2. Test toolchain: ${WHITE}riscv64-unknown-elf-gcc --version${NC}"
         echo -e "  3. Test Spike: ${WHITE}spike --help${NC}"
         echo -e "  4. Use with KryptoNyte conformance tests"
@@ -633,7 +604,6 @@ main() {
     echo -e "  Build Toolchain: ${WHITE}$BUILD_TOOLCHAIN${NC}"
     echo -e "  Build Spike: ${WHITE}$BUILD_SPIKE${NC}"
     echo -e "  Build PK: ${WHITE}$BUILD_PK${NC}"
-    echo -e "  Use Sudo: ${WHITE}$USE_SUDO${NC}"
     echo -e "  Upgrade Mode: ${WHITE}$UPGRADE_MODE${NC}"
     echo -e "  Clean Build: ${WHITE}$CLEAN_BUILD${NC}"
     
@@ -649,9 +619,7 @@ main() {
     # Confirm build
     if [ "$VERBOSE" = true ]; then
         echo ""
-        read -p "Continue with native build? (Y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Nn]$ ]]; then
+        if ! confirm_continue "Continue with native build? (Y/n): "; then
             print_error "Build cancelled by user"
             exit 1
         fi
@@ -669,7 +637,7 @@ main() {
 }
 
 # Ensure terminal is reset even if script is interrupted
-trap 'echo -e "\033[0m"; stty echo' EXIT INT TERM
+trap 'echo -e "\033[0m"; stty echo 2>/dev/null || true' EXIT INT TERM
 
 # Run main function
 main "$@"

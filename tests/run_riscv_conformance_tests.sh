@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(dirname "$SCRIPT_DIR")
 
-RISCV_ARCH_TEST_ROOT=${RISCV_ARCH_TEST_ROOT:-/opt/riscv-conformance/riscv-arch-test}
+RISCV_ARCH_TEST_ROOT=${RISCV_ARCH_TEST_ROOT:-$REPO_ROOT/.venv/tools/riscv-conformance/riscv-arch-test}
 PLUGIN_ROOT="$RISCV_ARCH_TEST_ROOT/riscof-plugins/rv32"
 BASE_SUITE_I="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/rv32i_m/I"
 BASE_SUITE_M="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/rv32i_m/M"
@@ -182,14 +182,18 @@ fi
 
 # Toolchain prefix (riscv32 toolchains often installed as riscv64-unknown-elf-)
 export RISCV_PREFIX="${RISCV_TOOLCHAIN_PREFIX:-riscv64-unknown-elf-}"
+TOOLCHAIN_ROOT="${RISCV_TOOLCHAIN_ROOT:-$REPO_ROOT/.venv/tools/riscv}"
+if [[ -d "$TOOLCHAIN_ROOT/bin" ]]; then
+  export PATH="$TOOLCHAIN_ROOT/bin:$PATH"
+fi
 
 # Provide riscv32 aliases to the riscv64 toolchain if needed
 ALIAS_BIN="$SCRIPT_DIR/toolchain_alias/bin"
 mkdir -p "$ALIAS_BIN"
 TOOLS=(gcc g++ as ld objcopy objdump ar ranlib readelf)
 for t in "${TOOLS[@]}"; do
-  if [[ ! -x "$ALIAS_BIN/riscv32-unknown-elf-$t" ]]; then
-    ln -sf "/opt/riscv/bin/riscv64-unknown-elf-$t" "$ALIAS_BIN/riscv32-unknown-elf-$t" || true
+  if [[ -x "$TOOLCHAIN_ROOT/bin/riscv64-unknown-elf-$t" ]]; then
+    ln -sf "$TOOLCHAIN_ROOT/bin/riscv64-unknown-elf-$t" "$ALIAS_BIN/riscv32-unknown-elf-$t" || true
   fi
 done
 export PATH="$ALIAS_BIN:$PATH"

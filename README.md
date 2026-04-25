@@ -11,16 +11,23 @@ All processor cores are implemented in Chisel and generate Verilog for synthesis
 
 # Installation
 
+See [INSTALL.md](INSTALL.md) for the full fresh-clone setup, including Docker/devcontainer usage and native Ubuntu/WSL installation.
+
 ## Github Codespace
 
 Create a normal github codespace. By default, sbt and gcc are installed.
 
 ## Ubuntu 24.04 including WSL
 
-1. RTL Tools: .devcontainer/install_rtl_tools.sh --with-sudo
-2. RISCV Compiler Toolchain: .devcontainer/install_riscv_compiler_tools.sh --with-sudo
-3. Conformance Tests: .devcontainer/install_riscv_conformance_tests.sh --with-sudo
-4. Physical Design: .devcontainer/install_physical_design_tools.sh --with-sudo
+1. OS prerequisites: sudo .devcontainer/00_install_ubuntu_packages.sh
+2. Basic SBT/Scala tools: .devcontainer/install_sbt_and_gcc.sh
+3. RTL tools: .devcontainer/install_rtl_tools.sh
+4. RISCV compiler toolchain: .devcontainer/install_riscv_compiler_tools.sh
+5. Conformance tests: .devcontainer/install_riscv_conformance_tests.sh
+6. Physical design: .devcontainer/install_physical_design_tools.sh
+
+The install scripts place repo-owned tools under `.venv`. Source `.devcontainer/dev_env.sh`
+in the current shell to use the installed tools immediately.
 
 
 ## Building and Testing ZeroNyte
@@ -59,4 +66,3 @@ KryptoNyte/
 ├── tests/                           # Family-wide verification
 ├── physical_design/                 # Physical implementation
 ```
-

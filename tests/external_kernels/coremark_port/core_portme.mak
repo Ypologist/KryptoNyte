@@ -1,4 +1,4 @@
-RISCV_PREFIX ?= /opt/riscv/bin/riscv64-unknown-elf-
+RISCV_PREFIX ?= ../../../.venv/tools/riscv/bin/riscv64-unknown-elf-
 CC := $(RISCV_PREFIX)gcc
 AR := $(RISCV_PREFIX)ar
 LD := $(CC)
