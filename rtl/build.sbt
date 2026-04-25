@@ -3,6 +3,11 @@ ThisBuild / version      := "0.1.0"
 ThisBuild / organization := "%ORGANIZATION%"
 
 val chiselVersion = "6.6.0"
+val repoRoot = file("..").getCanonicalFile
+val defaultFirtoolPath = sys.env.getOrElse(
+  "FIRTOOL_PATH",
+  (repoRoot / ".venv" / "bin" / "firtool").getAbsolutePath
+)
 
 lazy val generateLibraryRTL   = taskKey[Unit]("Generate RTL for standalone library modules")
 lazy val generateZeroNyteRTL  = taskKey[Unit]("Generate RTL for the ZeroNyte core")
@@ -49,7 +54,7 @@ lazy val commonSettings = Seq(
   // Java Options for forked JVMs (run and test)
   javaOptions ++= Seq(
     "-Xmx4G",
-    "-Dchisel.firtool.path=/usr/local/bin/firtool",
+    s"-Dchisel.firtool.path=$defaultFirtoolPath",
     "-Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG",
     "-Dorg.slf4j.simpleLogger.showDateTime=true",
     "-Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd HH:mm:ss"

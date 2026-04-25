@@ -1,32 +1,36 @@
 #!/bin/bash
 
 #######################################
-# Native RISC-V Toolchain, Spike, and PK Builder
+# RISC-V Compiler Package, Spike, and PK Installer
 # For KryptoNyte RISC-V Processor Family
-# Builds everything from source for maximum compatibility
+# Uses Ubuntu's prebuilt RISC-V compiler and builds Spike/PK locally
 #######################################
 
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/common_install.sh"
+
 # Script configuration
-USE_SUDO=false
 VERBOSE=true
 UPGRADE_MODE=false
-INSTALL_PREFIX="/opt/riscv"
-BUILD_DIR="/tmp/riscv-build"
+INSTALL_PREFIX="$KRYPTONYTE_TOOLS_DIR/riscv"
+BUILD_DIR="$KRYPTONYTE_VENV/build/riscv"
 JOBS=$(nproc)
 
 # Component versions
-TOOLCHAIN_VERSION="2024.02.02"  # Stable release
 SPIKE_VERSION="master"
 PK_VERSION="master"
 
-# Build configuration
+# Installation/build configuration
 BUILD_TOOLCHAIN=true
 BUILD_SPIKE=true
 BUILD_PK=true
 CLEAN_BUILD=false
 
 # Installation status tracking
-TOOLCHAIN_BUILT=false
+TOOLCHAIN_AVAILABLE=false
 SPIKE_BUILT=false
 PK_BUILT=false
 
@@ -43,10 +47,6 @@ NC='\033[0m' # No Color
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --with-sudo)
-            USE_SUDO=true
-            shift
-            ;;
         --quiet)
             VERBOSE=false
             shift
@@ -72,7 +72,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --toolchain-version)
-            TOOLCHAIN_VERSION="$2"
+            echo "Warning: --toolchain-version is ignored; the compiler is installed from Ubuntu packages." >&2
             shift 2
             ;;
         --spike-version)
@@ -98,41 +98,40 @@ while [[ $# -gt 0 ]]; do
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
-            echo "Native RISC-V Toolchain, Spike, and PK Builder for KryptoNyte"
+            echo "RISC-V Compiler Package, Spike, and PK Installer for KryptoNyte"
             echo ""
             echo "Options:"
-            echo "  --with-sudo              Use sudo for commands requiring elevated privileges"
             echo "  --quiet                  Reduce output verbosity"
             echo "  --upgrade                Force rebuild of existing components"
             echo "  --clean                  Clean build directories before building"
-            echo "  --prefix DIR             Installation prefix (default: /opt/riscv)"
-            echo "  --build-dir DIR          Build directory (default: /tmp/riscv-build)"
+            echo "  --prefix DIR             Installation prefix (default: $KRYPTONYTE_TOOLS_DIR/riscv)"
+            echo "  --build-dir DIR          Build directory (default: $KRYPTONYTE_VENV/build/riscv)"
             echo "  --jobs N                 Number of parallel jobs (default: $(nproc))"
-            echo "  --toolchain-version V    RISC-V toolchain version (default: 2024.02.02)"
+            echo "  --toolchain-version V    Ignored; compiler is installed from Ubuntu packages"
             echo "  --spike-version V        Spike simulator version (default: master)"
             echo "  --pk-version V           Proxy kernel version (default: master)"
-            echo "  --no-toolchain           Skip toolchain build"
+            echo "  --no-toolchain           Skip compiler package installation/check"
             echo "  --no-spike               Skip Spike build"
             echo "  --no-pk                  Skip PK build"
             echo "  --help, -h               Show this help message"
             echo ""
-            echo "This script builds from source:"
-            echo "  - RISC-V GNU Toolchain (GCC, Binutils, Newlib)"
+            echo "This script installs/builds:"
+            echo "  - Ubuntu RISC-V compiler packages (GCC, Binutils)"
             echo "  - Spike RISC-V ISA Simulator"
             echo "  - RISC-V Proxy Kernel (pk)"
             echo ""
-            echo "Build time: ~30-60 minutes depending on system performance"
-            echo "Disk space required: ~5GB for build, ~2GB for installation"
+            echo "Build time: usually 5-15 minutes depending on system performance"
+            echo "Disk space required: compiler packages plus Spike/PK build output"
             echo ""
             echo "Examples:"
-            echo "  Build everything:"
-            echo "    $0 --with-sudo"
+            echo "  Install compiler packages and build Spike/PK:"
+            echo "    $0"
             echo ""
-            echo "  Build with custom prefix:"
-            echo "    $0 --with-sudo --prefix /usr/local/riscv"
+            echo "  Install Spike/PK with custom prefix:"
+            echo "    $0 --prefix \$PWD/.venv/tools/riscv-custom"
             echo ""
-            echo "  Rebuild everything:"
-            echo "    $0 --with-sudo --upgrade --clean"
+            echo "  Rebuild Spike/PK:"
+            echo "    $0 --upgrade --clean"
             echo ""
             exit 0
             ;;
@@ -144,13 +143,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Function to execute commands with optional sudo
+# Function to execute commands
 run_cmd() {
-    if [ "$USE_SUDO" = true ]; then
-        sudo "$@"
-    else
-        "$@"
-    fi
+    "$@"
 }
 
 # Function to print large banner messages
@@ -202,31 +197,7 @@ command_exists() {
 
 # Function to check system requirements
 check_requirements() {
-    print_step "Checking system requirements for native RISC-V toolchain build"
-    
-    # Install all required dependencies upfront if using sudo
-    if [ "$USE_SUDO" = true ]; then
-        print_step "Installing build dependencies"
-        
-        sudo apt-get update
-        
-        print_step "Installing essential build tools"
-        sudo apt-get install -y \
-            build-essential git make gcc g++ autoconf automake autotools-dev cmake ninja-build \
-            pkg-config curl wget unzip tar gzip
-        
-        print_step "Installing toolchain build dependencies"
-        sudo apt-get install -y \
-            libmpc-dev libmpfr-dev libgmp-dev zlib1g-dev libexpat1-dev libglib2.0-dev \
-            libncurses-dev libssl-dev
-        
-        print_step "Installing additional build utilities"
-        sudo apt-get install -y \
-            gawk bison flex texinfo gperf libtool patchutils bc m4 device-tree-compiler \
-            python3 python3-dev python3-pip
-        
-        print_success "All build dependencies installed"
-    fi
+    print_step "Checking system requirements for RISC-V tools"
     
     # Verify critical build tools
     print_step "Verifying build environment"
@@ -238,28 +209,70 @@ check_requirements() {
             missing_tools+=("$tool")
         fi
     done
+
+    if [ "$BUILD_TOOLCHAIN" = true ] && ! command_exists apt-get; then
+        missing_tools+=("apt-get")
+    fi
     
     if [ ${#missing_tools[@]} -ne 0 ]; then
         print_error "Missing required tools: ${missing_tools[*]}"
-        if [ "$USE_SUDO" = false ]; then
-            print_error "Run with --with-sudo to automatically install dependencies"
-        fi
+        print_error "Install OS prerequisites with: sudo .devcontainer/00_install_ubuntu_packages.sh"
         exit 1
     fi
     
     # Check disk space (need ~5GB for build)
-    local available_space=$(df "$BUILD_DIR" 2>/dev/null | awk 'NR==2 {print $4}' || echo "0")
+    local available_space
+    available_space=$(df "$KRYPTONYTE_REPO_ROOT" 2>/dev/null | awk 'NR==2 {print $4}' || echo "0")
     if [ "$available_space" -lt 5000000 ]; then  # 5GB in KB
         print_warning "Low disk space detected. Build may fail if space runs out."
         print_warning "Recommended: At least 5GB free space in $BUILD_DIR"
     fi
     
-    print_success "Build environment verified"
+    print_success "Tool environment verified"
+}
+
+apt_install_packages() {
+    local packages=("$@")
+    local apt_cmd=()
+
+    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        apt_cmd=(apt-get)
+    elif command_exists sudo; then
+        apt_cmd=(sudo apt-get)
+    else
+        print_error "Installing compiler packages requires root or sudo."
+        print_error "Run this script as root, or install manually: apt-get install ${packages[*]}"
+        return 1
+    fi
+
+    print_step "Updating apt package lists"
+    DEBIAN_FRONTEND=noninteractive "${apt_cmd[@]}" update -y
+
+    print_step "Installing apt packages: ${packages[*]}"
+    DEBIAN_FRONTEND=noninteractive "${apt_cmd[@]}" install -y "${packages[@]}"
+}
+
+find_riscv_gcc() {
+    command -v riscv64-unknown-elf-gcc 2>/dev/null || true
+}
+
+find_riscv_tool() {
+    local tool="$1"
+    command -v "riscv64-unknown-elf-$tool" 2>/dev/null || true
+}
+
+riscv_toolchain_complete() {
+    [ -n "$(find_riscv_gcc)" ] &&
+        [ -n "$(find_riscv_tool g++)" ] &&
+        [ -n "$(find_riscv_tool ar)" ] &&
+        [ -n "$(find_riscv_tool ranlib)" ] &&
+        [ -n "$(find_riscv_tool strip)" ]
 }
 
 # Function to setup build environment
 setup_build_env() {
     print_step "Setting up build environment"
+    ensure_local_venv
     
     # Create build directory
     if [ "$CLEAN_BUILD" = true ] || [ "$UPGRADE_MODE" = true ]; then
@@ -278,11 +291,6 @@ setup_build_env() {
     
     run_cmd mkdir -p "$INSTALL_PREFIX"
     
-    # Fix ownership if using sudo
-    if [ "$USE_SUDO" = true ]; then
-        sudo chown -R $USER:$USER "$INSTALL_PREFIX" 2>/dev/null || true
-    fi
-    
     # Set environment variables for build
     export PATH="$INSTALL_PREFIX/bin:$PATH"
     export RISCV="$INSTALL_PREFIX"
@@ -293,58 +301,33 @@ setup_build_env() {
     print_step "Parallel jobs: $JOBS"
 }
 
-# Function to build RISC-V toolchain
-build_toolchain() {
+# Function to install/check RISC-V compiler packages
+install_toolchain() {
     if [ "$BUILD_TOOLCHAIN" = false ]; then
-        print_step "Skipping RISC-V toolchain build"
+        print_step "Skipping RISC-V compiler package installation/check"
         return 0
     fi
     
-    print_banner "Building RISC-V GNU Toolchain" "$BLUE"
-    
-    local toolchain_dir="$BUILD_DIR/riscv-gnu-toolchain"
-    
-    # Check if already built
-    if [ "$UPGRADE_MODE" = false ] && [ -f "$INSTALL_PREFIX/bin/riscv64-unknown-elf-gcc" ]; then
-        print_success "RISC-V toolchain already built - skipping"
-        TOOLCHAIN_BUILT=true
+    print_banner "Installing RISC-V Compiler Packages" "$BLUE"
+
+    if riscv_toolchain_complete; then
+        local version
+        version=$(riscv64-unknown-elf-gcc --version | head -1)
+        print_success "RISC-V compiler tools already available: $version"
+        TOOLCHAIN_AVAILABLE=true
         return 0
     fi
-    
-    print_step "Cloning RISC-V GNU toolchain repository"
-    if [ -d "$toolchain_dir" ]; then
-        cd "$toolchain_dir"
-        git fetch origin
-        git checkout "$TOOLCHAIN_VERSION" 2>/dev/null || git checkout master
-        git pull origin HEAD
+
+    apt_install_packages gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+
+    if riscv_toolchain_complete; then
+        local version
+        version=$(riscv64-unknown-elf-gcc --version | head -1)
+        print_success "RISC-V compiler tools installed: $version"
+        TOOLCHAIN_AVAILABLE=true
     else
-        git clone --recursive https://github.com/riscv-collab/riscv-gnu-toolchain.git "$toolchain_dir"
-        cd "$toolchain_dir"
-        git checkout "$TOOLCHAIN_VERSION" 2>/dev/null || echo "Using master branch"
-    fi
-    
-    print_step "Updating submodules"
-    git submodule update --init --recursive
-    
-    print_step "Configuring RISC-V toolchain build"
-    # Build both 32-bit and 64-bit toolchains with multilib support
-    ./configure --prefix="$INSTALL_PREFIX" --enable-multilib
-    
-    print_step "Building RISC-V toolchain (this will take 20-40 minutes)"
-    print_step "Building with $JOBS parallel jobs"
-    
-    # Build the toolchain
-    if make -j"$JOBS"; then
-        TOOLCHAIN_BUILT=true
-        print_success "RISC-V toolchain built successfully"
-        
-        # Verify installation
-        if [ -f "$INSTALL_PREFIX/bin/riscv64-unknown-elf-gcc" ]; then
-            local version=$("$INSTALL_PREFIX/bin/riscv64-unknown-elf-gcc" --version | head -1)
-            print_success "Toolchain version: $version"
-        fi
-    else
-        print_error "RISC-V toolchain build failed"
+        print_error "RISC-V compiler package installation completed, but the expected tools are not in PATH"
+        print_error "Expected riscv64-unknown-elf-{gcc,g++,ar,ranlib,strip}."
         return 1
     fi
 }
@@ -418,8 +401,10 @@ build_pk() {
     fi
     
     # Ensure toolchain is available
-    if [ ! -f "$INSTALL_PREFIX/bin/riscv64-unknown-elf-gcc" ]; then
-        print_error "RISC-V toolchain not found. Build toolchain first."
+    local riscv_gcc
+    riscv_gcc="$(find_riscv_gcc)"
+    if [ -z "$riscv_gcc" ]; then
+        print_error "RISC-V compiler not found. Install gcc-riscv64-unknown-elf first."
         return 1
     fi
     
@@ -449,16 +434,28 @@ build_pk() {
     cd build
     
     # Set up cross-compilation environment
-    export CC="$INSTALL_PREFIX/bin/riscv64-unknown-elf-gcc"
-    export CXX="$INSTALL_PREFIX/bin/riscv64-unknown-elf-g++"
-    export AR="$INSTALL_PREFIX/bin/riscv64-unknown-elf-ar"
-    export RANLIB="$INSTALL_PREFIX/bin/riscv64-unknown-elf-ranlib"
-    export STRIP="$INSTALL_PREFIX/bin/riscv64-unknown-elf-strip"
+    local riscv_gxx riscv_ar riscv_ranlib riscv_strip
+    riscv_gxx="$(find_riscv_tool g++)"
+    riscv_ar="$(find_riscv_tool ar)"
+    riscv_ranlib="$(find_riscv_tool ranlib)"
+    riscv_strip="$(find_riscv_tool strip)"
+
+    if [ -z "$riscv_gxx" ] || [ -z "$riscv_ar" ] || [ -z "$riscv_ranlib" ] || [ -z "$riscv_strip" ]; then
+        print_error "Incomplete RISC-V compiler tools in PATH."
+        print_error "Expected riscv64-unknown-elf-{gcc,g++,ar,ranlib,strip}."
+        return 1
+    fi
+
+    export CC="$riscv_gcc"
+    export CXX="$riscv_gxx"
+    export AR="$riscv_ar"
+    export RANLIB="$riscv_ranlib"
+    export STRIP="$riscv_strip"
     
     print_step "Using toolchain: $CC"
     
     # Configure and build with proper ISA extensions
-    # Install directly to /opt/riscv/bin like Spike
+    # Install directly into the selected repo-local RISC-V prefix.
     export CFLAGS="-march=rv64imac_zicsr_zifencei -mabi=lp64"
     export CXXFLAGS="-march=rv64imac_zicsr_zifencei -mabi=lp64"
     ../configure --prefix="$INSTALL_PREFIX" --host=riscv64-unknown-elf --with-arch=rv64imac_zicsr_zifencei
@@ -492,19 +489,26 @@ build_pk() {
 setup_environment() {
     print_banner "Setting up environment" "$PURPLE"
     
-    local env_file="$HOME/.riscv_native_env"
+    local env_file="$KRYPTONYTE_VENV/riscv_native_env"
+    local toolchain_root="$INSTALL_PREFIX"
+    if [ -n "$(find_riscv_gcc)" ]; then
+        toolchain_root="$(dirname "$(dirname "$(find_riscv_gcc)")")"
+    fi
     
     print_step "Creating environment configuration file"
     cat > "$env_file" << EOF
-# Native RISC-V Toolchain Environment Variables
+# RISC-V Compiler, Spike, and PK Environment Variables
 # Source this file or add to your shell profile (.bashrc, .zshrc, etc.)
+
+# KryptoNyte repo-local environment
+source "$KRYPTONYTE_REPO_ROOT/.devcontainer/dev_env.sh"
 
 # RISC-V Installation
 export RISCV="$INSTALL_PREFIX"
-export RISCV_TOOLCHAIN_ROOT="$INSTALL_PREFIX"
+export RISCV_TOOLCHAIN_ROOT="$toolchain_root"
 
-# Add RISC-V tools to PATH
-export PATH="$INSTALL_PREFIX/bin:\$PATH"
+# Add repo-local Spike/PK and packaged compiler tools to PATH
+export PATH="$INSTALL_PREFIX/bin:\$RISCV_TOOLCHAIN_ROOT/bin:\$PATH"
 
 # RISC-V specific environment
 export RISCV_PREFIX="riscv64-unknown-elf-"
@@ -513,18 +517,18 @@ export RISCV_PREFIX="riscv64-unknown-elf-"
 export SPIKE_ROOT="$INSTALL_PREFIX"
 export PK_ROOT="$INSTALL_PREFIX"
 
-echo "Native RISC-V toolchain environment loaded"
-echo "Toolchain: $INSTALL_PREFIX"
-echo "Tools available: \$(ls $INSTALL_PREFIX/bin/riscv* 2>/dev/null | wc -l) RISC-V tools"
+echo "RISC-V compiler, Spike, and PK environment loaded"
+echo "Compiler root: \$RISCV_TOOLCHAIN_ROOT"
+echo "Spike/PK root: $INSTALL_PREFIX"
 EOF
 
     print_step "Environment file created at: $env_file"
     
     # Add to shell profile if possible
     local shell_profile=""
-    if [ -n "$BASH_VERSION" ]; then
+    if [ -n "${BASH_VERSION:-}" ]; then
         shell_profile="$HOME/.bashrc"
-    elif [ -n "$ZSH_VERSION" ]; then
+    elif [ -n "${ZSH_VERSION:-}" ]; then
         shell_profile="$HOME/.zshrc"
     fi
     
@@ -532,15 +536,17 @@ EOF
         if ! grep -q "riscv_native_env" "$shell_profile"; then
             print_step "Adding environment setup to $shell_profile"
             echo "" >> "$shell_profile"
-            echo "# Native RISC-V Toolchain Environment" >> "$shell_profile"
+            echo "# RISC-V Compiler, Spike, and PK Environment" >> "$shell_profile"
             echo "source $env_file" >> "$shell_profile"
             print_success "Environment setup added to shell profile"
         fi
     fi
+
+    add_dev_env_to_shell_profile
     
     print_success "Environment configuration complete"
     
-    echo -e "\n${CYAN}To use the native RISC-V toolchain in your current session, run:${NC}"
+    echo -e "\n${CYAN}To use the RISC-V tools in your current session, run:${NC}"
     echo -e "${WHITE}source $env_file${NC}"
 }
 
@@ -553,12 +559,13 @@ verify_installation() {
     
     # Check toolchain
     if [ "$BUILD_TOOLCHAIN" = true ]; then
-        if [ "$TOOLCHAIN_BUILT" = true ] && [ -f "$INSTALL_PREFIX/bin/riscv64-unknown-elf-gcc" ]; then
-            print_success "RISC-V toolchain built and installed successfully"
-            local version=$("$INSTALL_PREFIX/bin/riscv64-unknown-elf-gcc" --version | head -1)
-            print_step "Toolchain: $version"
+        if [ "$TOOLCHAIN_AVAILABLE" = true ] && [ -n "$(find_riscv_gcc)" ]; then
+            print_success "RISC-V compiler package installed and available"
+            local version
+            version=$(riscv64-unknown-elf-gcc --version | head -1)
+            print_step "Compiler: $version"
         else
-            print_error "RISC-V toolchain build failed"
+            print_error "RISC-V compiler package installation/check failed"
             ((errors++))
         fi
     fi
@@ -584,20 +591,20 @@ verify_installation() {
     fi
     
     if [ $errors -eq 0 ]; then
-        print_banner "Build completed successfully!" "$GREEN"
-        echo -e "\n${GREEN}✅ All components built successfully!${NC}"
+        print_banner "Installation/build completed successfully!" "$GREEN"
+        echo -e "\n${GREEN}✅ All components installed or built successfully!${NC}"
         
         echo -e "\n${CYAN}📋 Installation Summary:${NC}"
-        [ "$BUILD_TOOLCHAIN" = true ] && [ "$TOOLCHAIN_BUILT" = true ] && echo -e "  🛠️  RISC-V Toolchain: ${GREEN}✅ Built${NC}"
+        [ "$BUILD_TOOLCHAIN" = true ] && [ "$TOOLCHAIN_AVAILABLE" = true ] && echo -e "  🛠️  RISC-V Compiler: ${GREEN}✅ Available from apt${NC}"
         [ "$BUILD_SPIKE" = true ] && [ "$SPIKE_BUILT" = true ] && echo -e "  🔧 Spike Simulator: ${GREEN}✅ Built${NC}"
         [ "$BUILD_PK" = true ] && [ "$PK_BUILT" = true ] && echo -e "  ⚙️  Proxy Kernel: ${GREEN}✅ Built${NC}"
         
         echo -e "\n${CYAN}📁 Installation Location:${NC}"
         echo -e "  📂 Install Prefix: ${WHITE}$INSTALL_PREFIX${NC}"
-        echo -e "  🌍 Environment File: ${WHITE}$HOME/.riscv_native_env${NC}"
+        echo -e "  🌍 Environment File: ${WHITE}$KRYPTONYTE_VENV/riscv_native_env${NC}"
         
         echo -e "\n${CYAN}🚀 Next Steps:${NC}"
-        echo -e "  1. Load environment: ${WHITE}source ~/.riscv_native_env${NC}"
+        echo -e "  1. Load environment: ${WHITE}source $KRYPTONYTE_VENV/riscv_native_env${NC}"
         echo -e "  2. Test toolchain: ${WHITE}riscv64-unknown-elf-gcc --version${NC}"
         echo -e "  3. Test Spike: ${WHITE}spike --help${NC}"
         echo -e "  4. Use with KryptoNyte conformance tests"
@@ -624,52 +631,46 @@ verify_installation() {
 
 # Main build flow
 main() {
-    print_banner "Native RISC-V Toolchain Builder for KryptoNyte" "$BLUE"
+    print_banner "RISC-V Compiler, Spike, and PK Installer for KryptoNyte" "$BLUE"
     
     echo -e "${CYAN}Build Configuration:${NC}"
     echo -e "  Install Prefix: ${WHITE}$INSTALL_PREFIX${NC}"
     echo -e "  Build Directory: ${WHITE}$BUILD_DIR${NC}"
     echo -e "  Parallel Jobs: ${WHITE}$JOBS${NC}"
-    echo -e "  Build Toolchain: ${WHITE}$BUILD_TOOLCHAIN${NC}"
+    echo -e "  Install/Check Compiler Packages: ${WHITE}$BUILD_TOOLCHAIN${NC}"
     echo -e "  Build Spike: ${WHITE}$BUILD_SPIKE${NC}"
     echo -e "  Build PK: ${WHITE}$BUILD_PK${NC}"
-    echo -e "  Use Sudo: ${WHITE}$USE_SUDO${NC}"
     echo -e "  Upgrade Mode: ${WHITE}$UPGRADE_MODE${NC}"
     echo -e "  Clean Build: ${WHITE}$CLEAN_BUILD${NC}"
     
     # Estimate build time
-    local estimated_time="20-40 minutes"
-    if [ "$BUILD_TOOLCHAIN" = false ]; then
-        estimated_time="5-10 minutes"
-    fi
+    local estimated_time="5-15 minutes"
     
     echo -e "\n${YELLOW}⏱️  Estimated build time: $estimated_time${NC}"
-    echo -e "${YELLOW}💾 Disk space required: ~5GB for build, ~2GB for installation${NC}"
+    echo -e "${YELLOW}💾 Disk space required: compiler packages plus Spike/PK build output${NC}"
     
     # Confirm build
     if [ "$VERBOSE" = true ]; then
         echo ""
-        read -p "Continue with native build? (Y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Nn]$ ]]; then
-            print_error "Build cancelled by user"
+        if ! confirm_continue "Continue with installation/build? (Y/n): "; then
+            print_error "Installation cancelled by user"
             exit 1
         fi
     fi
     
     check_requirements
     setup_build_env
-    build_toolchain
+    install_toolchain
     build_spike
     build_pk
     setup_environment
     verify_installation
     
-    print_banner "Native RISC-V Build Complete!" "$GREEN"
+    print_banner "RISC-V Tools Installation Complete!" "$GREEN"
 }
 
 # Ensure terminal is reset even if script is interrupted
-trap 'echo -e "\033[0m"; stty echo' EXIT INT TERM
+trap 'echo -e "\033[0m"; stty echo 2>/dev/null || true' EXIT INT TERM
 
 # Run main function
 main "$@"

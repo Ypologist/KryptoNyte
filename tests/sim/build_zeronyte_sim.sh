@@ -6,7 +6,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 
 cd "$REPO_ROOT"
 
-SIM_DIR="tests/sim"
+SIM_DIR="$REPO_ROOT/tests/sim"
 BUILD_DIR="$SIM_DIR/build"
 OBJ_DIR="$BUILD_DIR/obj_dir"
 
@@ -25,6 +25,7 @@ verilator -cc "$VERILOG_TOP" \
   --Mdir "$OBJ_DIR" \
   --timescale-override 1ns/1ns \
   --trace \
+  --Wno-UNOPTFLAT \
   --Wno-PINMISSING \
   --build \
   -CFLAGS "-O2 -std=c++17" \

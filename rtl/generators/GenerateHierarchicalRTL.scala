@@ -79,7 +79,7 @@ case class RTLGeneratorConfig(
     if (pdkRoot.nonEmpty) return this
     
     val pdkSearchPaths = Seq(
-      "/opt/skywater-pdk/pdks/sky130A",
+      s"${System.getProperty("user.dir")}/../.venv/tools/skywater-pdk/pdks/sky130A",
       "/usr/local/share/pdk/sky130A",
       System.getenv("PDK_ROOT"),
       System.getenv("SKYWATER_PDK_ROOT")
@@ -233,7 +233,7 @@ Examples:
   sbt 'runMain kryptonyte.generators.GenerateHierarchicalRTL --core-family OctoNyte --output-root /tmp/rtl'
   
   # Generate with ASIC optimization
-  sbt 'runMain kryptonyte.generators.GenerateHierarchicalRTL --optimize-asic --pdk-root /opt/skywater-pdk/pdks/sky130A'
+  sbt 'runMain kryptonyte.generators.GenerateHierarchicalRTL --optimize-asic --pdk-root ../.venv/tools/skywater-pdk/pdks/sky130A'
 
 Environment Variables:
   PDK_ROOT                    PDK root directory

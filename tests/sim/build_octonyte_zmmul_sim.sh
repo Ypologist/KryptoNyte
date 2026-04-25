@@ -6,7 +6,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 
 cd "$REPO_ROOT"
 
-SIM_DIR="tests/sim"
+SIM_DIR="$REPO_ROOT/tests/sim"
 BUILD_DIR="$SIM_DIR/build"
 OBJ_DIR="$BUILD_DIR/octonyte_zmmul_obj"
 

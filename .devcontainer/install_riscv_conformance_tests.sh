@@ -6,12 +6,18 @@
 # Includes UV Python, Spike Simulator, and Proxy Kernel
 #######################################
 
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/common_install.sh"
+
 # Script configuration
-USE_SUDO=false
 VERBOSE=true
 UPGRADE_MODE=false
-INSTALL_DIR="/opt/riscv-conformance"
-ARCH_TEST_VERSION="main"  # Can be changed to specific tag/commit
+INSTALL_DIR="$KRYPTONYTE_TOOLS_DIR/riscv-conformance"
+ARCH_TEST_VERSION="old-framework-3.x"  # RISCOF-compatible riscv-test-suite layout.
+RISCOF_PLUGINS_VERSION="main"
 SPIKE_VERSION="master"
 PK_VERSION="master"
 
@@ -23,6 +29,7 @@ BUILD_TESTS=true
 # Installation status tracking
 UV_INSTALLED=false
 ARCH_TESTS_INSTALLED=false
+RISCOF_PLUGINS_INSTALLED=false
 SPIKE_INSTALLED=false
 PK_INSTALLED=false
 TOOLCHAIN_AVAILABLE=false
@@ -41,10 +48,6 @@ NC='\033[0m' # No Color
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --with-sudo)
-            USE_SUDO=true
-            shift
-            ;;
         --quiet)
             VERBOSE=false
             shift
@@ -63,6 +66,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --spike-version)
             SPIKE_VERSION="$2"
+            shift 2
+            ;;
+        --riscof-plugins-version)
+            RISCOF_PLUGINS_VERSION="$2"
             shift 2
             ;;
         --pk-version)
@@ -87,11 +94,12 @@ while [[ $# -gt 0 ]]; do
             echo "RISC-V Conformance Tests Installation Script for KryptoNyte"
             echo ""
             echo "Options:"
-            echo "  --with-sudo              Use sudo for commands requiring elevated privileges"
             echo "  --quiet                  Reduce output verbosity"
             echo "  --upgrade                Force upgrade/reinstall of existing tools"
-            echo "  --install-dir DIR        Installation directory (default: /opt/riscv-conformance)"
+            echo "  --install-dir DIR        Installation directory (default: $KRYPTONYTE_TOOLS_DIR/riscv-conformance)"
             echo "  --arch-test-version V    RISC-V arch test version/branch (default: main)"
+            echo "  --riscof-plugins-version V"
+            echo "                           RISCOF plugins version/branch (default: main)"
             echo "  --spike-version V        Spike simulator version/branch (default: master)"
             echo "  --pk-version V           Proxy kernel version/branch (default: master)"
             echo "  --no-spike               Skip Spike simulator installation"
@@ -100,15 +108,15 @@ while [[ $# -gt 0 ]]; do
             echo "  --help, -h               Show this help message"
             echo ""
             echo "This script installs:"
-            echo "  - UV Python package manager"
-            echo "  - Python 3.10 virtual environment"
+            echo "  - UV Python package manager into .venv"
+            echo "  - Python dependencies into the repo-local .venv"
             echo "  - RISC-V Architecture Tests"
             echo "  - Spike RISC-V ISA Simulator"
             echo "  - RISC-V Proxy Kernel (pk)"
             echo "  - Test framework and utilities"
             echo ""
             echo "This script checks for (but does not install):"
-            echo "  - RISC-V GNU Toolchain (expects existing collab toolchain)"
+            echo "  - RISC-V GNU Toolchain (expects .venv/tools/riscv or PATH)"
             echo ""
             echo "Tools are automatically detected and skipped if already installed"
             echo "unless --upgrade flag is used."
@@ -121,13 +129,13 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Examples:"
             echo "  Install everything with default settings:"
-            echo "    $0 --with-sudo"
+            echo "    $0"
             echo ""
             echo "  Install to custom directory without Spike:"
-            echo "    $0 --with-sudo --install-dir /home/user/riscv-tests --no-spike"
+            echo "    $0 --install-dir \$PWD/.venv/tools/riscv-tests --no-spike"
             echo ""
             echo "  Force upgrade all components:"
-            echo "    $0 --with-sudo --upgrade"
+            echo "    $0 --upgrade"
             echo ""
             exit 0
             ;;
@@ -139,13 +147,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Function to execute commands with optional sudo
+# Function to execute commands
 run_cmd() {
-    if [ "$USE_SUDO" = true ]; then
-        sudo "$@"
-    else
-        "$@"
-    fi
+    "$@"
 }
 
 # Function to print large banner messages
@@ -197,7 +201,7 @@ command_exists() {
 
 # Function to check if running in Codespace
 is_codespace() {
-    [ -n "$CODESPACES" ] || [ -n "$GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN" ]
+    [ -n "${CODESPACES:-}" ] || [ -n "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" ]
 }
 
 # Function to check if UV is installed
@@ -218,8 +222,8 @@ check_spike() {
         local version=$(spike --help 2>&1 | head -1)
         print_step "Found Spike: $version"
         return 0
-    elif [ -f "/opt/riscv/bin/spike" ]; then
-        print_step "Found Spike at: /opt/riscv/bin/spike"
+    elif [ -f "$KRYPTONYTE_TOOLS_DIR/riscv/bin/spike" ]; then
+        print_step "Found Spike at: $KRYPTONYTE_TOOLS_DIR/riscv/bin/spike"
         return 0
     elif [ -f "$INSTALL_DIR/spike/bin/spike" ]; then
         print_step "Found Spike at: $INSTALL_DIR/spike/bin/spike"
@@ -235,8 +239,8 @@ check_pk() {
     if command_exists pk; then
         print_step "Found Proxy Kernel in system PATH"
         return 0
-    elif [ -f "/opt/riscv/bin/pk" ]; then
-        print_step "Found Proxy Kernel at: /opt/riscv/bin/pk"
+    elif [ -f "$KRYPTONYTE_TOOLS_DIR/riscv/bin/pk" ]; then
+        print_step "Found Proxy Kernel at: $KRYPTONYTE_TOOLS_DIR/riscv/bin/pk"
         return 0
     elif [ -f "$INSTALL_DIR/pk/riscv64-unknown-elf/bin/pk" ] || [ -f "$INSTALL_DIR/pk/bin/pk" ]; then
         print_step "Found Proxy Kernel at: $INSTALL_DIR/pk"
@@ -254,6 +258,17 @@ check_arch_tests() {
         return 0
     else
         print_step "RISC-V Architecture Tests not found"
+        return 1
+    fi
+}
+
+# Function to check if RISCOF reference plugins are installed
+check_riscof_plugins() {
+    if [ -d "$INSTALL_DIR/riscof-plugins/spike_simple" ] && [ -f "$INSTALL_DIR/riscof-plugins/spike_simple/riscof_spike_simple.py" ]; then
+        print_step "Found RISCOF plugins at: $INSTALL_DIR/riscof-plugins"
+        return 0
+    else
+        print_step "RISCOF plugins not found"
         return 1
     fi
 }
@@ -279,133 +294,72 @@ check_riscv_toolchain_available() {
 check_requirements() {
     print_step "Checking system requirements"
     
-    # Install all required dependencies upfront if using sudo
-    if [ "$USE_SUDO" = true ]; then
-        print_step "Installing RISC-V conformance test dependencies"
-        
-        sudo apt-get update
-        
-        print_step "Installing essential build tools"
-        sudo apt-get install -y \
-            build-essential git make gcc g++ autoconf automake autotools-dev cmake ninja-build \
-            pkg-config curl wget unzip tar gzip
-        
-        print_step "Installing RISC-V toolchain build dependencies"
-        sudo apt-get install -y \
-            libmpc-dev libmpfr-dev libgmp-dev zlib1g-dev libexpat1-dev libglib2.0-dev libncurses-dev
-        
-        print_step "Installing build utilities"
-        sudo apt-get install -y \
-            gawk bison flex texinfo gperf libtool patchutils bc m4 device-tree-compiler
-        
-        print_step "Installing Python development tools"
-        sudo apt-get install -y \
-            python3 python3-dev python3-venv
-        
-        print_success "All dependencies installed"
-    fi
-    
     # Basic verification of critical build tools only
     print_step "Verifying critical build tools"
     
     local critical_missing=()
     
-    # Only check the most essential tools needed for the build process
-    if ! command_exists git; then
-        critical_missing+=("git")
-    fi
-    
-    if ! command_exists make; then
-        critical_missing+=("make")
-    fi
-    
-    if ! command_exists gcc; then
-        critical_missing+=("gcc")
-    fi
-    
-    if ! command_exists python3; then
-        critical_missing+=("python3")
-    fi
+    for tool in git make gcc autoconf automake cmake python3 curl wget tar; do
+        if ! command_exists "$tool"; then
+            critical_missing+=("$tool")
+        fi
+    done
     
     # If critical tools are missing, try one more installation attempt
     if [ ${#critical_missing[@]} -ne 0 ]; then
-        if [ "$USE_SUDO" = true ]; then
-            print_warning "Some critical tools missing, attempting installation: ${critical_missing[*]}"
-            sudo apt-get update
-            sudo apt-get install -y build-essential git python3 autoconf cmake
-            
-            # Re-check after installation
-            if ! command_exists gcc || ! command_exists make; then
-                print_error "Critical build tools still missing. Cannot proceed."
-                exit 1
-            fi
-        else
-            print_error "Critical build tools missing: ${critical_missing[*]}"
-            print_error "Run with --with-sudo to automatically install dependencies"
-            exit 1
-        fi
+        print_error "Critical build tools missing: ${critical_missing[*]}"
+        print_error "Install OS prerequisites with: sudo .devcontainer/00_install_ubuntu_packages.sh"
+        exit 1
     fi
     
     print_success "Critical build tools available"
     print_success "System requirements satisfied"
 }
 
-# Function to ensure /opt/riscv/bin exists and is in PATH
+# Function to ensure the repo-local RISC-V bin exists and is in PATH
 setup_riscv_path() {
-    print_step "Setting up /opt/riscv/bin directory and PATH"
+    local riscv_bin="$KRYPTONYTE_TOOLS_DIR/riscv/bin"
+    print_step "Setting up $riscv_bin directory and PATH"
     
-    # Create /opt/riscv/bin if it doesn't exist
-    if [ ! -d "/opt/riscv/bin" ]; then
-        print_step "Creating /opt/riscv/bin directory"
-        run_cmd mkdir -p "/opt/riscv/bin"
-        
-        # Fix ownership if using sudo
-        if [ "$USE_SUDO" = true ]; then
-            sudo chown -R $USER:$USER "/opt/riscv"
-        fi
+    if [ ! -d "$riscv_bin" ]; then
+        print_step "Creating $riscv_bin directory"
+        run_cmd mkdir -p "$riscv_bin"
     fi
     
-    # Check if /opt/riscv/bin is in PATH
-    if [[ ":$PATH:" != *":/opt/riscv/bin:"* ]]; then
-        print_step "Adding /opt/riscv/bin to PATH for current session"
-        export PATH="/opt/riscv/bin:$PATH"
-        print_success "/opt/riscv/bin added to PATH"
+    if [[ ":$PATH:" != *":$riscv_bin:"* ]]; then
+        print_step "Adding $riscv_bin to PATH for current session"
+        export PATH="$riscv_bin:$PATH"
+        print_success "$riscv_bin added to PATH"
     else
-        print_success "/opt/riscv/bin already in PATH"
+        print_success "$riscv_bin already in PATH"
     fi
 }
 
 # Function to create installation directory
 create_install_dir() {
     print_step "Creating installation directory: $INSTALL_DIR"
+    ensure_local_venv
     
     if [ -d "$INSTALL_DIR" ] && [ "$UPGRADE_MODE" = false ]; then
         print_warning "Installation directory already exists"
-        read -p "Do you want to continue and potentially overwrite existing files? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_error "Installation cancelled by user"
-            exit 1
+        if [ -t 0 ]; then
+            local reply
+            read -p "Do you want to continue and potentially overwrite existing files? (y/N): " -n 1 -r reply || reply=""
+            echo
+            if [[ ! $reply =~ ^[Yy]$ ]]; then
+                print_error "Installation cancelled by user"
+                exit 1
+            fi
+        else
+            print_warning "No interactive terminal detected; continuing with existing directory"
         fi
     fi
     
     run_cmd mkdir -p "$INSTALL_DIR"
     
-    # Fix ownership and permissions if using sudo
-    if [ "$USE_SUDO" = true ]; then
-        sudo chown -R $USER:$USER "$INSTALL_DIR"
-        sudo chmod -R u+w "$INSTALL_DIR"
-    fi
-    
     # Check if we can write to the directory
     if [ ! -w "$INSTALL_DIR" ]; then
-        if [ "$USE_SUDO" = true ]; then
-            print_error "Cannot write to installation directory: $INSTALL_DIR"
-            print_error "Try running: sudo chown -R \$USER:\$USER $INSTALL_DIR"
-        else
-            print_error "Cannot write to installation directory: $INSTALL_DIR"
-            print_error "Directory may be owned by root. Try running with --with-sudo"
-        fi
+        print_error "Cannot write to installation directory: $INSTALL_DIR"
         exit 1
     fi
     
@@ -414,42 +368,23 @@ create_install_dir() {
 
 # Function to install UV Python package manager
 install_uv() {
-    print_banner "Installing UV Python Package Manager" "$BLUE"
-    
-    # Check if UV is already installed
-    if [ "$UPGRADE_MODE" = false ] && check_uv >/dev/null 2>&1; then
-        print_success "UV already installed - skipping"
-        UV_INSTALLED=true
-        return 0
-    fi
-    
-    if [ "$UPGRADE_MODE" = true ]; then
-        print_step "Upgrade mode: Reinstalling UV"
-    fi
-    
-    print_step "Installing UV Python package manager"
-    curl -LsSf https://astral.sh/uv/install.sh | sh || {
-        print_error "Failed to install UV"
-        return 1
-    }
-    
-    # Add UV to PATH for current session
-    export PATH="$HOME/.cargo/bin:$PATH"
-    
-    # Verify installation
-    if command_exists uv; then
-        UV_INSTALLED=true
-        print_success "UV Python package manager installed"
-        uv --version
-        
-        print_step "Creating Python 3.10 virtual environment"
-        cd "$INSTALL_DIR"
-        uv venv --python 3.10 || {
-            print_warning "Failed to create Python virtual environment"
+    print_banner "Installing UV Python Package Manager into .venv" "$BLUE"
+    install_python_build_tools
+
+    if [ "$UPGRADE_MODE" = true ] || ! [ -x "$KRYPTONYTE_VENV/bin/uv" ]; then
+        print_step "Installing uv into $KRYPTONYTE_VENV"
+        "$KRYPTONYTE_VENV/bin/python" -m pip install --upgrade uv || {
+            print_error "Failed to install uv into $KRYPTONYTE_VENV"
             return 1
         }
-        
-        print_success "Python 3.10 virtual environment created"
+    fi
+
+    export PATH="$KRYPTONYTE_VENV/bin:$PATH"
+
+    if command_exists uv; then
+        UV_INSTALLED=true
+        print_success "UV Python package manager installed in $KRYPTONYTE_VENV"
+        uv --version
         return 0
     else
         print_error "UV installation verification failed"
@@ -460,8 +395,17 @@ install_uv() {
 # Function to check existing RISC-V toolchain (no installation)
 check_riscv_toolchain() {
     print_banner "Checking RISC-V Toolchain" "$BLUE"
+
+    if [ -f "$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv32-unknown-elf-gcc" ] || \
+       [ -f "$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv64-unknown-elf-gcc" ]; then
+        print_step "Found repo-local RISC-V toolchain at $KRYPTONYTE_TOOLS_DIR/riscv"
+        TOOLCHAIN_AVAILABLE=true
+        export PATH="$KRYPTONYTE_TOOLS_DIR/riscv/bin:$PATH"
+        print_success "Using repo-local RISC-V toolchain"
+        return 0
+    fi
     
-    # Check for existing collab toolchain
+    # Check for existing collab toolchain as a read-only fallback.
     if [ -d "/opt/riscv/collab/bin" ] && [ -f "/opt/riscv/collab/bin/riscv32-unknown-elf-gcc" ]; then
         print_step "Found existing collab RISC-V toolchain at /opt/riscv/collab"
         local version=$(/opt/riscv/collab/bin/riscv32-unknown-elf-gcc --version 2>/dev/null | head -1 || echo "Version check failed")
@@ -479,8 +423,8 @@ check_riscv_toolchain() {
     fi
     
     print_warning "RISC-V toolchain not found"
-    print_warning "Expected collab toolchain at /opt/riscv/collab/bin/riscv32-unknown-elf-gcc"
-    print_warning "Please ensure the collab toolchain is installed before running conformance tests"
+    print_warning "Expected repo-local toolchain at $KRYPTONYTE_TOOLS_DIR/riscv/bin"
+    print_warning "Run .devcontainer/install_riscv_compiler_tools.sh before running conformance tests"
     
     TOOLCHAIN_AVAILABLE=false
     return 1
@@ -523,18 +467,21 @@ install_arch_tests() {
     
     if [ "$BUILD_TESTS" = true ]; then
         print_step "Setting up Python virtual environment"
-        if [ -f "$INSTALL_DIR/.venv/bin/activate" ]; then
-            source "$INSTALL_DIR/.venv/bin/activate"
+        if [ -f "$KRYPTONYTE_VENV/bin/activate" ]; then
+            # shellcheck disable=SC1091
+            source "$KRYPTONYTE_VENV/bin/activate"
         fi
         
-        print_step "Installing Python dependencies for test framework"
-        if [ -f "requirements.txt" ]; then
-            if command_exists uv && [ "$UV_INSTALLED" = true ]; then
-                uv pip install -r requirements.txt
+        print_step "Installing Python dependencies with uv sync"
+        if [ -f "$KRYPTONYTE_REPO_ROOT/pyproject.toml" ]; then
+            if [ -x "$KRYPTONYTE_VENV/bin/uv" ] && [ "$UV_INSTALLED" = true ]; then
+                (cd "$KRYPTONYTE_REPO_ROOT" && "$KRYPTONYTE_VENV/bin/uv" sync)
             else
-                print_warning "UV not available, falling back to pip3"
-                pip3 install --user -r requirements.txt
+                print_error "uv is required to install Python dependencies. Run install_uv or check $KRYPTONYTE_VENV/bin/uv."
+                return 1
             fi
+        else
+            print_warning "No pyproject.toml found at $KRYPTONYTE_REPO_ROOT; skipping Python dependency sync"
         fi
         
         print_step "Setting up test environment"
@@ -566,6 +513,44 @@ EOF
     print_success "RISC-V Architecture Tests installed"
 }
 
+# Function to install standalone RISCOF plugins
+install_riscof_plugins() {
+    print_banner "Installing RISCOF Reference Plugins" "$PURPLE"
+
+    local plugins_dir="$INSTALL_DIR/riscof-plugins"
+
+    if [ "$UPGRADE_MODE" = false ] && check_riscof_plugins >/dev/null 2>&1; then
+        print_success "RISCOF plugins already installed - skipping"
+        RISCOF_PLUGINS_INSTALLED=true
+        return 0
+    fi
+
+    if [ "$UPGRADE_MODE" = true ] && [ -d "$plugins_dir" ]; then
+        print_step "Upgrade mode: removing existing RISCOF plugins"
+        run_cmd rm -rf "$plugins_dir"
+    fi
+
+    print_step "Cloning RISCOF plugins repository"
+    if [ -d "$plugins_dir" ]; then
+        print_step "Updating existing repository"
+        cd "$plugins_dir"
+        git fetch origin
+        git checkout "$RISCOF_PLUGINS_VERSION"
+        git pull origin "$RISCOF_PLUGINS_VERSION"
+    else
+        git clone --depth 1 --branch "$RISCOF_PLUGINS_VERSION" \
+            https://gitlab.com/incoresemi/riscof-plugins.git "$plugins_dir"
+    fi
+
+    if [ ! -f "$plugins_dir/spike_simple/riscof_spike_simple.py" ]; then
+        print_error "spike_simple RISCOF plugin not found at $plugins_dir/spike_simple"
+        return 1
+    fi
+
+    RISCOF_PLUGINS_INSTALLED=true
+    print_success "RISCOF reference plugins installed"
+}
+
 # Function to install Spike simulator
 install_spike() {
     if [ "$INSTALL_SPIKE" = false ]; then
@@ -576,7 +561,7 @@ install_spike() {
     print_banner "Installing Spike RISC-V ISA Simulator" "$YELLOW"
     
     local spike_dir="$INSTALL_DIR/riscv-isa-sim"
-    local spike_install="/opt/riscv"
+    local spike_install="$KRYPTONYTE_TOOLS_DIR/riscv"
     
     # Check if Spike is already installed
     if [ "$UPGRADE_MODE" = false ] && check_spike >/dev/null 2>&1; then
@@ -587,22 +572,22 @@ install_spike() {
     
     if [ "$UPGRADE_MODE" = true ]; then
         print_step "Upgrade mode: Completely removing and rebuilding Spike"
-        # Remove source directory completely (may need sudo)
+        # Remove source directory completely
         if [ -d "$spike_dir" ]; then
             print_step "Removing existing Spike source directory"
             run_cmd rm -rf "$spike_dir"
         fi
-        # Remove Spike-specific files from /opt/riscv (may need sudo)
-        if [ -f "/opt/riscv/bin/spike" ]; then
+        # Remove Spike-specific files from the repo-local RISC-V prefix.
+        if [ -f "$spike_install/bin/spike" ]; then
             print_step "Removing existing Spike installation"
-            run_cmd rm -f "/opt/riscv/bin/spike"
-            run_cmd rm -f "/opt/riscv/lib/lib"*spike* 2>/dev/null || true
-            run_cmd rm -f "/opt/riscv/lib/libriscv.so" 2>/dev/null || true
-            run_cmd rm -f "/opt/riscv/lib/libfesvr.a" 2>/dev/null || true
-            run_cmd rm -f "/opt/riscv/lib/libdisasm.a" 2>/dev/null || true
-            run_cmd rm -f "/opt/riscv/lib/libsoftfloat.so" 2>/dev/null || true
-            run_cmd rm -f "/opt/riscv/lib/libcustomext.so" 2>/dev/null || true
-            run_cmd rm -rf "/opt/riscv/lib/pkgconfig/riscv-"* 2>/dev/null || true
+            run_cmd rm -f "$spike_install/bin/spike"
+            run_cmd rm -f "$spike_install/lib/lib"*spike* 2>/dev/null || true
+            run_cmd rm -f "$spike_install/lib/libriscv.so" 2>/dev/null || true
+            run_cmd rm -f "$spike_install/lib/libfesvr.a" 2>/dev/null || true
+            run_cmd rm -f "$spike_install/lib/libdisasm.a" 2>/dev/null || true
+            run_cmd rm -f "$spike_install/lib/libsoftfloat.so" 2>/dev/null || true
+            run_cmd rm -f "$spike_install/lib/libcustomext.so" 2>/dev/null || true
+            run_cmd rm -rf "$spike_install/lib/pkgconfig/riscv-"* 2>/dev/null || true
         fi
     fi
     
@@ -647,7 +632,7 @@ install_pk() {
     print_banner "Installing RISC-V Proxy Kernel" "$GREEN"
     
     local pk_dir="$INSTALL_DIR/riscv-pk"
-    local pk_install="/opt/riscv"
+    local pk_install="$KRYPTONYTE_TOOLS_DIR/riscv"
     
     # Check if PK is already installed
     if [ "$UPGRADE_MODE" = false ] && check_pk >/dev/null 2>&1; then
@@ -658,27 +643,27 @@ install_pk() {
     
     if [ "$UPGRADE_MODE" = true ]; then
         print_step "Upgrade mode: Completely removing and rebuilding proxy kernel"
-        # Remove source directory completely (may need sudo)
+        # Remove source directory completely
         if [ -d "$pk_dir" ]; then
             print_step "Removing existing proxy kernel source directory"
             run_cmd rm -rf "$pk_dir"
         fi
-        # Remove pk-specific files from /opt/riscv (may need sudo)
-        if [ -f "/opt/riscv/bin/pk" ]; then
+        # Remove pk-specific files from the repo-local RISC-V prefix.
+        if [ -f "$pk_install/bin/pk" ]; then
             print_step "Removing existing proxy kernel installation"
-            run_cmd rm -f "/opt/riscv/bin/pk" 2>/dev/null || true
-            run_cmd rm -f "/opt/riscv/bin/bbl" 2>/dev/null || true
-            run_cmd rm -f "/opt/riscv/bin/dummy_payload" 2>/dev/null || true
-            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/include/riscv-pk" 2>/dev/null || true
-            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/lib/riscv-pk" 2>/dev/null || true
-            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/bin/pk" 2>/dev/null || true
-            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/bin/bbl" 2>/dev/null || true
-            run_cmd rm -rf "/opt/riscv/riscv64-unknown-elf/bin/dummy_payload" 2>/dev/null || true
-            run_cmd rm -rf "/opt/riscv/riscv32-unknown-elf/include/riscv-pk" 2>/dev/null || true
-            run_cmd rm -rf "/opt/riscv/riscv32-unknown-elf/lib/riscv-pk" 2>/dev/null || true
-            run_cmd rm -rf "/opt/riscv/riscv32-unknown-elf/bin/pk" 2>/dev/null || true
-            run_cmd rm -rf "/opt/riscv/riscv32-unknown-elf/bin/bbl" 2>/dev/null || true
-            run_cmd rm -rf "/opt/riscv/riscv32-unknown-elf/bin/dummy_payload" 2>/dev/null || true
+            run_cmd rm -f "$pk_install/bin/pk" 2>/dev/null || true
+            run_cmd rm -f "$pk_install/bin/bbl" 2>/dev/null || true
+            run_cmd rm -f "$pk_install/bin/dummy_payload" 2>/dev/null || true
+            run_cmd rm -rf "$pk_install/riscv64-unknown-elf/include/riscv-pk" 2>/dev/null || true
+            run_cmd rm -rf "$pk_install/riscv64-unknown-elf/lib/riscv-pk" 2>/dev/null || true
+            run_cmd rm -rf "$pk_install/riscv64-unknown-elf/bin/pk" 2>/dev/null || true
+            run_cmd rm -rf "$pk_install/riscv64-unknown-elf/bin/bbl" 2>/dev/null || true
+            run_cmd rm -rf "$pk_install/riscv64-unknown-elf/bin/dummy_payload" 2>/dev/null || true
+            run_cmd rm -rf "$pk_install/riscv32-unknown-elf/include/riscv-pk" 2>/dev/null || true
+            run_cmd rm -rf "$pk_install/riscv32-unknown-elf/lib/riscv-pk" 2>/dev/null || true
+            run_cmd rm -rf "$pk_install/riscv32-unknown-elf/bin/pk" 2>/dev/null || true
+            run_cmd rm -rf "$pk_install/riscv32-unknown-elf/bin/bbl" 2>/dev/null || true
+            run_cmd rm -rf "$pk_install/riscv32-unknown-elf/bin/dummy_payload" 2>/dev/null || true
         fi
     fi
     
@@ -710,8 +695,22 @@ install_pk() {
     mkdir -p build
     cd build
     
-    # Set cross-compiler environment variables (prefer collab toolchain)
-    if [ -f "/opt/riscv/collab/bin/riscv32-unknown-elf-gcc" ]; then
+    # Set cross-compiler environment variables (prefer repo-local toolchain).
+    if [ -f "$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv32-unknown-elf-gcc" ]; then
+        export CC="$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv32-unknown-elf-gcc"
+        export CXX="$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv32-unknown-elf-g++"
+        export AR="$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv32-unknown-elf-ar"
+        export RANLIB="$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv32-unknown-elf-ranlib"
+        export STRIP="$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv32-unknown-elf-strip"
+        HOST_TRIPLET=riscv32-unknown-elf
+    elif [ -f "$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv64-unknown-elf-gcc" ]; then
+        export CC="$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv64-unknown-elf-gcc"
+        export CXX="$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv64-unknown-elf-g++"
+        export AR="$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv64-unknown-elf-ar"
+        export RANLIB="$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv64-unknown-elf-ranlib"
+        export STRIP="$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv64-unknown-elf-strip"
+        HOST_TRIPLET=riscv64-unknown-elf
+    elif [ -f "/opt/riscv/collab/bin/riscv32-unknown-elf-gcc" ]; then
         export CC=/opt/riscv/collab/bin/riscv32-unknown-elf-gcc
         export CXX=/opt/riscv/collab/bin/riscv32-unknown-elf-g++
         export AR=/opt/riscv/collab/bin/riscv32-unknown-elf-ar
@@ -759,27 +758,38 @@ install_pk() {
 setup_environment() {
     print_banner "Setting up environment variables" "$GREEN"
     
-    local env_file="$HOME/.riscv_conformance_env"
+    local env_file="$KRYPTONYTE_VENV/riscv_conformance_env"
     
     print_step "Creating environment configuration file"
     cat > "$env_file" << EOF
 # RISC-V Conformance Test Environment Variables
 # Source this file or add to your shell profile (.bashrc, .zshrc, etc.)
 
+# KryptoNyte repo-local environment
+source "$KRYPTONYTE_REPO_ROOT/.devcontainer/dev_env.sh"
+
 # Conformance Test Root Directories
 export RISCV_CONFORMANCE_ROOT="$INSTALL_DIR"
 export RISCV_ARCH_TEST_ROOT="$INSTALL_DIR/riscv-arch-test"
+export RISCV_PLUGIN_ROOT="$INSTALL_DIR/riscof-plugins"
 
-# Simulator and Tools - Install to /opt/riscv to keep with collab toolchain
-export SPIKE_ROOT="/opt/riscv"
-export PK_ROOT="/opt/riscv"
+# Simulator and tools
+export SPIKE_ROOT="$KRYPTONYTE_TOOLS_DIR/riscv"
+export PK_ROOT="$KRYPTONYTE_TOOLS_DIR/riscv"
 
-# RISC-V Toolchain - Use collab toolchain (expected to be pre-installed)
-if [ -d "/opt/riscv/collab/bin" ] && [ -f "/opt/riscv/collab/bin/riscv32-unknown-elf-gcc" ]; then
+# RISC-V Toolchain - prefer repo-local toolchain, with system/collab fallbacks.
+if [ -f "$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv64-unknown-elf-gcc" ]; then
+    export RISCV_TOOLCHAIN_ROOT="$KRYPTONYTE_TOOLS_DIR/riscv"
+    export RISCV="$KRYPTONYTE_TOOLS_DIR/riscv"
+    export RISCV_PREFIX="riscv64-unknown-elf-"
+elif [ -f "$KRYPTONYTE_TOOLS_DIR/riscv/bin/riscv32-unknown-elf-gcc" ]; then
+    export RISCV_TOOLCHAIN_ROOT="$KRYPTONYTE_TOOLS_DIR/riscv"
+    export RISCV="$KRYPTONYTE_TOOLS_DIR/riscv"
+    export RISCV_PREFIX="riscv32-unknown-elf-"
+elif [ -d "/opt/riscv/collab/bin" ] && [ -f "/opt/riscv/collab/bin/riscv32-unknown-elf-gcc" ]; then
     export RISCV_TOOLCHAIN_ROOT="/opt/riscv/collab"
     export RISCV="/opt/riscv/collab"
     export RISCV_PREFIX="riscv32-unknown-elf-"
-    echo "Using collab RISC-V toolchain at /opt/riscv/collab"
 elif command -v riscv64-unknown-elf-gcc >/dev/null 2>&1; then
     export RISCV_TOOLCHAIN_ROOT="\$(dirname \$(dirname \$(which riscv64-unknown-elf-gcc)))"
     export RISCV="\$RISCV_TOOLCHAIN_ROOT"
@@ -789,27 +799,21 @@ elif command -v riscv32-unknown-elf-gcc >/dev/null 2>&1; then
     export RISCV_TOOLCHAIN_ROOT="\$(dirname \$(dirname \$(which riscv32-unknown-elf-gcc)))"
     export RISCV="\$RISCV_TOOLCHAIN_ROOT"
     export RISCV_PREFIX="riscv32-unknown-elf-"
-    echo "Using system RISC-V toolchain"
 else
-    echo "Warning: No RISC-V toolchain found. Please install collab toolchain at /opt/riscv/collab/"
-    export RISCV_TOOLCHAIN_ROOT="/opt/riscv/collab"
-    export RISCV="/opt/riscv/collab"
-    export RISCV_PREFIX="riscv32-unknown-elf-"
+    echo "Warning: No RISC-V toolchain found. Run .devcontainer/install_riscv_compiler_tools.sh"
+    export RISCV_TOOLCHAIN_ROOT="$KRYPTONYTE_TOOLS_DIR/riscv"
+    export RISCV="$KRYPTONYTE_TOOLS_DIR/riscv"
+    export RISCV_PREFIX="riscv64-unknown-elf-"
 fi
 
 # UV Python environment
-export UV_PYTHON_ENV="$INSTALL_DIR/.venv"
+export UV_PYTHON_ENV="$KRYPTONYTE_VENV"
 
-# Add /opt/riscv/bin to PATH if it exists and isn't already there
-if [ -d "/opt/riscv/bin" ] && [[ ":\$PATH:" != *":/opt/riscv/bin:"* ]]; then
-    export PATH="/opt/riscv/bin:\$PATH"
-fi
-
-# Add tools to PATH (prioritize collab toolchain)
+# Add tools to PATH
 if [ -d "/opt/riscv/collab/bin" ]; then
-    export PATH="/opt/riscv/collab/bin:\$SPIKE_ROOT/bin:\$PK_ROOT/bin:\$HOME/.cargo/bin:\$PATH"
+    export PATH="/opt/riscv/collab/bin:\$SPIKE_ROOT/bin:\$PK_ROOT/bin:\$PATH"
 else
-    export PATH="\$RISCV_TOOLCHAIN_ROOT/bin:\$SPIKE_ROOT/bin:\$PK_ROOT/bin:\$HOME/.cargo/bin:\$PATH"
+    export PATH="\$RISCV_TOOLCHAIN_ROOT/bin:\$SPIKE_ROOT/bin:\$PK_ROOT/bin:\$PATH"
 fi
 
 # Test framework configuration
@@ -819,10 +823,11 @@ export RISCV_TEST_SUITE="rv32i_m"
 
 # KryptoNyte specific configurations
 export KRYPTONYTE_CONFORMANCE_ROOT="\$RISCV_ARCH_TEST_ROOT"
+export KRYPTONYTE_RISCOF_PLUGIN_ROOT="\$RISCV_PLUGIN_ROOT"
 export KRYPTONYTE_TEST_CONFIG="\$RISCV_ARCH_TEST_ROOT/kryptonyte_config.yaml"
 
 # Python path for test framework
-export PYTHONPATH="\$RISCV_ARCH_TEST_ROOT:\$PYTHONPATH"
+export PYTHONPATH="\$RISCV_ARCH_TEST_ROOT:\${PYTHONPATH:-}"
 
 # Activate UV Python environment if available
 if [ -f "\$UV_PYTHON_ENV/bin/activate" ]; then
@@ -835,9 +840,9 @@ EOF
     
     # Add to current shell profile if possible
     local shell_profile=""
-    if [ -n "$BASH_VERSION" ]; then
+    if [ -n "${BASH_VERSION:-}" ]; then
         shell_profile="$HOME/.bashrc"
-    elif [ -n "$ZSH_VERSION" ]; then
+    elif [ -n "${ZSH_VERSION:-}" ]; then
         shell_profile="$HOME/.zshrc"
     fi
     
@@ -855,6 +860,7 @@ EOF
     
     # Mark environment setup as complete
     ENVIRONMENT_SETUP=true
+    add_dev_env_to_shell_profile
     print_success "Environment configuration complete"
     
     echo -e "\n${CYAN}To use the RISC-V conformance tests in your current session, run:${NC}"
@@ -882,9 +888,11 @@ TEST_SUITE=${2:-rv32i_m}
 echo "Running RISC-V conformance tests for $ARCH"
 echo "Test suite: $TEST_SUITE"
 
-# Activate UV Python environment if available
-if [ -f "$RISCV_CONFORMANCE_ROOT/.venv/bin/activate" ]; then
-    source "$RISCV_CONFORMANCE_ROOT/.venv/bin/activate"
+# Activate KryptoNyte Python environment if available
+if [ -n "${KRYPTONYTE_VENV:-}" ] && [ -f "$KRYPTONYTE_VENV/bin/activate" ]; then
+    source "$KRYPTONYTE_VENV/bin/activate"
+elif [ -n "${RISCV_CONFORMANCE_ROOT:-}" ] && [ -f "$RISCV_CONFORMANCE_ROOT/../../bin/activate" ]; then
+    source "$RISCV_CONFORMANCE_ROOT/../../bin/activate"
 fi
 
 cd $RISCV_ARCH_TEST_ROOT
@@ -926,9 +934,11 @@ fi
 echo "Validating KryptoNyte core: $CORE_EXEC"
 echo "Architecture: $ARCH"
 
-# Activate UV Python environment if available
-if [ -f "$RISCV_CONFORMANCE_ROOT/.venv/bin/activate" ]; then
-    source "$RISCV_CONFORMANCE_ROOT/.venv/bin/activate"
+# Activate KryptoNyte Python environment if available
+if [ -n "${KRYPTONYTE_VENV:-}" ] && [ -f "$KRYPTONYTE_VENV/bin/activate" ]; then
+    source "$KRYPTONYTE_VENV/bin/activate"
+elif [ -n "${RISCV_CONFORMANCE_ROOT:-}" ] && [ -f "$RISCV_CONFORMANCE_ROOT/../../bin/activate" ]; then
+    source "$RISCV_CONFORMANCE_ROOT/../../bin/activate"
 fi
 
 # TODO: Implement core-specific test execution
@@ -971,6 +981,13 @@ verify_installation() {
         print_error "RISC-V Architecture Tests installation failed"
         ((errors++))
     fi
+
+    if [ "$RISCOF_PLUGINS_INSTALLED" = true ]; then
+        print_success "RISCOF plugins installation completed successfully"
+    else
+        print_error "RISCOF plugins installation failed"
+        ((errors++))
+    fi
     
     # Check Spike installation status
     if [ "$INSTALL_SPIKE" = true ]; then
@@ -1002,8 +1019,8 @@ verify_installation() {
         print_success "RISC-V toolchain found and available"
     else
         print_warning "RISC-V toolchain not found in PATH"
-        print_warning "Expected collab toolchain at /opt/riscv/collab/bin/"
-        print_warning "Please ensure the collab toolchain is installed before running conformance tests"
+        print_warning "Expected repo-local toolchain at $KRYPTONYTE_TOOLS_DIR/riscv/bin/"
+        print_warning "Run .devcontainer/install_riscv_compiler_tools.sh before running conformance tests"
         ((warnings++))
     fi
     
@@ -1031,6 +1048,7 @@ verify_installation() {
         echo -e "\n${CYAN}📋 Component Status Summary:${NC}"
         [ "$UV_INSTALLED" = true ] && echo -e "  🐍 UV Python Manager: ${GREEN}✅ Installed${NC}" || echo -e "  🐍 UV Python Manager: ${YELLOW}⚠️  Not Available${NC}"
         echo -e "  📚 Architecture Tests: ${GREEN}✅ Installed${NC}"
+        [ "$RISCOF_PLUGINS_INSTALLED" = true ] && echo -e "  🔌 RISCOF Plugins: ${GREEN}✅ Installed${NC}"
         [ "$INSTALL_SPIKE" = true ] && [ "$SPIKE_INSTALLED" = true ] && echo -e "  🔧 Spike Simulator: ${GREEN}✅ Installed${NC}"
         [ "$INSTALL_PK" = true ] && [ "$PK_INSTALLED" = true ] && echo -e "  ⚙️  Proxy Kernel: ${GREEN}✅ Installed${NC}"
         [ "$TOOLCHAIN_AVAILABLE" = true ] && echo -e "  🛠️  RISC-V Toolchain: ${GREEN}✅ Available${NC}"
@@ -1038,11 +1056,12 @@ verify_installation() {
         
         echo -e "\n${CYAN}📁 Installation Locations:${NC}"
         echo -e "  📂 Conformance Root: ${WHITE}$INSTALL_DIR${NC}"
-        echo -e "  🐍 UV Python Environment: ${WHITE}$INSTALL_DIR/.venv${NC}"
+        echo -e "  🐍 Python Environment: ${WHITE}$KRYPTONYTE_VENV${NC}"
         echo -e "  📚 Architecture Tests: ${WHITE}$INSTALL_DIR/riscv-arch-test${NC}"
-        [ "$INSTALL_SPIKE" = true ] && echo -e "  🔧 Spike Simulator: ${WHITE}$INSTALL_DIR/spike/bin/spike${NC}"
-        [ "$INSTALL_PK" = true ] && echo -e "  ⚙️  Proxy Kernel: ${WHITE}$INSTALL_DIR/pk${NC}"
-        echo -e "  🌍 Environment File: ${WHITE}$HOME/.riscv_conformance_env${NC}"
+        echo -e "  🔌 RISCOF Plugins: ${WHITE}$INSTALL_DIR/riscof-plugins${NC}"
+        [ "$INSTALL_SPIKE" = true ] && echo -e "  🔧 Spike Simulator: ${WHITE}$KRYPTONYTE_TOOLS_DIR/riscv/bin/spike${NC}"
+        [ "$INSTALL_PK" = true ] && echo -e "  ⚙️  Proxy Kernel: ${WHITE}$KRYPTONYTE_TOOLS_DIR/riscv/bin/pk${NC}"
+        echo -e "  🌍 Environment File: ${WHITE}$KRYPTONYTE_VENV/riscv_conformance_env${NC}"
         echo -e "  📜 Test Scripts: ${WHITE}$INSTALL_DIR/scripts${NC}"
         
         echo -e "\n${CYAN}🚀 Next Steps:${NC}"
@@ -1060,6 +1079,7 @@ verify_installation() {
         
         echo -e "\n${CYAN}💥 Failed Components:${NC}"
         [ "$ARCH_TESTS_INSTALLED" != true ] && echo -e "  📚 Architecture Tests: ${RED}❌ Failed${NC}"
+        [ "$RISCOF_PLUGINS_INSTALLED" != true ] && echo -e "  🔌 RISCOF Plugins: ${RED}❌ Failed${NC}"
         [ "$INSTALL_SPIKE" = true ] && [ "$SPIKE_INSTALLED" != true ] && echo -e "  🔧 Spike Simulator: ${RED}❌ Failed${NC}"
         [ "$INSTALL_PK" = true ] && [ "$PK_INSTALLED" != true ] && echo -e "  ⚙️  Proxy Kernel: ${RED}❌ Failed${NC}"
         
@@ -1067,8 +1087,7 @@ verify_installation() {
         echo -e "  1. Review the installation log above for specific error messages"
         echo -e "  2. Check system requirements and dependencies"
         echo -e "  3. Verify disk space and permissions in $INSTALL_DIR"
-        echo -e "  4. Try running with --with-sudo if permission issues"
-        echo -e "  5. Check network connectivity for repository access"
+        echo -e "  4. Check network connectivity for repository access"
         
         exit 1
     fi
@@ -1088,10 +1107,10 @@ main() {
     echo -e "${CYAN}Installation Configuration:${NC}"
     echo -e "  Install Directory: ${WHITE}$INSTALL_DIR${NC}"
     echo -e "  Arch Test Version: ${WHITE}$ARCH_TEST_VERSION${NC}"
+    echo -e "  RISCOF Plugins Version: ${WHITE}$RISCOF_PLUGINS_VERSION${NC}"
     echo -e "  Install Spike: ${WHITE}$INSTALL_SPIKE${NC}"
     echo -e "  Install PK: ${WHITE}$INSTALL_PK${NC}"
     echo -e "  Build Tests: ${WHITE}$BUILD_TESTS${NC}"
-    echo -e "  Use Sudo: ${WHITE}$USE_SUDO${NC}"
     echo -e "  Upgrade Mode: ${WHITE}$UPGRADE_MODE${NC}"
     
     # Tool detection summary
@@ -1102,6 +1121,7 @@ main() {
     local arch_tests_found=false
     local spike_found=false
     local pk_found=false
+    local riscof_plugins_found=false
     local toolchain_found=false
     
     if check_uv >/dev/null 2>&1; then
@@ -1116,6 +1136,13 @@ main() {
         arch_tests_found=true
     else
         echo -e "  📚 Architecture Tests: ${RED}Not Found${NC}"
+    fi
+
+    if check_riscof_plugins >/dev/null 2>&1; then
+        echo -e "  🔌 RISCOF Plugins: ${GREEN}Found${NC}"
+        riscof_plugins_found=true
+    else
+        echo -e "  🔌 RISCOF Plugins: ${RED}Not Found${NC}"
     fi
     
     if check_spike >/dev/null 2>&1; then
@@ -1147,9 +1174,7 @@ main() {
         else
             echo "Normal mode - will skip existing tools"
         fi
-        read -p "Continue with installation? (Y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Nn]$ ]]; then
+        if ! confirm_continue "Continue with installation? (Y/n): "; then
             print_error "Installation cancelled by user"
             exit 1
         fi
@@ -1161,6 +1186,7 @@ main() {
     install_uv
     check_riscv_toolchain
     install_arch_tests
+    install_riscof_plugins
     install_spike
     install_pk
     create_test_runners
@@ -1175,7 +1201,7 @@ main() {
 }
 
 # Ensure terminal is reset even if script is interrupted
-trap 'echo -e "\033[0m"; stty echo' EXIT INT TERM
+trap 'echo -e "\033[0m"; stty echo 2>/dev/null || true' EXIT INT TERM
 
 # Run main function
 main "$@"

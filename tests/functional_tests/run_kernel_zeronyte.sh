@@ -10,8 +10,8 @@ MAX_CYCLES=1000000
 KEEP_OUTPUT=0
 FORCE_SIM_BUILD=0
 
-RISCV_GCC="${RISCV_GCC:-/opt/riscv/bin/riscv64-unknown-elf-gcc}"
-SPIKE_BIN="${SPIKE_BIN:-/opt/riscv/bin/spike}"
+RISCV_GCC="${RISCV_GCC:-$REPO_ROOT/.venv/tools/riscv/bin/riscv64-unknown-elf-gcc}"
+SPIKE_BIN="${SPIKE_BIN:-$REPO_ROOT/.venv/tools/riscv/bin/spike}"
 ISA="${ISA:-rv32i}"
 
 usage() {
@@ -25,8 +25,8 @@ Builds and runs tests/functional_tests/<name>.c on:
 Then compares signatures and fails on mismatch.
 
 Environment overrides:
-  RISCV_GCC  Cross compiler (default: /opt/riscv/bin/riscv64-unknown-elf-gcc)
-  SPIKE_BIN  Spike executable (default: /opt/riscv/bin/spike)
+  RISCV_GCC  Cross compiler (default: .venv/tools/riscv/bin/riscv64-unknown-elf-gcc)
+  SPIKE_BIN  Spike executable (default: .venv/tools/riscv/bin/spike)
   ISA        ISA string for compile + spike (default: rv32i)
 USAGE
 }

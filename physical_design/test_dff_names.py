@@ -1,5 +1,10 @@
 import re
-with open("/tmp/kryptonyte_openlane_jglossner/runs/TetraNyteRV32ICore/runs/RUN_2026-03-18_20-41-08/20-openroad-ioplacement/TetraNyteRV32ICore.nl.v") as f:
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+NETLIST = REPO_ROOT / ".venv/physical_design/runs/TetraNyteRV32ICore/runs/RUN_2026-03-18_20-41-08/20-openroad-ioplacement/TetraNyteRV32ICore.nl.v"
+
+with open(NETLIST) as f:
     named_count = 0
     numeric_count = 0
     matched_regfile = 0

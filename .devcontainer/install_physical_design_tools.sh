@@ -6,10 +6,15 @@
 # and OpenLane2 for complete RTL-to-GDSII ASIC design flow with KryptoNyte processors
 #######################################
 
+set -uo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/common_install.sh"
+
 # Script configuration
-USE_SUDO=false
 VERBOSE=true
-INSTALL_DIR="/opt/skywater-pdk"
+INSTALL_DIR="$KRYPTONYTE_TOOLS_DIR/skywater-pdk"
 SKYWATER_VERSION="main"  # Can be changed to specific tag/commit
 OPEN_PDK_VERSION="master"  # Open PDK uses master branch, not main
 
@@ -34,10 +39,6 @@ NC='\033[0m' # No Color
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --with-sudo)
-            USE_SUDO=true
-            shift
-            ;;
         --quiet)
             VERBOSE=false
             shift
@@ -60,11 +61,10 @@ while [[ $# -gt 0 ]]; do
             echo "SkyWater PDK Installation Script for KryptoNyte"
             echo ""
             echo "Options:"
-            echo "  --with-sudo           Use sudo for commands requiring elevated privileges"
             echo "  --quiet               Reduce output verbosity"
-            echo "  --install-dir DIR     Installation directory (default: /opt/skywater-pdk)"
+            echo "  --install-dir DIR     Installation directory (default: $KRYPTONYTE_TOOLS_DIR/skywater-pdk)"
             echo "  --skywater-version V  SkyWater PDK version/branch (default: main)"
-            echo "  --open-pdk-version V  Open PDK version/branch (default: main)"
+            echo "  --open-pdk-version V  Open PDK version/branch (default: master)"
             echo "  --help, -h            Show this help message"
             echo ""
             echo "This script installs:"
@@ -89,13 +89,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Function to execute commands with optional sudo
+# Function to execute commands
 run_cmd() {
-    if [ "$USE_SUDO" = true ]; then
-        sudo "$@"
-    else
-        "$@"
-    fi
+    "$@"
 }
 
 # Function to print large banner messages
@@ -300,6 +296,11 @@ check_openlane2() {
 prompt_upgrade() {
     local tool_name="$1"
     local current_info="$2"
+
+    if [ ! -t 0 ]; then
+        print_success "Keeping existing $tool_name installation"
+        return 0
+    fi
     
     echo -e "\n${YELLOW}$tool_name is already installed.${NC}"
     if [ -n "$current_info" ]; then
@@ -338,86 +339,22 @@ prompt_upgrade() {
 check_requirements() {
     print_step "Checking system requirements"
     
-    # Install all required dependencies upfront if using sudo
-    if [ "$USE_SUDO" = true ]; then
-        print_step "Installing SkyWater PDK dependencies"
-        
-        sudo apt-get update
-        
-        print_step "Installing essential build tools"
-        sudo apt-get install -y \
-            build-essential git make gcc g++ autoconf automake autotools-dev cmake ninja-build \
-            pkg-config
-        
-        print_step "Installing development libraries"
-        sudo apt-get install -y \
-            libmpc-dev libmpfr-dev libgmp-dev zlib1g-dev libexpat-dev libglib2.0-dev libncurses-dev
-        
-        print_step "Installing build utilities"
-        sudo apt-get install -y \
-            gawk bison flex texinfo gperf libtool patchutils bc m4 tcsh csh
-        
-        print_step "Installing GUI and graphics libraries (for Magic VLSI)"
-        sudo apt-get install -y \
-            tcl-dev tk-dev libcairo2-dev mesa-common-dev libglu1-mesa-dev \
-            libx11-dev libxpm-dev libxext-dev libxt-dev
-        
-        print_step "Installing Python development tools"
-        sudo apt-get install -y \
-            python3 python3-dev python3-venv
-        
-        print_step "Installing uv (fast Python package manager)"
-        if ! command_exists uv; then
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-            export PATH="$HOME/.cargo/bin:$PATH"
-        fi
-        
-        print_step "Installing additional utilities"
-        sudo apt-get install -y \
-            curl wget unzip tar gzip
-        
-        print_success "All dependencies installed"
-    fi
-    
     # Basic verification of critical build tools only
     print_step "Verifying critical build tools"
     
     local critical_missing=()
     
-    # Only check the most essential tools needed for the build process
-    if ! command_exists git; then
-        critical_missing+=("git")
-    fi
-    
-    if ! command_exists make; then
-        critical_missing+=("make")
-    fi
-    
-    if ! command_exists gcc; then
-        critical_missing+=("gcc")
-    fi
-    
-    if ! command_exists python3; then
-        critical_missing+=("python3")
-    fi
+    for tool in git make gcc autoconf automake cmake python3 curl wget tar; do
+        if ! command_exists "$tool"; then
+            critical_missing+=("$tool")
+        fi
+    done
     
     # If critical tools are missing, try one more installation attempt
     if [ ${#critical_missing[@]} -ne 0 ]; then
-        if [ "$USE_SUDO" = true ]; then
-            print_warning "Some critical tools missing, attempting installation: ${critical_missing[*]}"
-            sudo apt-get update
-            sudo apt-get install -y build-essential git python3 autoconf cmake
-            
-            # Re-check after installation
-            if ! command_exists gcc || ! command_exists make; then
-                print_error "Critical build tools still missing. Cannot proceed."
-                exit 1
-            fi
-        else
-            print_error "Critical build tools missing: ${critical_missing[*]}"
-            print_error "Run with --with-sudo to automatically install dependencies"
-            exit 1
-        fi
+        print_error "Critical build tools missing: ${critical_missing[*]}"
+        print_error "Install OS prerequisites with: sudo .devcontainer/00_install_ubuntu_packages.sh"
+        exit 1
     fi
     
     print_success "Critical build tools available"
@@ -428,34 +365,28 @@ check_requirements() {
 # Function to create installation directory
 create_install_dir() {
     print_step "Creating installation directory: $INSTALL_DIR"
+    ensure_local_venv
     
     if [ -d "$INSTALL_DIR" ]; then
         print_warning "Installation directory already exists"
-        read -p "Do you want to continue and potentially overwrite existing files? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_warning "Installation cancelled by user - some tools may not be installed"
-            return 1
+        if [ -t 0 ]; then
+            local reply
+            read -p "Do you want to continue and potentially overwrite existing files? (y/N): " -n 1 -r reply || reply=""
+            echo
+            if [[ ! $reply =~ ^[Yy]$ ]]; then
+                print_warning "Installation cancelled by user - some tools may not be installed"
+                return 1
+            fi
+        else
+            print_warning "No interactive terminal detected; continuing with existing directory"
         fi
     fi
     
     run_cmd mkdir -p "$INSTALL_DIR"
     
-    # Fix ownership and permissions if using sudo
-    if [ "$USE_SUDO" = true ]; then
-        sudo chown -R $USER:$USER "$INSTALL_DIR"
-        sudo chmod -R u+w "$INSTALL_DIR"
-    fi
-    
     # Check if we can write to the directory
     if [ ! -w "$INSTALL_DIR" ]; then
-        if [ "$USE_SUDO" = true ]; then
-            print_error "Cannot write to installation directory: $INSTALL_DIR"
-            print_error "Try running: sudo chown -R \$USER:\$USER $INSTALL_DIR"
-        else
-            print_error "Cannot write to installation directory: $INSTALL_DIR"
-            print_error "Directory may be owned by root. Try running with --with-sudo"
-        fi
+        print_error "Cannot write to installation directory: $INSTALL_DIR"
         exit 1
     fi
     
@@ -647,20 +578,19 @@ install_magic() {
         esac
     fi
     
-    print_step "Installing Magic dependencies"
+    print_step "Checking Magic dependencies"
     local magic_deps=(
         "tcl-dev" "tk-dev" "libcairo2-dev" "mesa-common-dev"
         "libglu1-mesa-dev" "libncurses-dev" "m4" "tcsh" "csh"
         "libx11-dev" "libxpm-dev" "libxext-dev" "libxt-dev"
     )
-    
-    if [ "$USE_SUDO" = true ]; then
-        sudo apt-get update
-        sudo apt-get install -y "${magic_deps[@]}"
-    else
-        print_warning "Cannot install Magic dependencies without sudo"
-        print_step "Please install these packages manually: ${magic_deps[*]}"
-    fi
+
+    print_step "Magic uses OS development packages that cannot live in .venv"
+    print_step "Expected packages: ${magic_deps[*]}"
+    require_commands tclsh wish m4 tcsh csh || {
+        print_error "Missing Magic OS prerequisites. Install them with: sudo .devcontainer/00_install_ubuntu_packages.sh"
+        return 1
+    }
     
     print_step "Cloning Magic repository"
     git clone https://github.com/RTimothyEdwards/magic.git "$magic_dir"
@@ -690,12 +620,15 @@ install_magic() {
 setup_environment() {
     print_banner "Setting up environment variables" "$GREEN"
     
-    local env_file="$HOME/.skywater_pdk_env"
+    local env_file="$KRYPTONYTE_VENV/skywater_pdk_env"
     
     print_step "Creating environment configuration file"
     cat > "$env_file" << EOF
 # SkyWater PDK Environment Variables
 # Source this file or add to your shell profile (.bashrc, .zshrc, etc.)
+
+# KryptoNyte repo-local environment
+source "$KRYPTONYTE_REPO_ROOT/.devcontainer/dev_env.sh"
 
 # PDK Root Directories
 export SKYWATER_PDK_ROOT="$INSTALL_DIR/skywater-pdk"
@@ -734,9 +667,9 @@ EOF
     
     # Add to current shell profile if possible
     local shell_profile=""
-    if [ -n "$BASH_VERSION" ]; then
+    if [ -n "${BASH_VERSION:-}" ]; then
         shell_profile="$HOME/.bashrc"
-    elif [ -n "$ZSH_VERSION" ]; then
+    elif [ -n "${ZSH_VERSION:-}" ]; then
         shell_profile="$HOME/.zshrc"
     fi
     
@@ -754,6 +687,7 @@ EOF
     
     # Mark environment setup as complete
     ENVIRONMENT_SETUP=true
+    add_dev_env_to_shell_profile
     print_success "Environment configuration complete"
     
     echo -e "\n${CYAN}To use the SkyWater PDK in your current session, run:${NC}"
@@ -862,7 +796,7 @@ verify_installation() {
         print_success "Environment configuration completed successfully"
         
         # Verify environment file exists
-        if [ -f "$HOME/.skywater_pdk_env" ]; then
+        if [ -f "$KRYPTONYTE_VENV/skywater_pdk_env" ]; then
             print_success "Environment file created successfully"
         else
             print_warning "Environment setup completed but file not found"
@@ -897,7 +831,7 @@ verify_installation() {
         echo -e "\n${CYAN}📁 Installation Locations:${NC}"
         echo -e "  📂 Installation Root: ${WHITE}$INSTALL_DIR${NC}"
         echo -e "  🔧 Magic Tool: ${WHITE}$INSTALL_DIR/magic-install/bin/magic${NC}"
-        echo -e "  🌍 Environment File: ${WHITE}$HOME/.skywater_pdk_env${NC}"
+        echo -e "  🌍 Environment File: ${WHITE}$KRYPTONYTE_VENV/skywater_pdk_env${NC}"
         
         # Try to find actual PDK locations
         if [ -d "$INSTALL_DIR/pdks" ]; then
@@ -908,7 +842,7 @@ verify_installation() {
         fi
         
         echo -e "\n${CYAN}🚀 Next Steps:${NC}"
-        echo -e "  1. Load environment: ${WHITE}source $HOME/.skywater_pdk_env${NC}"
+        echo -e "  1. Load environment: ${WHITE}source $KRYPTONYTE_VENV/skywater_pdk_env${NC}"
         echo -e "  2. Update KryptoNyte RTL generator paths"
         echo -e "  3. Test synthesis with your RISC-V cores"
         echo -e "  4. Verify PDK integration with your design flow"
@@ -929,174 +863,28 @@ verify_installation() {
         echo -e "  1. Review the installation log above for specific error messages"
         echo -e "  2. Check system requirements and dependencies"
         echo -e "  3. Verify disk space and permissions in $INSTALL_DIR"
-        echo -e "  4. Try running with --with-sudo if permission issues"
-        echo -e "  5. Check network connectivity for repository access"
+        echo -e "  4. Check network connectivity for repository access"
         
         exit 1
     fi
 }
 
-# Function to install Nix package manager
+# Function to verify Nix package manager
 install_nix() {
-    print_banner "Installing Nix Package Manager" "$PURPLE"
-    
-    # Check if Nix is already installed
+    print_banner "Checking Nix Package Manager" "$PURPLE"
+
     if check_nix; then
-        local current_info=""
-        if command_exists nix; then
-            local version=$(nix --version 2>/dev/null | head -1 || echo "unknown")
-            local install_path=$(which nix)
-            current_info="$install_path ($version)"
-        fi
-        
-        prompt_upgrade "Nix" "$current_info"
-        local upgrade_choice=$?
-        
-        case $upgrade_choice in
-            0)  # Keep existing
-                NIX_INSTALLED=true
-                return 0
-                ;;
-            1)  # Upgrade/reinstall
-                print_step "Will attempt to upgrade/reinstall Nix"
-                ;;
-            2)  # Skip
-                return 0
-                ;;
-        esac
-    fi
-    
-    # Install curl if needed
-    if ! command_exists curl; then
-        if [ "$USE_SUDO" = true ]; then
-            print_step "Installing curl (required for Nix installation)"
-            sudo apt-get update -qq 2>/dev/null || true
-            sudo apt-get install -y curl
-        else
-            print_error "curl is required for Nix installation but sudo is not available"
-            return 1
-        fi
-    fi
-    
-    # Detect environment type
-    local env_type="standalone"
-    if [ -n "$CODESPACES" ] || [ -n "$GITHUB_CODESPACE_TOKEN" ]; then
-        env_type="codespace"
-    elif grep -q Microsoft /proc/version 2>/dev/null; then
-        env_type="wsl"
-    fi
-    
-    print_step "Detected environment: $env_type"
-    
-    # Install Nix using Ubuntu package manager
-    print_step "Installing Nix using Ubuntu package manager"
-    print_step "This is faster and simpler than the curl installer"
-    
-    if [ "$USE_SUDO" = true ]; then
-        # Update package list and install nix-bin
-        print_step "Updating package list..."
-        sudo apt-get update -qq 2>/dev/null || true
-        
-        print_step "Installing nix-bin package..."
-        if sudo apt-get install -y nix-bin; then
-            print_success "Nix package installed successfully"
-        else
-            print_error "Failed to install nix-bin package"
-            return 1
-        fi
-    else
-        print_error "Nix installation requires sudo privileges"
-        print_step "Please run with --with-sudo flag"
-        return 1
-    fi
-    
-    # Configure OpenLane binary cache
-    print_step "Configuring OpenLane binary cache"
-    local nix_conf_dir="/etc/nix"
-    local nix_conf_file="$nix_conf_dir/nix.conf"
-    
-    if [ "$USE_SUDO" = true ]; then
-        # Create nix configuration directory if it doesn't exist
-        sudo mkdir -p "$nix_conf_dir"
-        
-        # Add OpenLane cache configuration
-        local cache_config="extra-substituters = https://openlane.cachix.org
-extra-trusted-public-keys = openlane.cachix.org-1:qqdwh+QMNGmZAuyeQJTH9ErW57OWSvdtuwfBKdS254E="
-        
-        if [ -f "$nix_conf_file" ]; then
-            # Check if cache is already configured
-            if ! grep -q "openlane.cachix.org" "$nix_conf_file"; then
-                print_step "Adding OpenLane cache to existing nix.conf"
-                echo "$cache_config" | sudo tee -a "$nix_conf_file" >/dev/null
-            else
-                print_step "OpenLane cache already configured"
-            fi
-        else
-            print_step "Creating nix.conf with OpenLane cache"
-            echo "$cache_config" | sudo tee "$nix_conf_file" >/dev/null
-        fi
-    fi
-    
-    if true; then
-        print_success "Nix installed successfully"
-        
-        # Set up Nix environment for current session
-        print_step "Setting up Nix environment for current session"
-        
-        # For Ubuntu package installation, nix-shell should be available in /usr/bin
-        if [ -f "/usr/bin/nix-shell" ] && [[ ":$PATH:" != *":/usr/bin:"* ]]; then
-            print_step "Adding /usr/bin to PATH for nix-shell"
-            export PATH="/usr/bin:$PATH"
-        fi
-        
-        # Also try standard Nix locations for completeness
-        if [ -f "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh" ]; then
-            print_step "Sourcing Nix daemon from /nix/var/nix/profiles/default"
-            source "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh"
-        fi
-        
-        # Add standard Nix paths if they exist
-        if [ -d "/nix/var/nix/profiles/default/bin" ] && [[ ":$PATH:" != *":/nix/var/nix/profiles/default/bin:"* ]]; then
-            print_step "Adding Nix to PATH manually"
-            export PATH="/nix/var/nix/profiles/default/bin:$PATH"
-        fi
-        
-        # Verify Nix tools are available
         if command -v nix-shell >/dev/null 2>&1; then
-            local nix_shell_path=$(command -v nix-shell)
-            print_success "nix-shell is available at: $nix_shell_path"
-            
-            # Set up nixpkgs channel for nix-shell compatibility
-            print_step "Setting up nixpkgs channel for OpenLane2 compatibility"
-            if nix-channel --add https://nixos.org/channels/nixpkgs-unstable nixpkgs 2>/dev/null; then
-                print_step "Added nixpkgs channel"
-                if nix-channel --update 2>/dev/null; then
-                    print_success "Updated nixpkgs channel"
-                else
-                    print_warning "Failed to update nixpkgs channel, but continuing"
-                fi
-            else
-                print_warning "Failed to add nixpkgs channel, but continuing"
-            fi
-            
-            NIX_INSTALLED=true
-        elif command -v nix >/dev/null 2>&1; then
-            local nix_version=$(nix --version 2>/dev/null | head -1 || echo "unknown")
-            print_success "Nix is available in PATH: $nix_version"
-            NIX_INSTALLED=true
-        else
-            print_warning "Nix installed but not found in PATH"
-            print_step "Nix may require a new shell session to be available"
-            print_step "You can verify installation with: which nix-shell"
-            NIX_INSTALLED=true  # Mark as installed since apt install succeeded
+            print_success "nix-shell is available at: $(command -v nix-shell)"
         fi
-        
-    else
-        print_error "Nix installation failed"
-        print_step "You can try manual installation from: https://nixos.org/download.html"
-        NIX_INSTALLED=false
-        return 1
+        NIX_INSTALLED=true
+        return 0
     fi
+
+    print_warning "Nix cannot be installed into $KRYPTONYTE_VENV because it manages /nix"
+    print_warning "Install Nix as an OS prerequisite if you need OpenLane2"
+    NIX_INSTALLED=false
+    return 1
 }
 
 # Function to install OpenLane2
@@ -1164,14 +952,9 @@ install_openlane2() {
     
     # Install git if needed
     if ! command_exists git; then
-        if [ "$USE_SUDO" = true ]; then
-            print_step "Installing git (required for OpenLane2)"
-            sudo apt-get update -qq 2>/dev/null || true
-            sudo apt-get install -y git
-        else
-            print_error "git is required for OpenLane2 installation but sudo is not available"
-            return 1
-        fi
+        print_error "git is required for OpenLane2 installation"
+        print_error "Install OS prerequisites with: sudo .devcontainer/00_install_ubuntu_packages.sh"
+        return 1
     fi
     
     # Clone OpenLane2 repository
@@ -1242,7 +1025,6 @@ main() {
     echo -e "  Install Directory: ${WHITE}$INSTALL_DIR${NC}"
     echo -e "  SkyWater Version: ${WHITE}$SKYWATER_VERSION${NC}"
     echo -e "  Open PDK Version: ${WHITE}$OPEN_PDK_VERSION${NC}"
-    echo -e "  Use Sudo: ${WHITE}$USE_SUDO${NC}"
     
     # Quick tool detection summary
     print_banner "Checking Existing Tools" "$CYAN"
@@ -1281,9 +1063,7 @@ main() {
     # Confirm installation
     if [ "$VERBOSE" = true ]; then
         echo ""
-        read -p "Continue with installation? (Y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Nn]$ ]]; then
+        if ! confirm_continue "Continue with installation? (Y/n): "; then
             print_error "Installation cancelled by user"
             exit 1
         fi

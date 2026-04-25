@@ -4,11 +4,18 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(dirname "$SCRIPT_DIR")
 
-RISCV_ARCH_TEST_ROOT=${RISCV_ARCH_TEST_ROOT:-/opt/riscv-conformance/riscv-arch-test}
-PLUGIN_ROOT="$RISCV_ARCH_TEST_ROOT/riscof-plugins/rv32"
-BASE_SUITE_I="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/rv32i_m/I"
-BASE_SUITE_M="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/rv32i_m/M"
-ENV_ROOT="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env"
+if [[ -f "$REPO_ROOT/.devcontainer/dev_env.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "$REPO_ROOT/.devcontainer/dev_env.sh"
+fi
+
+RISCV_ARCH_TEST_ROOT=${RISCV_ARCH_TEST_ROOT:-$REPO_ROOT/.venv/tools/riscv-conformance/riscv-arch-test}
+RISCV_PLUGIN_ROOT=${RISCV_PLUGIN_ROOT:-}
+PLUGIN_ROOT=""
+BASE_SUITE_I=""
+BASE_SUITE_M=""
+ENV_ROOT=""
+ARCH_TEST_LAYOUT=""
 
 # Define supported configurations.
 # Format: <processor_name>|<dut_name>|<sim_build_script>|<sim_binary>|<isa_yaml>|<platform_yaml>|<rtl_top>|<rtl_task>|<feature_set>
@@ -182,20 +189,81 @@ fi
 
 # Toolchain prefix (riscv32 toolchains often installed as riscv64-unknown-elf-)
 export RISCV_PREFIX="${RISCV_TOOLCHAIN_PREFIX:-riscv64-unknown-elf-}"
+TOOLCHAIN_ROOT="${RISCV_TOOLCHAIN_ROOT:-$REPO_ROOT/.venv/tools/riscv}"
+if [[ -d "$TOOLCHAIN_ROOT/bin" ]]; then
+  export PATH="$TOOLCHAIN_ROOT/bin:$PATH"
+fi
 
 # Provide riscv32 aliases to the riscv64 toolchain if needed
 ALIAS_BIN="$SCRIPT_DIR/toolchain_alias/bin"
 mkdir -p "$ALIAS_BIN"
 TOOLS=(gcc g++ as ld objcopy objdump ar ranlib readelf)
 for t in "${TOOLS[@]}"; do
-  if [[ ! -x "$ALIAS_BIN/riscv32-unknown-elf-$t" ]]; then
-    ln -sf "/opt/riscv/bin/riscv64-unknown-elf-$t" "$ALIAS_BIN/riscv32-unknown-elf-$t" || true
+  if [[ -x "$TOOLCHAIN_ROOT/bin/riscv64-unknown-elf-$t" ]]; then
+    ln -sf "$TOOLCHAIN_ROOT/bin/riscv64-unknown-elf-$t" "$ALIAS_BIN/riscv32-unknown-elf-$t" || true
+  elif command -v "riscv64-unknown-elf-$t" >/dev/null 2>&1; then
+    ln -sf "$(command -v "riscv64-unknown-elf-$t")" "$ALIAS_BIN/riscv32-unknown-elf-$t" || true
   fi
 done
 export PATH="$ALIAS_BIN:$PATH"
 
+SPIKE_BIN_DIR=""
+if command -v spike >/dev/null 2>&1; then
+  SPIKE_BIN_DIR=$(dirname "$(command -v spike)")
+elif [[ -x "$REPO_ROOT/.venv/tools/riscv/bin/spike" ]]; then
+  SPIKE_BIN_DIR="$REPO_ROOT/.venv/tools/riscv/bin"
+fi
+
 if [[ ! -d "$RISCV_ARCH_TEST_ROOT" ]]; then
   echo "RISCV_ARCH_TEST_ROOT not found at $RISCV_ARCH_TEST_ROOT" >&2
+  exit 1
+fi
+
+if [[ -d "$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env" ]]; then
+  ARCH_TEST_LAYOUT="legacy"
+  BASE_SUITE_I="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/rv32i_m/I"
+  BASE_SUITE_M="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/rv32i_m/M"
+  ENV_ROOT="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env"
+elif [[ -d "$RISCV_ARCH_TEST_ROOT/tests/env" ]]; then
+  ARCH_TEST_LAYOUT="current"
+  BASE_SUITE_I="$RISCV_ARCH_TEST_ROOT/tests/rv32i/I"
+  BASE_SUITE_M="$RISCV_ARCH_TEST_ROOT/tests/rv32i/M"
+  ENV_ROOT="$RISCV_ARCH_TEST_ROOT/tests/env"
+else
+  echo "Could not detect RISC-V architecture test layout under $RISCV_ARCH_TEST_ROOT" >&2
+  echo "Expected either riscv-test-suite/env or tests/env." >&2
+  exit 1
+fi
+
+if [[ ! -d "$BASE_SUITE_I" ]]; then
+  echo "RV32I test suite not found at $BASE_SUITE_I" >&2
+  exit 1
+fi
+
+if [[ -n "$RISCV_PLUGIN_ROOT" ]]; then
+  PLUGIN_ROOT="$RISCV_PLUGIN_ROOT"
+else
+  for candidate in \
+    "$REPO_ROOT/.venv/tools/riscv-conformance/riscof-plugins" \
+    "$RISCV_ARCH_TEST_ROOT/riscof-plugins/rv32" \
+    "$RISCV_ARCH_TEST_ROOT/riscof-plugins"; do
+    if [[ -f "$candidate/spike_simple/riscof_spike_simple.py" ]]; then
+      PLUGIN_ROOT="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ ! -f "$PLUGIN_ROOT/spike_simple/riscof_spike_simple.py" ]]; then
+  echo "RISCOF spike_simple plugin not found." >&2
+  echo "Expected it under RISCV_PLUGIN_ROOT/spike_simple or $REPO_ROOT/.venv/tools/riscv-conformance/riscof-plugins/spike_simple." >&2
+  echo "Run .devcontainer/install_riscv_conformance_tests.sh to install the standalone RISCOF plugins." >&2
+  exit 1
+fi
+
+if [[ -z "$SPIKE_BIN_DIR" ]]; then
+  echo "Spike executable not found in PATH or $REPO_ROOT/.venv/tools/riscv/bin." >&2
+  echo "Run .devcontainer/install_riscv_conformance_tests.sh to build Spike." >&2
   exit 1
 fi
 
@@ -205,7 +273,7 @@ if [[ -x "$VENV_BIN/python3" ]] && "$VENV_BIN/python3" -c "import riscof.cli" >/
 elif command -v riscof >/dev/null 2>&1; then
   RISCOF_CMD=(riscof)
 else
-  echo "riscof CLI not found. Install riscof in your Python environment." >&2
+  echo "riscof CLI not found. Run 'uv sync' from the repository root, then retry." >&2
   exit 1
 fi
 
@@ -231,18 +299,30 @@ fi
 # Dynamic suite builder based on feature set
 DYN_SUITE="$SCRIPT_DIR/output/dyn_suite_$PROCESSOR"
 rm -rf "$DYN_SUITE"
-mkdir -p "$DYN_SUITE/I/src"
-mkdir -p "$DYN_SUITE/I/references"
+if [[ "$ARCH_TEST_LAYOUT" == "legacy" ]]; then
+  mkdir -p "$DYN_SUITE/I/src"
+  mkdir -p "$DYN_SUITE/I/references"
 
-cp "$BASE_SUITE_I/src/"*.S "$DYN_SUITE/I/src/" 2>/dev/null || true
-cp "$BASE_SUITE_I/references/"* "$DYN_SUITE/I/references/" 2>/dev/null || true
+  cp "$BASE_SUITE_I/src/"*.S "$DYN_SUITE/I/src/" 2>/dev/null || true
+  cp "$BASE_SUITE_I/references/"* "$DYN_SUITE/I/references/" 2>/dev/null || true
 
-if [[ "$FEATURE_SET" == "zmmul" ]]; then
-  cp "$BASE_SUITE_M/src/mul"*.S "$DYN_SUITE/I/src/" 2>/dev/null || true
-  cp "$BASE_SUITE_M/references/mul"* "$DYN_SUITE/I/references/" 2>/dev/null || true
-elif [[ "$FEATURE_SET" == "im" ]]; then
-  cp "$BASE_SUITE_M/src/"*.S "$DYN_SUITE/I/src/" 2>/dev/null || true
-  cp "$BASE_SUITE_M/references/"* "$DYN_SUITE/I/references/" 2>/dev/null || true
+  if [[ "$FEATURE_SET" == "zmmul" ]]; then
+    cp "$BASE_SUITE_M/src/mul"*.S "$DYN_SUITE/I/src/" 2>/dev/null || true
+    cp "$BASE_SUITE_M/references/mul"* "$DYN_SUITE/I/references/" 2>/dev/null || true
+  elif [[ "$FEATURE_SET" == "im" ]]; then
+    cp "$BASE_SUITE_M/src/"*.S "$DYN_SUITE/I/src/" 2>/dev/null || true
+    cp "$BASE_SUITE_M/references/"* "$DYN_SUITE/I/references/" 2>/dev/null || true
+  fi
+else
+  mkdir -p "$DYN_SUITE/I"
+
+  cp "$BASE_SUITE_I/"*.S "$DYN_SUITE/I/" 2>/dev/null || true
+
+  if [[ "$FEATURE_SET" == "zmmul" ]]; then
+    cp "$BASE_SUITE_M/"*mul*.S "$DYN_SUITE/I/" 2>/dev/null || true
+  elif [[ "$FEATURE_SET" == "im" ]]; then
+    cp "$BASE_SUITE_M/"*.S "$DYN_SUITE/I/" 2>/dev/null || true
+  fi
 fi
 
 SUITE_ROOT="$DYN_SUITE"
@@ -278,7 +358,7 @@ jobs=1
 pluginpath=$PLUGIN_ROOT/spike_simple
 ispec=$PLUGIN_ROOT/spike_simple/spike_simple_isa.yaml
 pspec=$PLUGIN_ROOT/spike_simple/spike_simple_platform.yaml
-PATH=
+PATH=$SPIKE_BIN_DIR
 EOF
 
 # Workaround for Spike signature dumps failing on multi-threaded concurrent simulators
@@ -294,11 +374,16 @@ if $SMOKE_TEST; then
   
   SMOKE_SUITE_DIR="$SCRIPT_DIR/output/smoke_suite_$PROCESSOR/add-01_suite"
   rm -rf "$SMOKE_SUITE_DIR"
-  mkdir -p "$SMOKE_SUITE_DIR/src"
-  mkdir -p "$SMOKE_SUITE_DIR/references"
   
-  cp "$BASE_SUITE_I/src/add-01.S" "$SMOKE_SUITE_DIR/src/"
-  cp "$BASE_SUITE_I/references/add-01.reference_output" "$SMOKE_SUITE_DIR/references/" 2>/dev/null || true
+  if [[ "$ARCH_TEST_LAYOUT" == "legacy" ]]; then
+    mkdir -p "$SMOKE_SUITE_DIR/src"
+    mkdir -p "$SMOKE_SUITE_DIR/references"
+    cp "$BASE_SUITE_I/src/add-01.S" "$SMOKE_SUITE_DIR/src/"
+    cp "$BASE_SUITE_I/references/add-01.reference_output" "$SMOKE_SUITE_DIR/references/" 2>/dev/null || true
+  else
+    mkdir -p "$SMOKE_SUITE_DIR/I"
+    cp "$BASE_SUITE_I/I-add-00.S" "$SMOKE_SUITE_DIR/I/"
+  fi
   
   pushd "$SCRIPT_DIR/riscof" >/dev/null
   "${RISCOF_CMD[@]}" run --config "$CONFIG_GENERATED" --suite "$SMOKE_SUITE_DIR" --env "$ENV_ROOT" --work-dir "$SMOKE_WORK_DIR"

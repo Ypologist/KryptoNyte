@@ -10,8 +10,8 @@ PORT_DST="$COREMARK_ROOT/$PORT_NAME"
 BUILD_DIR="$COREMARK_ROOT/build/$PORT_NAME"
 DEFAULT_OUT_DIR="$REPO_ROOT/tests/output/external/coremark"
 
-RISCV_PREFIX=${RISCV_PREFIX:-/opt/riscv/bin/riscv64-unknown-elf-}
-SPIKE_BIN=${SPIKE_BIN:-/opt/riscv/bin/spike}
+RISCV_PREFIX=${RISCV_PREFIX:-$REPO_ROOT/.venv/tools/riscv/bin/riscv64-unknown-elf-}
+SPIKE_BIN=${SPIKE_BIN:-$REPO_ROOT/.venv/tools/riscv/bin/spike}
 ISA=${ISA:-rv32i}
 
 ITERATIONS=1

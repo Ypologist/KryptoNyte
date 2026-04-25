@@ -10,16 +10,21 @@
 **/project/target/
 **/project/project/
 
-# Convormance tests
+# Conformance tests
 **/reference_signatures/
 **/riscof_work/
 tests/output/
+tests/output/conformance/
+tests/output/dyn_suite_*/
+tests/output/smoke_suite_*/
 tests/reports/
 tests/toolchain/
 tests/toolchain_alias/
 toolchain_alias/bin/
 tests/sim/build/
 tests/riscof/.config*.ini
+tests/riscof/.config.*.ini
+tests/riscof/*/__pycache__/
 rtl/.sbtboot/
 
 
@@ -33,6 +38,7 @@ rtl/.sbtboot/
 
 # FIRRTL intermediate files
 **/*.fir
+**/*.fir.mlir
 **/*.anno.json
 **/firrtl_black_box_resource_files.f
 
@@ -353,6 +359,7 @@ rtl/.sbtboot/
 
 # Lock files
 **/*.lock
+!uv.lock
 **/.lock-*
 
 #==============================================================================
