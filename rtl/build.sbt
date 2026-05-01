@@ -18,6 +18,7 @@ lazy val generateTetraNyteZmmulRTL = taskKey[Unit]("Generate RTL for the TetraNy
 lazy val generateTetraNyteIMRTL = taskKey[Unit]("Generate RTL for the TetraNyte IM core")
 lazy val generateOctoNyteRTL  = taskKey[Unit]("Generate RTL for the OctoNyte core")
 lazy val generateOctoNyteZmmulRTL = taskKey[Unit]("Generate RTL for the OctoNyte Zmmul core")
+lazy val generateOctoNyteIFZmmulRTL = taskKey[Unit]("Generate RTL for the OctoNyte RV32IF Zmmul core")
 lazy val generateOctoNyteIMRTL = taskKey[Unit]("Generate RTL for the OctoNyte IM core")
 lazy val generateRTL          = taskKey[Unit]("Generate RTL for library, ZeroNyte architectures, and TetraNyte")
 
@@ -131,6 +132,13 @@ lazy val octoNyteZmmul = (project in file("OctoNyte/rv32i_Zmmul"))
   )
   .settings(commonSettings: _*)
 
+lazy val octoNyteIFZmmul = (project in file("OctoNyte/rv32if_Zmmul"))
+  .dependsOn(library, octoNyteZmmul)
+  .settings(
+    name := "OctoNyteIFZmmul"
+  )
+  .settings(commonSettings: _*)
+
 lazy val octoNyteIM = (project in file("OctoNyte/rv32im"))
   .dependsOn(library, octoNyte)
   .settings(
@@ -140,7 +148,7 @@ lazy val octoNyteIM = (project in file("OctoNyte/rv32im"))
 
 // ----------------- Generators Project -----------------
 lazy val generators = (project in file("generators"))
-  .dependsOn(library, zeroNyte, zeroNyteZmmul, zeroNyteIM, tetraNyte, tetraNyteZmmul, tetraNyteIM, octoNyte, octoNyteZmmul, octoNyteIM)
+  .dependsOn(library, zeroNyte, zeroNyteZmmul, zeroNyteIM, tetraNyte, tetraNyteZmmul, tetraNyteIM, octoNyte, octoNyteZmmul, octoNyteIFZmmul, octoNyteIM)
   .settings(
     name := "Generators"
   )
@@ -158,6 +166,7 @@ lazy val generators = (project in file("generators"))
       tetraNyteIM / Compile / compile,
       octoNyte / Compile / compile,
       octoNyteZmmul / Compile / compile,
+      octoNyteIFZmmul / Compile / compile,
       octoNyteIM / Compile / compile
     ).value,
     
@@ -220,6 +229,12 @@ lazy val generators = (project in file("generators"))
       (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL --core-family OctoNyte --core-variant rv32i_Zmmul").value
     },
 
+    generateOctoNyteIFZmmulRTL := {
+      (library / Compile / compile).value
+      (octoNyteIFZmmul / Compile / compile).value
+      (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL --core-family OctoNyte --core-variant rv32if_Zmmul").value
+    },
+
     generateOctoNyteIMRTL := {
       (library / Compile / compile).value
       (octoNyteIM / Compile / compile).value
@@ -236,6 +251,7 @@ lazy val generators = (project in file("generators"))
       generateTetraNyteIMRTL,
       generateOctoNyteRTL,
       generateOctoNyteZmmulRTL,
+      generateOctoNyteIFZmmulRTL,
       generateOctoNyteIMRTL
     ).value,
     
@@ -243,7 +259,7 @@ lazy val generators = (project in file("generators"))
 
 // ----------------- Root Project -----------------
 lazy val root = (project in file("."))
-  .aggregate(library, zeroNyte, zeroNyteZmmul, zeroNyteIM, tetraNyte, tetraNyteZmmul, tetraNyteIM, octoNyte, octoNyteZmmul, octoNyteIM, generators)
+  .aggregate(library, zeroNyte, zeroNyteZmmul, zeroNyteIM, tetraNyte, tetraNyteZmmul, tetraNyteIM, octoNyte, octoNyteZmmul, octoNyteIFZmmul, octoNyteIM, generators)
   .settings(
     name := "KryptoNyte",
     
@@ -258,6 +274,7 @@ lazy val root = (project in file("."))
     addCommandAlias("genTetraNyteIM", "generators/generateTetraNyteIMRTL"),
     addCommandAlias("genOctoNyte", "generators/generateOctoNyteRTL"),
     addCommandAlias("genOctoNyteZmmul", "generators/generateOctoNyteZmmulRTL"),
+    addCommandAlias("genOctoNyteIFZmmul", "generators/generateOctoNyteIFZmmulRTL"),
     addCommandAlias("genOctoNyteIM", "generators/generateOctoNyteIMRTL"),
     addCommandAlias("genAllRtl", "generators/generateRTL"),
     

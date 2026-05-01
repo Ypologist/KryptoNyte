@@ -16,6 +16,7 @@ import scala.util.{Try, Success, Failure}
 
 // Import KryptoNyte modules
 import ALUs.ALU32
+import ALUs.Float32ALU
 import BranchUnit.BranchUnit
 import Decoders.RV32IDecodeModule
 import LoadUnit.LoadUnit
@@ -24,6 +25,7 @@ import StoreUnit.StoreUnit
 import TetraNyte.{TetraNyteRV32ICore, TetraNyteRV32IMCore, TetraNyteRV32IZmmulCore}
 import ZeroNyte.{ZeroNyteRV32ICore, ZeroNyteRV32ICoreWithCache, ZeroNyteRV32IZmmulCore, ZeroNyteRV32IMCore}
 import OctoNyte.OctoNyteRV32ICore
+import OctoNyte.OctoNyteRV32IFZmmulCore
 
 // Note: RV32IDecode is an object (not a Module class), so it's not imported for RTL generation
 
@@ -354,6 +356,12 @@ Environment Variables:
         val libraryBlocks = getRV32ILibraryModules("OctoNyteZmmul")
         libraryBlocks :+
           ModuleSpec(() => new OctoNyteRV32IZmmulCore(cosimulate), "OctoNyteRV32IZmmulCore", "Eight-thread, 4-wide packet barrel-threaded RV32I Zmmul core", "OctoNyte", "rv32i_Zmmul")
+      case "rv32if_Zmmul" =>
+        val libraryBlocks = getRV32ILibraryModules("OctoNyteIFZmmul")
+        libraryBlocks ++ Seq(
+          ModuleSpec(() => new Float32ALU, "Float32ALU", "Single-precision floating-point ALU subset", "OctoNyte", "rv32if_Zmmul"),
+          ModuleSpec(() => new OctoNyteRV32IFZmmulCore(cosimulate), "OctoNyteRV32IFZmmulCore", "Eight-thread RV32IF Zmmul core for scalar FP inference support", "OctoNyte", "rv32if_Zmmul")
+        )
       case _ => Seq.empty
     }
   }
