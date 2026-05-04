@@ -164,3 +164,34 @@ class Float32ALU extends Module {
     SGNJX -> Float32Ops.signInjectXor(io.a, io.b)
   ))
 }
+
+class Float32ALUPipelined(val numCycles: Int = 4) extends Module {
+  val io = IO(new Bundle {
+    val a = Input(UInt(32.W))
+    val b = Input(UInt(32.W))
+    val c = Input(UInt(32.W))
+    val opcode = Input(UInt(Float32Ops.Opcode.WIDTH.W))
+    val result = Output(UInt(32.W))
+  })
+
+  require(numCycles >= 1, "Pipelined Float32 ALU must have at least 1 cycle of latency.")
+
+  import Float32Ops.Opcode._
+
+  val combinational = MuxLookup(io.opcode, 0.U(32.W))(Seq(
+    ADD -> Float32Ops.add(io.a, io.b),
+    SUB -> Float32Ops.sub(io.a, io.b),
+    MUL -> Float32Ops.mul(io.a, io.b),
+    MADD -> Float32Ops.madd(io.a, io.b, io.c),
+    MSUB -> Float32Ops.msub(io.a, io.b, io.c),
+    MIN -> Float32Ops.min(io.a, io.b),
+    MAX -> Float32Ops.max(io.a, io.b),
+    SGNJ -> Float32Ops.signInject(io.a, io.b),
+    SGNJN -> Float32Ops.signInjectNeg(io.a, io.b),
+    SGNJX -> Float32Ops.signInjectXor(io.a, io.b)
+  ))
+
+  // Mirrors Mul32Pipelined: registers sit in the same module as the FP tree so
+  // synthesis can retime them across the combinational datapath.
+  io.result := ShiftRegister(combinational, numCycles)
+}

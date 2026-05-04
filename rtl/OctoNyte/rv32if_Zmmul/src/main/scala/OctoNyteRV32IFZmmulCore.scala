@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.dontTouch
 import ALUs.ALU32
-import ALUs.Float32ALU
+import ALUs.Float32ALUPipelined
 import ALUs.Float32Ops
 import ALUs.Mul32Pipelined
 import Decoders.RV32IDecode
@@ -220,11 +220,15 @@ class OctoNyteRV32IFZmmulCore(val cosimulate: Boolean = false) extends Module {
   mulUnit.io.signedA := false.B
   mulUnit.io.signedB := false.B
 
-  val fpu = Module(new Float32ALU)
+  val fpu = Module(new Float32ALUPipelined(4))
   fpu.io.a := 0.U
   fpu.io.b := 0.U
   fpu.io.c := 0.U
   fpu.io.opcode := Float32Ops.Opcode.ADD
+  val fpRegDirectResultEX = WireDefault(0.U(32.W))
+  val fpIntResultEX = WireDefault(0.U(32.W))
+  val fpRegDirectResultWB = ShiftRegister(fpRegDirectResultEX, 4)
+  val fpIntResultWB = ShiftRegister(fpIntResultEX, 4)
 
   val branchUnit = Module(new BranchUnit)
   branchUnit.io.rs1 := 0.U
@@ -424,16 +428,16 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
     io.memMisaligned := io.threadEnable(fetchSignals.threadId) && storeUnit.io.misaligned
   }
   .elsewhen (isFloatMAdd(fetchSignals.instr)) {
-    val mul = Float32Ops.mul(regReadReg.frs1Data, regReadReg.frs2Data)
-    val negMul = Float32Ops.negate(mul)
-    val negAddend = Float32Ops.negate(regReadReg.frs3Data)
     val opcode = fetchSignals.instr(6, 0)
-    exec1Reg.fpResult := MuxLookup(opcode, Float32Ops.add(mul, regReadReg.frs3Data))(Seq(
-      OP_FMADD -> Float32Ops.add(mul, regReadReg.frs3Data),
-      OP_FMSUB -> Float32Ops.add(mul, negAddend),
-      OP_FNMSUB -> Float32Ops.add(negMul, regReadReg.frs3Data),
-      OP_FNMADD -> Float32Ops.add(negMul, negAddend)
-    ))
+    val negateProduct = opcode === OP_FNMSUB || opcode === OP_FNMADD
+    val negateAddend = opcode === OP_FMSUB || opcode === OP_FNMADD
+    fpu.io.a := Mux(negateProduct, Float32Ops.negate(regReadReg.frs1Data),
+                    regReadReg.frs1Data)
+    fpu.io.b := regReadReg.frs2Data
+    fpu.io.c := Mux(negateAddend, Float32Ops.negate(regReadReg.frs3Data),
+                    regReadReg.frs3Data)
+    fpu.io.opcode := Float32Ops.Opcode.MADD
+    exec1Reg.fpResult := 0.U
     exec1Reg.doFpRegFileWrite := true.B
   }
   .elsewhen (isFloatOp(fetchSignals.instr)) {
@@ -453,15 +457,15 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
 
     when (fpFunct7 === "b0000000".U) {
       fpu.io.opcode := Float32Ops.Opcode.ADD
-      exec1Reg.fpResult := fpu.io.result
+      exec1Reg.fpResult := 0.U
       exec1Reg.doFpRegFileWrite := true.B
     } .elsewhen (fpFunct7 === "b0000100".U) {
       fpu.io.opcode := Float32Ops.Opcode.SUB
-      exec1Reg.fpResult := fpu.io.result
+      exec1Reg.fpResult := 0.U
       exec1Reg.doFpRegFileWrite := true.B
     } .elsewhen (fpFunct7 === "b0001000".U) {
       fpu.io.opcode := Float32Ops.Opcode.MUL
-      exec1Reg.fpResult := fpu.io.result
+      exec1Reg.fpResult := 0.U
       exec1Reg.doFpRegFileWrite := true.B
     } .elsewhen (fpFunct7 === "b0010000".U) {
       fpu.io.opcode := MuxLookup(funct3, Float32Ops.Opcode.SGNJ)(Seq(
@@ -469,26 +473,31 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
         "b001".U -> Float32Ops.Opcode.SGNJN,
         "b010".U -> Float32Ops.Opcode.SGNJX
       ))
-      exec1Reg.fpResult := fpu.io.result
+      exec1Reg.fpResult := 0.U
       exec1Reg.doFpRegFileWrite := true.B
     } .elsewhen (fpFunct7 === "b0010100".U) {
       fpu.io.opcode := Mux(funct3(0), Float32Ops.Opcode.MAX, Float32Ops.Opcode.MIN)
-      exec1Reg.fpResult := fpu.io.result
+      exec1Reg.fpResult := 0.U
       exec1Reg.doFpRegFileWrite := true.B
     } .elsewhen (fpFunct7 === "b1010000".U) {
-      exec1Reg.result := fpCompareResult
+      fpIntResultEX := fpCompareResult
+      exec1Reg.result := 0.U
       exec1Reg.doRegFileWrite := true.B
     } .elsewhen (fpFunct7 === "b1100000".U) {
-      exec1Reg.result := Float32Ops.floatToInt(regReadReg.frs1Data, fpRs2 === 0.U)
+      fpIntResultEX := Float32Ops.floatToInt(regReadReg.frs1Data, fpRs2 === 0.U)
+      exec1Reg.result := 0.U
       exec1Reg.doRegFileWrite := true.B
     } .elsewhen (fpFunct7 === "b1101000".U) {
-      exec1Reg.fpResult := Float32Ops.intToFloat(regReadReg.rs1Data, fpRs2 === 0.U)
+      fpRegDirectResultEX := Float32Ops.intToFloat(regReadReg.rs1Data, fpRs2 === 0.U)
+      exec1Reg.fpResult := 0.U
       exec1Reg.doFpRegFileWrite := true.B
     } .elsewhen (fpFunct7 === "b1110000".U) {
-      exec1Reg.result := Mux(funct3 === "b001".U, fpClass, regReadReg.frs1Data)
+      fpIntResultEX := Mux(funct3 === "b001".U, fpClass, regReadReg.frs1Data)
+      exec1Reg.result := 0.U
       exec1Reg.doRegFileWrite := true.B
     } .elsewhen (fpFunct7 === "b1111000".U) {
-      exec1Reg.fpResult := regReadReg.rs1Data
+      fpRegDirectResultEX := regReadReg.rs1Data
+      exec1Reg.fpResult := 0.U
       exec1Reg.doFpRegFileWrite := true.B
     }
   }
@@ -587,6 +596,18 @@ val wbExec = wbReg.exec3Signals.exec2Signals.exec1Signals
 val wbIsMExt = wbFetch.instr(6, 0) === RV32IDecode.OP_R && wbFetch.instr(31, 25) === "b0000001".U(7.W)
 val wbFunct3 = wbFetch.instr(14, 12)
 val wbIsMulInstr = wbIsMExt && (wbFunct3 <= "b011".U)
+val wbIsFloatCompute = isFloatOp(wbFetch.instr) || isFloatMAdd(wbFetch.instr)
+val wbUseFpRegPipeline = wbIsFloatCompute && wbExec.doFpRegFileWrite
+val wbUseFpIntPipeline = wbIsFloatCompute && wbExec.doRegFileWrite
+val wbFpFunct7 = wbFetch.instr(31, 25)
+val wbUseFpAluPipeline = isFloatMAdd(wbFetch.instr) ||
+  (isFloatOp(wbFetch.instr) && (
+    wbFpFunct7 === "b0000000".U ||
+    wbFpFunct7 === "b0000100".U ||
+    wbFpFunct7 === "b0001000".U ||
+    wbFpFunct7 === "b0010000".U ||
+    wbFpFunct7 === "b0010100".U
+  ))
 
 val mulResult_WB = MuxLookup(wbFunct3, mulUnit.io.lo)(Seq(
   "b000".U -> mulUnit.io.lo,
@@ -595,7 +616,8 @@ val mulResult_WB = MuxLookup(wbFunct3, mulUnit.io.lo)(Seq(
   "b011".U -> mulUnit.io.hi
 ))
 
-val finalWBResult = Mux(wbIsMulInstr, mulResult_WB, wbExec.result)
+val finalWBResult = Mux(wbIsMulInstr, mulResult_WB,
+  Mux(wbUseFpIntPipeline, fpIntResultWB, wbExec.result))
 
 when (wbFetch.valid && wbExec.doRegFileWrite && wbDecode.rd =/= 0.U) {
   regFile.io.wens(0) := true.B
@@ -608,7 +630,9 @@ when (wbFetch.valid && wbExec.doFpRegFileWrite) {
   fpWriteEnable := true.B
   fpWriteThreadID := wbFetch.threadId
   fpWriteAddr := wbDecode.rd
-  fpWriteData := wbExec.fpResult
+  fpWriteData := Mux(wbUseFpRegPipeline,
+    Mux(wbUseFpAluPipeline, fpu.io.result, fpRegDirectResultWB),
+    wbExec.fpResult)
 }
 
 // Control-flow commit
