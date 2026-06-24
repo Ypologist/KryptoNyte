@@ -23,7 +23,7 @@ import LoadUnit.LoadUnit
 import RegFiles.{RegFile2R1WMem, RegFileMT2R1WMem, RegFileMT2R1WVec}
 import StoreUnit.StoreUnit
 import TetraNyte.{TetraNyteRV32ICore, TetraNyteRV32IMCore, TetraNyteRV32IZmmulCore}
-import ZeroNyte.{ZeroNyteRV32ICore, ZeroNyteRV32ICoreWithCache, ZeroNyteRV32IZmmulCore, ZeroNyteRV32IMCore}
+import ZeroNyte.{ZeroNyteRV32ICore, ZeroNyteRV32ICoreWithCache, ZeroNyteRV32IFRVVCore, ZeroNyteRV32IZmmulCore, ZeroNyteRV32IMCore}
 import OctoNyte.OctoNyteRV32ICore
 import OctoNyte.OctoNyteRV32IFZmmulCore
 
@@ -311,6 +311,11 @@ Environment Variables:
       case "rv32im" =>
         getRV32ILibraryModules("ZeroNyteIM") ++ Seq(
           ModuleSpec(() => new ZeroNyteRV32IMCore(cosimulate), "ZeroNyteRV32IMCore", "Single-cycle RV32IM core", "ZeroNyte", "rv32im")
+        )
+      case "rv32if_rvv" =>
+        getRV32ILibraryModules("ZeroNyteIFRVV") ++ Seq(
+          ModuleSpec(() => new Float32ALU, "Float32ALU", "Single-precision floating-point ALU subset", "ZeroNyte", "rv32if_rvv"),
+          ModuleSpec(() => new ZeroNyteRV32IFRVVCore(cosimulate), "ZeroNyteRV32IFRVVCore", "Single-thread 8-stage RV32IF core with generic RVV/matrix/tensor extension issue", "ZeroNyte", "rv32if_rvv")
         )
       case _ => Seq.empty
     }

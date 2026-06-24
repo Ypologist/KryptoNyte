@@ -13,6 +13,7 @@ lazy val generateLibraryRTL   = taskKey[Unit]("Generate RTL for standalone libra
 lazy val generateZeroNyteRTL  = taskKey[Unit]("Generate RTL for the ZeroNyte core")
 lazy val generateZeroNyteZmmulRTL = taskKey[Unit]("Generate RTL for the ZeroNyte Zmmul core")
 lazy val generateZeroNyteIMRTL    = taskKey[Unit]("Generate RTL for the ZeroNyte IM core")
+lazy val generateZeroNyteIFRVVRTL = taskKey[Unit]("Generate RTL for the ZeroNyte RV32IF core with generic RVV/matrix/tensor extension issue")
 lazy val generateTetraNyteRTL = taskKey[Unit]("Generate RTL for the TetraNyte core")
 lazy val generateTetraNyteZmmulRTL = taskKey[Unit]("Generate RTL for the TetraNyte Zmmul core")
 lazy val generateTetraNyteIMRTL = taskKey[Unit]("Generate RTL for the TetraNyte IM core")
@@ -95,6 +96,13 @@ lazy val zeroNyteIM = (project in file("ZeroNyte/rv32im"))
   )
   .settings(commonSettings: _*)
 
+lazy val zeroNyteIFRVV = (project in file("ZeroNyte/rv32if_rvv"))
+  .dependsOn(library, zeroNyte)
+  .settings(
+    name := "ZeroNyteIFRVV"
+  )
+  .settings(commonSettings: _*)
+
 // ----------------- TetraNyte Project -----------------
 lazy val tetraNyte = (project in file("TetraNyte/rv32i"))
   .dependsOn(library)
@@ -148,7 +156,7 @@ lazy val octoNyteIM = (project in file("OctoNyte/rv32im"))
 
 // ----------------- Generators Project -----------------
 lazy val generators = (project in file("generators"))
-  .dependsOn(library, zeroNyte, zeroNyteZmmul, zeroNyteIM, tetraNyte, tetraNyteZmmul, tetraNyteIM, octoNyte, octoNyteZmmul, octoNyteIFZmmul, octoNyteIM)
+  .dependsOn(library, zeroNyte, zeroNyteZmmul, zeroNyteIM, zeroNyteIFRVV, tetraNyte, tetraNyteZmmul, tetraNyteIM, octoNyte, octoNyteZmmul, octoNyteIFZmmul, octoNyteIM)
   .settings(
     name := "Generators"
   )
@@ -161,6 +169,7 @@ lazy val generators = (project in file("generators"))
       zeroNyte / Compile / compile,
       zeroNyteZmmul / Compile / compile,
       zeroNyteIM / Compile / compile,
+      zeroNyteIFRVV / Compile / compile,
       tetraNyte / Compile / compile,
       tetraNyteZmmul / Compile / compile,
       tetraNyteIM / Compile / compile,
@@ -197,6 +206,12 @@ lazy val generators = (project in file("generators"))
       (library / Compile / compile).value
       (zeroNyteIM / Compile / compile).value
       (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL --core-family ZeroNyte --core-variant rv32im").value
+    },
+
+    generateZeroNyteIFRVVRTL := {
+      (library / Compile / compile).value
+      (zeroNyteIFRVV / Compile / compile).value
+      (Compile / runMain).toTask(" generators.GenerateHierarchicalRTL --core-family ZeroNyte --core-variant rv32if_rvv").value
     },
 
     generateTetraNyteRTL := {
