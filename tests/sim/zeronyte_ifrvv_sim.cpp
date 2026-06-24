@@ -162,10 +162,18 @@ int main(int argc, char** argv) {
           << "cycle=0x" << cycle
           << " pc=0x" << dut.io_pc_out
           << " instr=0x" << dut.io_instr_out
-          << " retire_valid=0x" << dut.io_retire_valid
+          << " dmem_valid=0x" << static_cast<unsigned>(dut.io_dmem_valid)
+          << " dmem_addr=0x" << dut.io_dmem_addr
+          << " dmem_rdata=0x" << dut.io_dmem_rdata
+          << " dmem_wmask=0x" << static_cast<unsigned>(dut.io_dmem_wmask)
+          << " dmem_wdata=0x" << dut.io_dmem_wdata
+          << " retire_valid=0x" << static_cast<unsigned>(dut.io_retire_valid)
           << " retire_pc=0x" << dut.io_retire_pc
           << " retire_instr=0x" << dut.io_retire_instr
-          << " fflags=0x" << dut.io_csr_fflags
+          << " retire_write_fp=0x" << static_cast<unsigned>(dut.io_retire_write_fp)
+          << " retire_fp_rd=0x" << static_cast<unsigned>(dut.io_retire_fp_rd)
+          << " retire_fp_wdata=0x" << dut.io_retire_fp_wdata
+          << " fflags=0x" << static_cast<unsigned>(dut.io_csr_fflags)
           << std::dec << '\n';
     }
 

@@ -1,3 +1,23 @@
+# 06/24/2026 16:49 - ZeroNyte Scalar-F Long-Latency Divide and Square Root
+
+**Why these changes were made:**
+* **RV32F Completeness:** The ZeroNyte IF/RVV scalar frontend advertised scalar-F support, but `FDIV.S` and `FSQRT.S` still needed real RTL implementations instead of trapping or remaining compliance gaps.
+* **Pipeline Practicality:** Divide and square root are naturally long-latency operations. Keeping them in a standalone iterative unit avoids coupling them to the pipelined multiplier and keeps the core pipeline behavior explicit.
+* **Conformance-Driven Debug:** Focused RISCOF runs exposed surrounding scalar-F hazards, including FP register `f0` write behavior, FP CSR ordering, FP load/writeback selection, and a square-root restoring-algorithm edge-case.
+
+**What the changes are:**
+* **Standalone Iterative Unit:** Added `Float32DivSqrtUnit` with long-latency `FDIV.S` and `FSQRT.S`, IEEE-style exception flags, NaN/zero/infinity handling, and round-to-nearest-even result packing.
+* **ZeroNyte Integration:** Wired the new unit into `ZeroNyteRV32IFRVVCore` with start/hold/done control, frontend stall reporting, FP writeback, and `fflags` propagation.
+* **Scalar-F Hazard Fixes:** Allowed architectural FP register `f0` writes, added register-file bypassing around retire/read capture, ordered FP CSR accesses around flag-producing operations, and fixed FP direct-result writeback so ordinary `FLW` immediates cannot be misclassified as FP move/convert operations.
+* **Sqrt Correctness Fix:** Corrected the restoring square-root trial term and quiet-NaN invalid classification so subnormal, max-finite, and NaN edge cases match the reference model.
+* **Simulator Diagnostics:** Improved ZeroNyte IF/RVV Verilator log formatting for memory and FP retire signals.
+
+**Validation status:**
+* `sbt "zeroNyteIFRVV/compile"` passed.
+* Rebuilt the ZeroNyte IF/RVV Verilator RTL simulator.
+* Focused RISCOF scalar-F smoke passed both generated tests: `fdiv_b1-01.S` and `fsqrt_b1-01.S`.
+* The generated synthesis scout from the simulator build reported `Float32DivSqrtUnit` at `2,750` cells and the full `ZeroNyteRV32IFRVVCore` hierarchy at `40,826` cells.
+
 # 06/24/2026 15:40 - ZeroNyte IF/RVV Conformance Reference Flow
 
 **Why these changes were made:**
