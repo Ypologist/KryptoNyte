@@ -63,6 +63,12 @@ class ZeroNyteExtensionCompletion extends Bundle {
   val vxsat = Bool()
 }
 
+class ZeroNytePendingExtension extends Bundle {
+  val pc = UInt(32.W)
+  val instr = UInt(32.W)
+  val isVectorConfig = Bool()
+}
+
 class ZeroNyteRV32IFRVVCoreIO(val cosimulate: Boolean = false) extends Bundle {
   val imem_addr = Output(UInt(32.W))
   val imem_rdata = Input(UInt(32.W))
@@ -302,10 +308,6 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
   val pc = RegInit(resetPc)
   val trapValid = RegInit(false.B)
   val trapCause = RegInit(0.U(8.W))
-  val extPending = RegInit(false.B)
-  val extPendingPc = RegInit(0.U(32.W))
-  val extPendingInstr = RegInit(0.U(32.W))
-  io.extComplete.ready := extPending
 
   val fflags = RegInit(0.U(5.W))
   val frm = RegInit(0.U(3.W))
@@ -385,6 +387,13 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
   storeUnit.io.data := 0.U
   storeUnit.io.storeType := 0.U
 
+  val extRetireQueue = Module(new Queue(new ZeroNytePendingExtension, 16))
+  extRetireQueue.io.enq.valid := false.B
+  extRetireQueue.io.enq.bits := 0.U.asTypeOf(new ZeroNytePendingExtension)
+  extRetireQueue.io.deq.ready := false.B
+  val extOutstanding = extRetireQueue.io.deq.valid
+  val extVectorConfigPending = RegInit(false.B)
+
   val fpPipedResult = fpu.io.result
   val regReadFpFunct7 = regReadReg.decRegs.instr(31, 25)
   val regReadIsFpDiv = regReadReg.decRegs.valid && regReadReg.decRegs.isFpOp &&
@@ -460,9 +469,13 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
     mcause := wbReg.trapCause
   }
 
-  val extCompleteFire = io.extComplete.fire && extPending
-
   val wbIntWrite = wbValid && wbReg.writeInt && wbReg.rd =/= 0.U
+  val extCompleteWouldWriteInt = io.extComplete.valid && io.extComplete.bits.writeRd && io.extComplete.bits.rd =/= 0.U
+  io.extComplete.ready := extOutstanding && !(wbIntWrite && extCompleteWouldWriteInt)
+  val extCompleteFire = io.extComplete.fire && extOutstanding
+  val extRetireHead = extRetireQueue.io.deq.bits
+  extRetireQueue.io.deq.ready := extCompleteFire
+
   val extIntWrite = extCompleteFire && io.extComplete.bits.writeRd && io.extComplete.bits.rd =/= 0.U
   val retireIntWrite = wbIntWrite || extIntWrite
   val retireIntAddr = Mux(extIntWrite, io.extComplete.bits.rd, wbReg.rd)
@@ -486,11 +499,13 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
       Mux(lastFpWriteValid && lastFpWriteAddr === addr, lastFpWriteData, raw))
 
   when(extCompleteFire) {
-    extPending := false.B
+    when(extRetireHead.isVectorConfig) {
+      extVectorConfigPending := false.B
+    }
     when(io.extComplete.bits.fault) {
       trapValid := true.B
       trapCause := io.extComplete.bits.cause
-      mepc := extPendingPc
+      mepc := extRetireHead.pc
       mcause := io.extComplete.bits.cause
     }
     when(io.extComplete.bits.writeRd && io.extComplete.bits.rd =/= 0.U) {
@@ -586,13 +601,20 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
   val olderPipeBusy = regReadReg.decRegs.valid || exec1Reg.regReadRegs.decRegs.valid ||
     exec2Reg.regReadRegs.decRegs.valid || exec3Reg.regReadRegs.decRegs.valid || wbReg.regReadRegs.decRegs.valid
   val extNeedsIssue = dispatchValid && dispatchReg.isExt
+  val dispatchIsVectorConfig = extNeedsIssue && dispatchReg.instr(6, 0) === opVector &&
+    dispatchReg.instr(14, 12) === "b111".U
+  val extSerializeBlocked =
+    (dispatchIsVectorConfig && extOutstanding) ||
+      (!dispatchIsVectorConfig && extVectorConfigPending)
   val extCanIssue = extNeedsIssue && !intRawHazard && !fpRawHazard && !fpWawHazard &&
-    !extPending && !olderPipeBusy && !trapValid
-  val extBlocked = extPending || (extNeedsIssue && (olderPipeBusy || !io.extIssue.ready))
+    !olderPipeBusy && !trapValid && !extSerializeBlocked && extRetireQueue.io.enq.ready &&
+    io.extIssue.ready
+  val scalarBlockedByExt = dispatchValid && !dispatchReg.isExt && extOutstanding
+  val extBlocked = scalarBlockedByExt || (extNeedsIssue && !extCanIssue)
   val replayFetchActive = io.replay_enable && io.replay_valid && !trapValid
   val replayFinishRequested = io.replay_enable && (io.replay_finish || replayFinishPending)
   val replayFinishActive = replayFinishRequested && !replayFetchActive && !trapValid
-  val interruptBlocked = io.interruptPending && (dispatchValid || olderPipeBusy || extPending ||
+  val interruptBlocked = io.interruptPending && (dispatchValid || olderPipeBusy || extOutstanding ||
     replayFetchActive || replayFinishRequested)
   val stallFront = intRawHazard || fpRawHazard || fpWawHazard || csrFpHazard || fpDivSqrtStall ||
     extBlocked || interruptBlocked || trapValid
@@ -641,6 +663,11 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
   extIssueBits.memSegments := dispatchReg.instr(31, 29)
   io.extIssue.valid := extCanIssue
   io.extIssue.bits := extIssueBits
+
+  extRetireQueue.io.enq.valid := extHandshake
+  extRetireQueue.io.enq.bits.pc := dispatchReg.pc
+  extRetireQueue.io.enq.bits.instr := dispatchReg.instr
+  extRetireQueue.io.enq.bits.isVectorConfig := dispatchIsVectorConfig
 
   val redirect = WireDefault(false.B)
   val redirectTarget = WireDefault(0.U(32.W))
@@ -900,9 +927,9 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
   redirectTarget := exec1Reg.branchTarget
 
   when(extHandshake) {
-    extPending := true.B
-    extPendingPc := dispatchReg.pc
-    extPendingInstr := dispatchReg.instr
+    when(dispatchIsVectorConfig) {
+      extVectorConfigPending := true.B
+    }
   }
 
   val fetchAddress = Mux(replayFetchActive, io.replay_pc, Mux(replayFinishActive, io.replay_finish_pc, pc))
@@ -976,11 +1003,11 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
   io.result := wbIntResult
   io.trap_valid := trapValid.asUInt
   io.trap_cause := trapCause
-  io.ext_pending := extPending.asUInt
+  io.ext_pending := extOutstanding.asUInt
   io.stall_reason := stallReason
   io.retire_valid := (wbValid || extCompleteFire).asUInt
-  io.retire_pc := Mux(extCompleteFire, extPendingPc, wbReg.regReadRegs.decRegs.pc)
-  io.retire_instr := Mux(extCompleteFire, extPendingInstr, wbInstr)
+  io.retire_pc := Mux(extCompleteFire, extRetireHead.pc, wbReg.regReadRegs.decRegs.pc)
+  io.retire_instr := Mux(extCompleteFire, extRetireHead.instr, wbInstr)
   io.retire_write_rd := Mux(extCompleteFire, io.extComplete.bits.writeRd, wbReg.writeInt).asUInt
   io.retire_rd := Mux(extCompleteFire, io.extComplete.bits.rd, wbReg.rd)
   io.retire_wdata := Mux(extCompleteFire, io.extComplete.bits.rdData, wbIntResult)
@@ -992,9 +1019,6 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
   io.csr_vl := vl
   io.csr_vtype := vtype
   io.csr_vstart := vstart
-
-  val unusedExtInstr = WireDefault(extPendingInstr)
-  dontTouch(unusedExtInstr)
 }
 
 class ZeroNyteRV32IFRVVCoreCosim(vlenbBytes: Int = 256)

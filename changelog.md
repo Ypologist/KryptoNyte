@@ -1,3 +1,19 @@
+# 06/24/2026 18:04 - ZeroNyte IF/RVV Extension Retire Queue
+
+**Why these changes were made:**
+* **Extension Throughput:** The ZeroNyte IF/RVV frontend previously allowed only one outstanding extension instruction, which forced the scalar pipeline to wait for each external operation to complete before issuing the next one.
+* **Architectural Ordering:** The frontend still needs in-order completion visibility for traps, CSR updates, retire metadata, and vector-configuration writes even when multiple external operations are in flight.
+* **Configuration Safety:** Vector configuration instructions require stronger ordering than ordinary vector work because later vector instructions consume the updated `vl`/`vtype` state.
+
+**What the changes are:**
+* **In-Order Retire Queue:** Replaced the single extension-pending slot with a 16-entry pending-extension retire queue carrying PC, instruction, and vector-configuration metadata.
+* **Multiple Outstanding Extension Ops:** Extension issue can now continue while older extension operations are still waiting for completion, provided normal scalar hazards, trap state, queue capacity, and extension-interface readiness allow it.
+* **Vector Config Serialization:** Added explicit tracking for pending vector-configuration operations so `vset*` state updates retire before dependent vector instructions issue, while ordinary extension operations can remain overlapped.
+* **Retire Metadata Cleanup:** Retire PC/instruction and trap attribution now come from the retire-queue head, removing the previous single pending PC/instruction registers.
+
+**Validation status:**
+* `sbt "zeroNyteIFRVV/compile"` passed.
+
 # 06/24/2026 16:49 - ZeroNyte Scalar-F Long-Latency Divide and Square Root
 
 **Why these changes were made:**
