@@ -277,6 +277,17 @@ if [[ -z "$SPIKE_BIN_DIR" ]]; then
   exit 1
 fi
 
+REF_PLUGIN="spike_simple"
+REF_PLUGIN_PATH="$PLUGIN_ROOT/spike_simple"
+REF_ISA_FILE="$PLUGIN_ROOT/spike_simple/spike_simple_isa.yaml"
+REF_PLATFORM_FILE="$PLUGIN_ROOT/spike_simple/spike_simple_platform.yaml"
+if [[ "$FEATURE_SET" == "if" ]]; then
+  REF_PLUGIN="spike_scalar"
+  REF_PLUGIN_PATH="$SCRIPT_DIR/riscof/spike_scalar"
+  REF_ISA_FILE="$ISA_FILE"
+  REF_PLATFORM_FILE="$PLATFORM_FILE"
+fi
+
 RISCOF_CMD=()
 if [[ -x "$VENV_BIN/python3" ]] && "$VENV_BIN/python3" -c "import riscof.cli" >/dev/null 2>&1; then
   RISCOF_CMD=("$VENV_BIN/python3" -m riscof.cli)
@@ -356,8 +367,8 @@ mkdir -p "$OUTPUT_DIR"
 CONFIG_GENERATED="$SCRIPT_DIR/riscof/.config.${PROCESSOR}.ini"
 cat >"$CONFIG_GENERATED" <<EOF
 [RISCOF]
-ReferencePlugin=spike_simple
-ReferencePluginPath=$PLUGIN_ROOT/spike_simple
+ReferencePlugin=$REF_PLUGIN
+ReferencePluginPath=$REF_PLUGIN_PATH
 DUTPlugin=$DUT_NAME
 DUTPluginPath=$DUT_NAME
 
@@ -369,10 +380,10 @@ PATH=../sim/build
 sim=$SIM_BINARY
 jobs=1
 
-[spike_simple]
-pluginpath=$PLUGIN_ROOT/spike_simple
-ispec=$PLUGIN_ROOT/spike_simple/spike_simple_isa.yaml
-pspec=$PLUGIN_ROOT/spike_simple/spike_simple_platform.yaml
+[$REF_PLUGIN]
+pluginpath=$REF_PLUGIN_PATH
+ispec=$REF_ISA_FILE
+pspec=$REF_PLATFORM_FILE
 PATH=$SPIKE_BIN_DIR
 EOF
 

@@ -1,3 +1,38 @@
+# 06/24/2026 15:40 - ZeroNyte IF/RVV Conformance Reference Flow
+
+**Why these changes were made:**
+* **RV32F Requires CSR Semantics:** RISCOF rejected the ZeroNyte IF/RVV ISA declaration because `F` cannot be advertised without `Zicsr`. The core already exposes `fflags`, `frm`, `fcsr`, and related CSR plumbing, so the conformance spec needed to describe the architectural contract as `RV32IFZicsr`.
+* **Installed Spike Reference Was RV32I-Only:** The upstream `spike_simple` RISCOF plugin installed by the devcontainer scripts only constructed Spike ISA strings from `I/M/C`, causing RV32F tests to run the reference model as `rv32i`. That made full scalar-F comparisons impossible and caused Spike to hang/fail on the first FP cases.
+* **Scalar-F Compliance Needed Real Data:** Running the full 180-test ZeroNyte IF/RVV conformance suite was needed to separate harness issues from RTL compliance gaps.
+
+**What the changes are:**
+* **ISA YAML Correction:** Updated `tests/riscof/zeronyte_ifrvv/zeronyte_ifrvv_isa.yaml` to advertise `RV32IFZicsr`.
+* **Local Spike Scalar Reference Plugin:** Added `tests/riscof/spike_scalar/`, including linker/model headers and a RISCOF plugin that derives Spike's `--isa` string from the checked YAML, preserving `F` and `Zicsr`.
+* **IF Target Reference Routing:** Updated `tests/run_riscv_conformance_tests.sh` so IF-family conformance runs use the local `spike_scalar` reference while existing integer-only and integer-multiply targets continue using the installed `spike_simple` plugin.
+
+**Validation status:**
+* Installed the RISC-V conformance stack into `external/KryptoNyte/.venv` using the devcontainer installer with `--no-pk --riscof-plugins-version master`; `device-tree-compiler` was required for the Spike build.
+* Verified `zeronyte-ifrvv` smoke conformance through Verilator RTL: `add-01.S` passed against Spike.
+* Ran the full 180-test ZeroNyte IF/RVV RTL conformance suite. Manual signature inventory showed `44` passing tests, `112` mismatched DUT/reference signatures, `24` missing DUT signatures, and `0` missing reference signatures. Base RV32I cases passed; remaining failures are concentrated in scalar-F arithmetic, compare, convert, fused, divide, and sqrt behavior.
+
+# 06/24/2026 13:20 - ZeroNyte RV32IF/RVV 8-Stage Pipeline
+
+**Why these changes were made:**
+* **Compiled RV32I/RVV Compatibility Path:** ZeroNyte needed a scalar frontend capable of executing ordinary compiled RV32I plus RVV binaries while still allowing vector memory traffic to be intercepted and serviced by a decoupled memory path.
+* **Floating-Point Isolation:** Floating point remains undesirable inside OctoNyte, but algorithms using RVV often also need scalar single-precision setup, conversion, and reduction support. A decoupled ZeroNyte frontend provides that scalar-F capability next to the vector datapath without changing OctoNyte's public multithreaded core.
+* **Longer Scalar Pipeline Requirement:** A simple four-stage frontend was too short for the intended scalar-F operations and hazard behavior. The first ZeroNyte design therefore reused the OctoNyte-style deeper in-order structure while removing multithreading and adding single-thread hazard checks.
+
+**What the changes are:**
+* **New ZeroNyte IF/RVV Core:** Added the first `ZeroNyteRV32IFRVVCore` implementation as an eight-stage, single-thread, in-order RV32I plus scalar-F plus RVV-aware frontend under `rtl/ZeroNyte/rv32if_rvv`.
+* **Scalar Execute Resources:** Integrated integer ALU, branch/load/store handling, a pipelined 32-bit multiplier, a single-precision floating-point datapath, integer and floating-point register files, CSR state for `fflags`, `frm`, `fcsr`, and vector control CSRs.
+* **Vector Dispatch Boundary:** Added RVV decode/lowering scaffolding and vector request/completion interfaces so the frontend can recognize vector work and hand it to an external vector execution boundary rather than trying to execute the full vector datapath locally.
+* **RTL Generation and Verilator Harness:** Connected the new ZeroNyte IF/RVV variant into the hierarchical RTL generator and Verilator simulation harness so the core can be generated, loaded with ELF binaries, run, logged, and signature-checked.
+
+**Validation status:**
+* Verified the first design by compiling the new Chisel/Scala RTL and building the ZeroNyte IF/RVV Verilator simulator.
+* Passed directed fetch/decode/retire smoke coverage for simple RV32I execution.
+* Documented follow-on work for loader hardening, TDMA queues, loop replay architectural equivalence, broader RVV lowering, scalar-F compliance, and RISCOF expansion.
+
 # 04/06/2026 10:42 - Residual RTL Testbench Diagnostics
 
 **Why these changes were made:**
