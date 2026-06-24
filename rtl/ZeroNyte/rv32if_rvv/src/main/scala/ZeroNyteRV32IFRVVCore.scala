@@ -77,6 +77,13 @@ class ZeroNyteRV32IFRVVCoreIO(val cosimulate: Boolean = false) extends Bundle {
   val extIssue = Decoupled(new ZeroNyteExtensionIssue)
   val extComplete = Flipped(Decoupled(new ZeroNyteExtensionCompletion))
 
+  val replay_enable = Input(Bool())
+  val replay_valid = Input(Bool())
+  val replay_pc = Input(UInt(32.W))
+  val replay_finish = Input(Bool())
+  val replay_finish_pc = Input(UInt(32.W))
+  val replay_step = Output(Bool())
+
   val interruptVector = Input(UInt(32.W))
   val interruptPending = Input(Bool())
   val interruptTaken = Output(Bool())
@@ -114,6 +121,7 @@ class ZeroNyteIFRVVFetchRegs extends Bundle {
   val valid = Bool()
   val pc = UInt(32.W)
   val instr = UInt(32.W)
+  val replay = Bool()
 }
 
 class ZeroNyteIFRVVDecodeRegs extends Bundle {
@@ -121,6 +129,7 @@ class ZeroNyteIFRVVDecodeRegs extends Bundle {
   val pc = UInt(32.W)
   val instr = UInt(32.W)
   val dec = new RV32IDecode.DecodeSignals
+  val replay = Bool()
   val isExt = Bool()
   val isFpLoad = Bool()
   val isFpStore = Bool()
@@ -286,6 +295,7 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
   io.extIssue.valid := false.B
   io.extIssue.bits := 0.U.asTypeOf(new ZeroNyteExtensionIssue)
   io.extComplete.ready := false.B
+  io.replay_step := false.B
 
   val pc = RegInit(resetPc)
   val trapValid = RegInit(false.B)
@@ -306,6 +316,7 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
   val mtvec = RegInit(0.U(32.W))
   val mepc = RegInit(0.U(32.W))
   val mcause = RegInit(0.U(32.W))
+  val replayFinishPending = RegInit(false.B)
 
   val fetchReg = RegInit(emptyFetch)
   val decodeReg = RegInit(emptyDecode)
@@ -507,7 +518,11 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
   val extCanIssue = extNeedsIssue && !intRawHazard && !fpRawHazard && !fpWawHazard &&
     !extPending && !olderPipeBusy && !trapValid
   val extBlocked = extPending || (extNeedsIssue && (olderPipeBusy || !io.extIssue.ready))
-  val interruptBlocked = io.interruptPending && (dispatchValid || olderPipeBusy || extPending)
+  val replayFetchActive = io.replay_enable && io.replay_valid && !trapValid
+  val replayFinishRequested = io.replay_enable && (io.replay_finish || replayFinishPending)
+  val replayFinishActive = replayFinishRequested && !replayFetchActive && !trapValid
+  val interruptBlocked = io.interruptPending && (dispatchValid || olderPipeBusy || extPending ||
+    replayFetchActive || replayFinishRequested)
   val stallFront = intRawHazard || fpRawHazard || fpWawHazard || extBlocked || interruptBlocked || trapValid
 
   val stallReason = WireDefault(0.U(8.W))
@@ -594,7 +609,6 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
     fpu.io.b := regReadReg.frs2Data
     fpu.io.c := regReadReg.frs3Data
     val fpAnyNaN2 = Float32Ops.isNaN(regReadReg.frs1Data) || Float32Ops.isNaN(regReadReg.frs2Data)
-    val fpAnyNaN3 = fpAnyNaN2 || Float32Ops.isNaN(regReadReg.frs3Data)
 
     when((regs.dec.isALU && !isMulInstr) || regs.dec.isLUI || regs.dec.isAUIPC) {
       val opcode = instr(6, 0)
@@ -634,42 +648,45 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
       val opcode = instr(6, 0)
       val negateProduct = opcode === opFnmsub || opcode === opFnmadd
       val negateAddend = opcode === opFmsub || opcode === opFnmadd
-      fpu.io.a := Mux(negateProduct, Float32Ops.negate(regReadReg.frs1Data), regReadReg.frs1Data)
+      val maddA = Mux(negateProduct, Float32Ops.negate(regReadReg.frs1Data), regReadReg.frs1Data)
+      val maddC = Mux(negateAddend, Float32Ops.negate(regReadReg.frs3Data), regReadReg.frs3Data)
+      fpu.io.a := maddA
       fpu.io.b := regReadReg.frs2Data
-      fpu.io.c := Mux(negateAddend, Float32Ops.negate(regReadReg.frs3Data), regReadReg.frs3Data)
+      fpu.io.c := maddC
       fpu.io.opcode := Float32Ops.Opcode.MADD
       nextExec.fpUsesPipedResult := true.B
       nextExec.writeFp := true.B
-      nextExec.fpFlags := Mux(fpAnyNaN3, "b10000".U(5.W), 0.U)
+      nextExec.fpFlags := Mux(Float32Ops.invalidForMAdd(maddA, regReadReg.frs2Data, maddC),
+        "b10000".U(5.W), 0.U)
     }.elsewhen(regs.isFpOp) {
       val fpCompareResult = MuxLookup(funct3, 0.U(32.W))(Seq(
-        "b010".U -> (regReadReg.frs1Data === regReadReg.frs2Data).asUInt,
-        "b001".U -> Float32Ops.lessThan(regReadReg.frs1Data, regReadReg.frs2Data).asUInt,
-        "b000".U -> Float32Ops.lessOrEqual(regReadReg.frs1Data, regReadReg.frs2Data).asUInt
+        "b010".U -> (!fpAnyNaN2 && (regReadReg.frs1Data === regReadReg.frs2Data ||
+          (Float32Ops.isZero(regReadReg.frs1Data) && Float32Ops.isZero(regReadReg.frs2Data)))).asUInt,
+        "b001".U -> (!fpAnyNaN2 && Float32Ops.lessThan(regReadReg.frs1Data, regReadReg.frs2Data)).asUInt,
+        "b000".U -> (!fpAnyNaN2 && Float32Ops.lessOrEqual(regReadReg.frs1Data, regReadReg.frs2Data)).asUInt
       ))
-      val fpClass = Cat(
-        0.U(23.W),
-        0.U(5.W),
-        (!regReadReg.frs1Data(31) && regReadReg.frs1Data(30, 0) === 0.U).asUInt,
-        (regReadReg.frs1Data(31) && regReadReg.frs1Data(30, 0) === 0.U).asUInt,
-        (!regReadReg.frs1Data(31) && regReadReg.frs1Data(30, 23) =/= 0.U).asUInt,
-        (regReadReg.frs1Data(31) && regReadReg.frs1Data(30, 23) =/= 0.U).asUInt
-      )
+      val fpCompareInvalid = Mux(funct3 === "b010".U,
+        Float32Ops.invalidForEq(regReadReg.frs1Data, regReadReg.frs2Data),
+        Float32Ops.invalidForOrderedCompare(regReadReg.frs1Data, regReadReg.frs2Data))
+      val fpClass = Float32Ops.fclass(regReadReg.frs1Data)
       when(fpFunct7 === "b0000000".U) {
         fpu.io.opcode := Float32Ops.Opcode.ADD
         nextExec.fpUsesPipedResult := true.B
         nextExec.writeFp := true.B
-        nextExec.fpFlags := Mux(fpAnyNaN2, "b10000".U(5.W), 0.U)
+        nextExec.fpFlags := Mux(Float32Ops.invalidForAdd(regReadReg.frs1Data, regReadReg.frs2Data),
+          "b10000".U(5.W), 0.U)
       }.elsewhen(fpFunct7 === "b0000100".U) {
         fpu.io.opcode := Float32Ops.Opcode.SUB
         nextExec.fpUsesPipedResult := true.B
         nextExec.writeFp := true.B
-        nextExec.fpFlags := Mux(fpAnyNaN2, "b10000".U(5.W), 0.U)
+        nextExec.fpFlags := Mux(Float32Ops.invalidForSub(regReadReg.frs1Data, regReadReg.frs2Data),
+          "b10000".U(5.W), 0.U)
       }.elsewhen(fpFunct7 === "b0001000".U) {
         fpu.io.opcode := Float32Ops.Opcode.MUL
         nextExec.fpUsesPipedResult := true.B
         nextExec.writeFp := true.B
-        nextExec.fpFlags := Mux(fpAnyNaN2, "b10000".U(5.W), 0.U)
+        nextExec.fpFlags := Mux(Float32Ops.invalidForMul(regReadReg.frs1Data, regReadReg.frs2Data),
+          "b10000".U(5.W), 0.U)
       }.elsewhen(fpFunct7 === "b0010000".U) {
         fpu.io.opcode := MuxLookup(funct3, Float32Ops.Opcode.SGNJ)(Seq(
           "b000".U -> Float32Ops.Opcode.SGNJ,
@@ -678,17 +695,17 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
         ))
         nextExec.fpUsesPipedResult := true.B
         nextExec.writeFp := true.B
-        nextExec.fpFlags := Mux(fpAnyNaN2, "b10000".U(5.W), 0.U)
       }.elsewhen(fpFunct7 === "b0010100".U) {
         fpu.io.opcode := Mux(funct3(0), Float32Ops.Opcode.MAX, Float32Ops.Opcode.MIN)
         nextExec.fpUsesPipedResult := true.B
         nextExec.writeFp := true.B
-        nextExec.fpFlags := Mux(fpAnyNaN2, "b10000".U(5.W), 0.U)
+        nextExec.fpFlags := Mux(Float32Ops.invalidForMinMax(regReadReg.frs1Data, regReadReg.frs2Data),
+          "b10000".U(5.W), 0.U)
       }.elsewhen(fpFunct7 === "b1010000".U) {
         nextExec.fpIntDirectResult := fpCompareResult
         nextExec.fpUsesPipedIntResult := true.B
         nextExec.writeInt := true.B
-        nextExec.fpFlags := Mux(fpAnyNaN2, "b10000".U(5.W), 0.U)
+        nextExec.fpFlags := Mux(fpCompareInvalid, "b10000".U(5.W), 0.U)
       }.elsewhen(fpFunct7 === "b1100000".U) {
         nextExec.fpIntDirectResult := Float32Ops.floatToInt(regReadReg.frs1Data, fpRs2 === 0.U)
         nextExec.fpUsesPipedIntResult := true.B
@@ -796,13 +813,23 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
     }
   }
 
-  redirect := exec1Reg.branchTaken && exec1Reg.regReadRegs.decRegs.valid && !exec1Reg.trap
+  redirect := exec1Reg.branchTaken && exec1Reg.regReadRegs.decRegs.valid &&
+    !exec1Reg.trap && !exec1Reg.regReadRegs.decRegs.replay
   redirectTarget := exec1Reg.branchTarget
 
   when(extHandshake) {
     extPending := true.B
     extPendingPc := dispatchReg.pc
     extPendingInstr := dispatchReg.instr
+  }
+
+  val fetchAddress = Mux(replayFetchActive, io.replay_pc, Mux(replayFinishActive, io.replay_finish_pc, pc))
+  val fetchFromReplay = replayFetchActive
+  val fetchFromReplayFinish = replayFinishActive
+  val fetchAccepted = !stallFront
+  io.replay_step := fetchAccepted && fetchFromReplay
+  when(io.replay_enable && io.replay_finish && !(fetchAccepted && replayFinishActive)) {
+    replayFinishPending := true.B
   }
 
   when(io.interruptPending && !interruptBlocked && !trapValid) {
@@ -822,14 +849,19 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
   }.otherwise {
     when(!stallFront) {
       fetchReg.valid := true.B
-      fetchReg.pc := pc
+      fetchReg.pc := fetchAddress
       fetchReg.instr := io.imem_rdata
-      pc := pc + 4.U
+      fetchReg.replay := fetchFromReplay
+      pc := Mux(fetchFromReplay, pc, fetchAddress + 4.U)
+      when(fetchFromReplayFinish) {
+        replayFinishPending := false.B
+      }
 
       decodeReg.valid := fetchReg.valid
       decodeReg.pc := fetchReg.pc
       decodeReg.instr := fetchReg.instr
       decodeReg.dec := RV32IDecode.decodeInstr(fetchReg.instr)
+      decodeReg.replay := fetchReg.replay
       decodeReg.isExt := isExtension(fetchReg.instr)
       decodeReg.isFpLoad := isFloatLoad(fetchReg.instr)
       decodeReg.isFpStore := isFloatStore(fetchReg.instr)
@@ -854,7 +886,7 @@ class ZeroNyteRV32IFRVVCore(val cosimulate: Boolean = false, val vlenbBytes: Int
   exec3Reg := exec2Reg
   wbReg := exec3Reg
 
-  io.imem_addr := pc
+  io.imem_addr := fetchAddress
   io.pc_out := pc
   io.instr_out := fetchReg.instr
   io.result := wbIntResult

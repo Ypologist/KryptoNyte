@@ -25,7 +25,56 @@ object Float32Ops {
 
   def isNaN(a: UInt): Bool = a(30, 23) === "hff".U && a(22, 0) =/= 0.U
 
+  def isSignalingNaN(a: UInt): Bool = isNaN(a) && !a(22)
+
+  def isQuietNaN(a: UInt): Bool = isNaN(a) && a(22)
+
+  def isSubnormal(a: UInt): Bool = a(30, 23) === 0.U && a(22, 0) =/= 0.U
+
+  def isNormal(a: UInt): Bool = a(30, 23) =/= 0.U && a(30, 23) =/= "hff".U
+
   def canonicalNaN: UInt = "h7fc00000".U(32.W)
+
+  def fclass(a: UInt): UInt = Cat(
+    0.U(22.W),
+    isQuietNaN(a).asUInt,
+    isSignalingNaN(a).asUInt,
+    (!a(31) && isInf(a)).asUInt,
+    (!a(31) && isNormal(a)).asUInt,
+    (!a(31) && isSubnormal(a)).asUInt,
+    (!a(31) && isZero(a)).asUInt,
+    (a(31) && isZero(a)).asUInt,
+    (a(31) && isSubnormal(a)).asUInt,
+    (a(31) && isNormal(a)).asUInt,
+    (a(31) && isInf(a)).asUInt
+  )
+
+  def invalidForAdd(a: UInt, b: UInt): Bool =
+    isSignalingNaN(a) || isSignalingNaN(b) ||
+      (isInf(a) && isInf(b) && a(31) =/= b(31))
+
+  def invalidForSub(a: UInt, b: UInt): Bool = invalidForAdd(a, negate(b))
+
+  def invalidForMul(a: UInt, b: UInt): Bool =
+    isSignalingNaN(a) || isSignalingNaN(b) ||
+      ((isInf(a) && isZero(b)) || (isZero(a) && isInf(b)))
+
+  def invalidForMAdd(a: UInt, b: UInt, c: UInt): Bool = {
+    val productInvalid = invalidForMul(a, b)
+    val productInf = !productInvalid && !isNaN(a) && !isNaN(b) &&
+      ((isInf(a) && !isZero(b)) || (!isZero(a) && isInf(b)))
+    val productSign = a(31) ^ b(31)
+    productInvalid || isSignalingNaN(c) ||
+      (productInf && isInf(c) && productSign =/= c(31))
+  }
+
+  def invalidForEq(a: UInt, b: UInt): Bool =
+    isSignalingNaN(a) || isSignalingNaN(b)
+
+  def invalidForOrderedCompare(a: UInt, b: UInt): Bool = isNaN(a) || isNaN(b)
+
+  def invalidForMinMax(a: UInt, b: UInt): Bool =
+    isSignalingNaN(a) || isSignalingNaN(b)
 
   private def magnitude(a: UInt): UInt = a(30, 0)
 
@@ -70,9 +119,13 @@ object Float32Ops {
     val subExp = Mux(bigExp > leadingZeros, bigExp - leadingZeros, 0.U)
     val subPacked = Cat(bigSign, subExp, normalizedSub(22, 0))
 
-    Mux(isZero(a), b,
+    val finiteResult = Mux(isZero(a), b,
       Mux(isZero(b), a,
         Mux(sameSign, addPacked, Mux(subIsZero, 0.U(32.W), subPacked))))
+
+    Mux(isNaN(a) || isNaN(b) || (isInf(a) && isInf(b) && aSign =/= bSign), canonicalNaN,
+      Mux(isInf(a), a,
+        Mux(isInf(b), b, finiteResult)))
   }
 
   def sub(a: UInt, b: UInt): UInt = add(a, negate(b))
@@ -89,9 +142,11 @@ object Float32Ops {
     val frac = Mux(normalizedHigh, product(46, 24), product(45, 23))
     val exp = expSum.asUInt
 
-    Mux(isZero(a) || isZero(b) || expSum <= 0.S, 0.U(32.W),
-      Mux(expSum >= 255.S, Cat(sign, Fill(8, 1.U), 0.U(23.W)),
-        Cat(sign, exp(7, 0), frac)))
+    val infResult = Cat(sign, Fill(8, 1.U), 0.U(23.W))
+    Mux(isNaN(a) || isNaN(b) || ((isInf(a) && isZero(b)) || (isZero(a) && isInf(b))), canonicalNaN,
+      Mux(isInf(a) || isInf(b) || expSum >= 255.S, infResult,
+        Mux(isZero(a) || isZero(b) || expSum <= 0.S, 0.U(32.W),
+          Cat(sign, exp(7, 0), frac))))
   }
 
   def madd(a: UInt, b: UInt, c: UInt): UInt = add(mul(a, b), c)
@@ -109,9 +164,23 @@ object Float32Ops {
 
   def lessOrEqual(a: UInt, b: UInt): Bool = lessThan(a, b) || a === b || (isZero(a) && isZero(b))
 
-  def min(a: UInt, b: UInt): UInt = Mux(lessThan(a, b), a, b)
+  def min(a: UInt, b: UInt): UInt = {
+    val minZero = Mux(a(31) || b(31), "h80000000".U(32.W), 0.U(32.W))
+    Mux(isNaN(a) && isNaN(b), canonicalNaN,
+      Mux(isNaN(a), b,
+        Mux(isNaN(b), a,
+          Mux(isZero(a) && isZero(b), minZero,
+            Mux(lessThan(a, b), a, b)))))
+  }
 
-  def max(a: UInt, b: UInt): UInt = Mux(lessThan(a, b), b, a)
+  def max(a: UInt, b: UInt): UInt = {
+    val maxZero = Mux(a(31) && b(31), "h80000000".U(32.W), 0.U(32.W))
+    Mux(isNaN(a) && isNaN(b), canonicalNaN,
+      Mux(isNaN(a), b,
+        Mux(isNaN(b), a,
+          Mux(isZero(a) && isZero(b), maxZero,
+            Mux(lessThan(a, b), b, a)))))
+  }
 
   def intToFloat(value: UInt, signed: Bool): UInt = {
     val negative = signed && value(31)

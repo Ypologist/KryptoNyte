@@ -14,12 +14,13 @@ RISCV_PLUGIN_ROOT=${RISCV_PLUGIN_ROOT:-}
 PLUGIN_ROOT=""
 BASE_SUITE_I=""
 BASE_SUITE_M=""
+BASE_SUITE_F=""
 ENV_ROOT=""
 ARCH_TEST_LAYOUT=""
 
 # Define supported configurations.
 # Format: <processor_name>|<dut_name>|<sim_build_script>|<sim_binary>|<isa_yaml>|<platform_yaml>|<rtl_top>|<rtl_task>|<feature_set>
-# feature_set can be: 'i', 'zmmul', 'im'
+# feature_set can be: 'i', 'zmmul', 'im', 'if'
 
 AVAILABLE_PROCESSORS=(
   "octonyte|octonyte|sim/build_octonyte_sim.sh|octonyte_sim|octonyte/octonyte_isa.yaml|octonyte/octonyte_platform.yaml|rtl/generators/generated_sim/verilog_hierarchical_timed/OctoNyteRV32ICore.v|generators/runMain generators.GenerateHierarchicalRTL --core-family OctoNyte --core-variant rv32i --cosimulate|i"
@@ -31,6 +32,7 @@ AVAILABLE_PROCESSORS=(
   "zeronyte-cache|zeronyte|sim/build_zeronyte_cache_sim.sh|zeronyte_cache_sim|zeronyte/zeronyte_isa.yaml|zeronyte/zeronyte_platform.yaml|rtl/generators/generated_sim/verilog_hierarchical_timed/ZeroNyteRV32ICoreWithCache.v|generators/runMain generators.GenerateHierarchicalRTL --core-family ZeroNyte --core-variant rv32i --cosimulate|i"
   "zeronyte-im|zeronyte_im|sim/build_zeronyte_im_sim.sh|zeronyte_im_sim|zeronyte_im/zeronyte_im_isa.yaml|zeronyte_im/zeronyte_im_platform.yaml|rtl/generators/generated_sim/verilog_hierarchical_timed/ZeroNyteRV32IMCore.v|generators/runMain generators.GenerateHierarchicalRTL --core-family ZeroNyte --core-variant rv32im --cosimulate|im"
   "zeronyte-zmmul|zeronyte_zmmul|sim/build_zeronyte_zmmul_sim.sh|zeronyte_zmmul_sim|zeronyte_zmmul/zeronyte_zmmul_isa.yaml|zeronyte_zmmul/zeronyte_zmmul_platform.yaml|rtl/generators/generated_sim/verilog_hierarchical_timed/ZeroNyteRV32IZmmulCore.v|generators/runMain generators.GenerateHierarchicalRTL --core-family ZeroNyte --core-variant rv32i_Zmmul --cosimulate|zmmul"
+  "zeronyte-ifrvv|zeronyte_ifrvv|sim/build_zeronyte_ifrvv_sim.sh|zeronyte_ifrvv_sim|zeronyte_ifrvv/zeronyte_ifrvv_isa.yaml|zeronyte_ifrvv/zeronyte_ifrvv_platform.yaml|rtl/generators/generated_sim/verilog_hierarchical_timed/ZeroNyteRV32IFRVVCore.v|generators/runMain generators.GenerateHierarchicalRTL --core-family ZeroNyte --core-variant rv32if_rvv --cosimulate|if"
 )
 
 print_usage() {
@@ -40,7 +42,7 @@ print_usage() {
   for config in "${AVAILABLE_PROCESSORS[@]}"; do
     IFS="|" read -r proc_name _ _ _ _ _ _ _ feat <<< "$config"
     display_feat="$feat"
-    if [[ "$feat" == "zmmul" || "$feat" == "im" ]]; then
+    if [[ "$feat" == "zmmul" || "$feat" == "im" || "$feat" == "if" ]]; then
       display_feat="i, $feat"
     fi
     echo "  $proc_name (Features: $display_feat)"
@@ -49,6 +51,7 @@ print_usage() {
   echo "RV32i processors only do the base tests."
   echo "Zmmul adds just multiplier tests."
   echo "RV32IM executes integer, multiplier, and divider tests."
+  echo "RV32IF executes integer and single-precision floating-point tests."
   echo ""
 }
 
@@ -223,11 +226,13 @@ if [[ -d "$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env" ]]; then
   ARCH_TEST_LAYOUT="legacy"
   BASE_SUITE_I="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/rv32i_m/I"
   BASE_SUITE_M="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/rv32i_m/M"
+  BASE_SUITE_F="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/rv32i_m/F"
   ENV_ROOT="$RISCV_ARCH_TEST_ROOT/riscv-test-suite/env"
 elif [[ -d "$RISCV_ARCH_TEST_ROOT/tests/env" ]]; then
   ARCH_TEST_LAYOUT="current"
   BASE_SUITE_I="$RISCV_ARCH_TEST_ROOT/tests/rv32i/I"
   BASE_SUITE_M="$RISCV_ARCH_TEST_ROOT/tests/rv32i/M"
+  BASE_SUITE_F="$RISCV_ARCH_TEST_ROOT/tests/rv32i/F"
   ENV_ROOT="$RISCV_ARCH_TEST_ROOT/tests/env"
 else
   echo "Could not detect RISC-V architecture test layout under $RISCV_ARCH_TEST_ROOT" >&2
@@ -237,6 +242,11 @@ fi
 
 if [[ ! -d "$BASE_SUITE_I" ]]; then
   echo "RV32I test suite not found at $BASE_SUITE_I" >&2
+  exit 1
+fi
+
+if [[ "$FEATURE_SET" == "if" && ! -d "$BASE_SUITE_F" ]]; then
+  echo "RV32F test suite not found at $BASE_SUITE_F" >&2
   exit 1
 fi
 
@@ -312,6 +322,9 @@ if [[ "$ARCH_TEST_LAYOUT" == "legacy" ]]; then
   elif [[ "$FEATURE_SET" == "im" ]]; then
     cp "$BASE_SUITE_M/src/"*.S "$DYN_SUITE/I/src/" 2>/dev/null || true
     cp "$BASE_SUITE_M/references/"* "$DYN_SUITE/I/references/" 2>/dev/null || true
+  elif [[ "$FEATURE_SET" == "if" ]]; then
+    cp "$BASE_SUITE_F/src/"*.S "$DYN_SUITE/I/src/" 2>/dev/null || true
+    cp "$BASE_SUITE_F/references/"* "$DYN_SUITE/I/references/" 2>/dev/null || true
   fi
 else
   mkdir -p "$DYN_SUITE/I"
@@ -322,6 +335,8 @@ else
     cp "$BASE_SUITE_M/"*mul*.S "$DYN_SUITE/I/" 2>/dev/null || true
   elif [[ "$FEATURE_SET" == "im" ]]; then
     cp "$BASE_SUITE_M/"*.S "$DYN_SUITE/I/" 2>/dev/null || true
+  elif [[ "$FEATURE_SET" == "if" ]]; then
+    cp "$BASE_SUITE_F/"*.S "$DYN_SUITE/I/" 2>/dev/null || true
   fi
 fi
 
