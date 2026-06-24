@@ -19,7 +19,13 @@ object Float32Ops {
     val SGNJX = "b1001".U(WIDTH.W)
   }
 
-  private def isZero(a: UInt): Bool = a(30, 0) === 0.U
+  def isZero(a: UInt): Bool = a(30, 0) === 0.U
+
+  def isInf(a: UInt): Bool = a(30, 23) === "hff".U && a(22, 0) === 0.U
+
+  def isNaN(a: UInt): Bool = a(30, 23) === "hff".U && a(22, 0) =/= 0.U
+
+  def canonicalNaN: UInt = "h7fc00000".U(32.W)
 
   private def magnitude(a: UInt): UInt = a(30, 0)
 
