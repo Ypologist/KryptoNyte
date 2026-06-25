@@ -1,3 +1,19 @@
+# 06/25/2026 11:00 - ZeroNyte and OctoNyte Timing Scope Audit
+
+**Why this audit was made:**
+* **Unexpected OctoNyte Frequency:** The archived ASAP7 TT OctoNyte scout reported an implied frequency around `509 MHz`, which was unexpectedly low for a deep in-order scalar pipeline.
+* **ZeroNyte Frequency Planning:** Existing ZeroNyte IF/RVV timing scouts needed to be interpreted before deciding whether removing long-latency scalar-F divide/square-root hardware would materially change the frequency target.
+* **FP Datapath Scope:** The scalar-F implementation needed an explicit audit to distinguish single-precision `F` support from any accidental double-precision datapath assumptions.
+
+**What was found:**
+* **OctoNyte Multiplier-Limited Scout:** The archived OctoNyte result is dominated by a generated Zmmul path from a register-read-stage operand bit into `mulUnit.prodCombinational[63]` and then `mulUnit.delayedProd_r[63]`, not by the scalar pipeline frontend or register-file macro.
+* **Generated RTL Mismatch:** The archived scout used generated RTL with a combinational 32x32 product feeding the first multiplier register. The current shared `Mul32Pipelined` implementation requires at least six staged cycles, while the OctoNyte source still instantiates the older four-cycle configuration.
+* **ZeroNyte No-Div/Sqrt Estimate:** Existing global-route scout variants imply that removing `FDIV.S` and `FSQRT.S` alone would likely leave ZeroNyte IF/RVV around `1.25-1.30 GHz` TT, with the remaining limit in scalar/control/scoreboard-style logic rather than the div/sqrt datapath itself.
+* **Single-Precision FPU Scope:** ZeroNyte IF/RVV currently implements a 32-bit scalar-F datapath: the FP register file, `Float32ALUPipelined`, and `Float32DivSqrtUnit` all use 32-bit operands/results. No 64-bit double-precision FPU is present.
+
+**Validation status:**
+* This was a timing/data audit only. No RTL edits, new physical-design scout, or conformance run was performed for this entry.
+
 # 06/24/2026 18:04 - ZeroNyte IF/RVV Extension Retire Queue
 
 **Why these changes were made:**
