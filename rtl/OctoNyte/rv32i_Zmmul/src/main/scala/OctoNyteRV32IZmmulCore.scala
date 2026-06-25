@@ -65,47 +65,304 @@ class OctoNyteRV32IZmmulCoreIO(val numThreads: Int, val fetchWidth: Int, val cos
 // ****************************************************************************************
 // Pipeline Register Definitions
 // ****************************************************************************************
-class FetchPipelineRegs(threadBits: Int) extends Bundle {
+class ZmmulPcSelectPipelineRegs(threadBits: Int) extends Bundle {
+  val valid    = Bool()
+  val threadId = UInt(threadBits.W)
+  val pc       = UInt(32.W)
+}
+
+class ZmmulPcUpdatePipelineRegs(threadBits: Int) extends Bundle {
+  val valid    = Bool()
+  val threadId = UInt(threadBits.W)
+  val pcHi     = UInt(16.W)
+  val pcLow    = UInt(16.W)
+  val carry    = Bool()
+}
+
+class ZmmulFetchPipelineRegs(threadBits: Int) extends Bundle {
   val valid    = Bool()
   val threadId = UInt(threadBits.W)
   val pc       = UInt(32.W)
   val instr    = UInt(32.W)
 }
 
-class DecodePipelineRegs(threadBits: Int) extends Bundle {
-  val fetchSignals = new FetchPipelineRegs(threadBits)
+class ZmmulDecodePipelineRegs(threadBits: Int) extends Bundle {
+  val fetchSignals = new ZmmulFetchPipelineRegs(threadBits)
   val decodeSignals = new RV32IDecode.DecodeSignals
 }
 
-class DispatchPipelineRegs(threadBits: Int) extends Bundle {
-  val decodePipelineSignals = new DecodePipelineRegs(threadBits)
+class ZmmulDispatchPipelineRegs(threadBits: Int) extends Bundle {
+  val decodePipelineSignals = new ZmmulDecodePipelineRegs(threadBits)
 }
 
-class RegisterReadPipelineRegs(threadBits: Int) extends Bundle {
-  val dispatchSignals = new DispatchPipelineRegs(threadBits)
+class ZmmulRegisterReadPipelineRegs(threadBits: Int) extends Bundle {
+  val dispatchSignals = new ZmmulDispatchPipelineRegs(threadBits)
   val rs1Data  = UInt(32.W)
-  val rs2Data  = UInt(32.W) 
+  val rs2Data  = UInt(32.W)
 }
 
-class Exec1PipelineRegs(threadBits: Int) extends Bundle {
-  val regReadSignals = new RegisterReadPipelineRegs(threadBits)
+class ZmmulExec1PipelineRegs(threadBits: Int) extends Bundle {
+  val regReadSignals = new ZmmulRegisterReadPipelineRegs(threadBits)
   val result   = UInt(32.W)
   val doRegFileWrite = Bool()
   val ctrlTaken = Bool()
   val ctrlTarget = UInt(32.W)
-} 
-
-class Exec2PipelineRegs(threadBits: Int) extends Bundle {
-  val exec1Signals = new Exec1PipelineRegs(threadBits)
-} 
-
-class Exec3PipelineRegs(threadBits: Int) extends Bundle {
-  val exec2Signals = new Exec2PipelineRegs(threadBits)
+  val ctrlIsBranch = Bool()
+  val ctrlBaseHi = UInt(16.W)
+  val ctrlImmHi = UInt(16.W)
+  val ctrlLow = UInt(16.W)
+  val ctrlCarry = Bool()
+  val ctrlClearBit0 = Bool()
+  val ctrlClearBit1 = Bool()
 }
 
-class WritebackPipelineRegs(threadBits: Int) extends Bundle {
-  val exec3Signals = new Exec3PipelineRegs(threadBits)
-} 
+class ZmmulExec2PipelineRegs(threadBits: Int) extends Bundle {
+  val exec1Signals = new ZmmulExec1PipelineRegs(threadBits)
+  val ctrlTaken = Bool()
+  val ctrlTarget = UInt(32.W)
+}
+
+class ZmmulExec3PipelineRegs(threadBits: Int) extends Bundle {
+  val exec2Signals = new ZmmulExec2PipelineRegs(threadBits)
+}
+
+class ZmmulWritebackPipelineRegs(threadBits: Int) extends Bundle {
+  val exec3Signals = new ZmmulExec3PipelineRegs(threadBits)
+}
+
+class ZmmulDelayedWritebackRegs(threadBits: Int) extends Bundle {
+  val valid = Bool()
+  val threadId = UInt(threadBits.W)
+  val rd = UInt(5.W)
+  val result = UInt(32.W)
+  val doRegFileWrite = Bool()
+  val isMul = Bool()
+  val isLoad = Bool()
+  val mulFunct3 = UInt(3.W)
+}
+
+class ZmmulResultPipeIn(threadBits: Int) extends Bundle {
+  val valid = Bool()
+  val threadId = UInt(threadBits.W)
+  val pc = UInt(32.W)
+  val instr = UInt(32.W)
+  val dec = new RV32IDecode.DecodeSignals
+  val rs1Data = UInt(32.W)
+  val rs2Data = UInt(32.W)
+  val loadData = UInt(32.W)
+}
+
+class ZmmulScalarIntPre extends Bundle {
+  val aluOp = UInt(ALU32.Opcode.WIDTH.W)
+  val opA = UInt(32.W)
+  val opB = UInt(32.W)
+  val bEff = UInt(32.W)
+  val isSubLike = Bool()
+  val aSign = Bool()
+  val bSign = Bool()
+  val shiftRight = Bool()
+  val shiftArithmetic = Bool()
+}
+
+class ZmmulScalarIntStage1 extends Bundle {
+  val aluOp = UInt(ALU32.Opcode.WIDTH.W)
+  val sumLo = UInt(8.W)
+  val carry = Bool()
+  val aHi = UInt(24.W)
+  val bHi = UInt(24.W)
+  val aSign = Bool()
+  val bSign = Bool()
+  val xorResult = UInt(32.W)
+  val orResult = UInt(32.W)
+  val andResult = UInt(32.W)
+  val shiftResult = UInt(32.W)
+  val shamtHi = UInt(3.W)
+  val shiftRight = Bool()
+  val shiftArithmetic = Bool()
+}
+
+class ZmmulScalarIntStage2 extends Bundle {
+  val aluOp = UInt(ALU32.Opcode.WIDTH.W)
+  val sumLo = UInt(16.W)
+  val carry = Bool()
+  val aHi = UInt(16.W)
+  val bHi = UInt(16.W)
+  val aSign = Bool()
+  val bSign = Bool()
+  val xorResult = UInt(32.W)
+  val orResult = UInt(32.W)
+  val andResult = UInt(32.W)
+  val shiftResult = UInt(32.W)
+  val shamtHi = UInt(1.W)
+  val shiftRight = Bool()
+  val shiftArithmetic = Bool()
+}
+
+class ZmmulScalarIntStage3 extends Bundle {
+  val aluOp = UInt(ALU32.Opcode.WIDTH.W)
+  val sumLo = UInt(24.W)
+  val carry = Bool()
+  val aHi = UInt(8.W)
+  val bHi = UInt(8.W)
+  val aSign = Bool()
+  val bSign = Bool()
+  val xorResult = UInt(32.W)
+  val orResult = UInt(32.W)
+  val andResult = UInt(32.W)
+  val shiftResult = UInt(32.W)
+}
+
+class OctoNyteResultPipe(threadBits: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Input(new ZmmulResultPipeIn(threadBits))
+    val out = Output(new ZmmulDelayedWritebackRegs(threadBits))
+  })
+
+  private def shiftStep(value: UInt, enable: Bool, amount: Int, right: Bool, arithmetic: Bool): UInt = {
+    val shiftedRight = Cat(Fill(amount, arithmetic && value(31)), value(31, amount))
+    val shiftedLeft = Cat(value(31 - amount, 0), 0.U(amount.W))
+    Mux(enable, Mux(right, shiftedRight, shiftedLeft), value)
+  }
+
+  val inFunct3 = io.in.instr(14, 12)
+  val inIsMExt = io.in.instr(6, 0) === RV32IDecode.OP_R && io.in.instr(31, 25) === "b0000001".U(7.W)
+  val inIsMul = inIsMExt && !inFunct3(2)
+  val inWritesAlu = (io.in.dec.isALU && !inIsMul) || io.in.dec.isLUI || io.in.dec.isAUIPC ||
+    io.in.dec.isJAL || io.in.dec.isJALR
+  val inWrites = io.in.valid && (inWritesAlu || io.in.dec.isLoad || inIsMul)
+
+  val metaIn = WireDefault(0.U.asTypeOf(new ZmmulDelayedWritebackRegs(threadBits)))
+  metaIn.valid := io.in.valid
+  metaIn.threadId := io.in.threadId
+  metaIn.rd := io.in.dec.rd
+  metaIn.result := io.in.loadData
+  metaIn.doRegFileWrite := inWrites
+  metaIn.isMul := inIsMul
+  metaIn.isLoad := io.in.dec.isLoad
+  metaIn.mulFunct3 := inFunct3
+
+  val mulUnit = Module(new Mul32Pipelined(6))
+  mulUnit.io.a := io.in.rs1Data
+  mulUnit.io.b := io.in.rs2Data
+  mulUnit.io.signedA := inFunct3 =/= "b011".U
+  mulUnit.io.signedB := (inFunct3 =/= "b011".U) && (inFunct3 =/= "b010".U)
+
+  val raw = RegNext(io.in)
+  val s0 = RegNext({
+    val pre = Wire(new ZmmulScalarIntPre)
+    val opcode = raw.instr(6, 0)
+    val useImm = opcode === RV32IDecode.OP_I || raw.dec.isLUI || raw.dec.isAUIPC
+    val linkResult = raw.dec.isJAL || raw.dec.isJALR
+    val forceAdd = raw.dec.isLUI || raw.dec.isAUIPC || linkResult
+    val aluOp = Mux(forceAdd, ALU32.Opcode.ADD, raw.dec.aluOp)
+    pre.aluOp := aluOp
+    pre.opA := Mux(linkResult || raw.dec.isAUIPC, raw.pc,
+      Mux(raw.dec.isLUI, 0.U, raw.rs1Data))
+    pre.opB := Mux(linkResult, 4.U(32.W), Mux(useImm, raw.dec.imm, raw.rs2Data))
+    pre.isSubLike := aluOp === ALU32.Opcode.SUB || aluOp === ALU32.Opcode.SLT || aluOp === ALU32.Opcode.SLTU
+    pre.bEff := Mux(pre.isSubLike, ~pre.opB, pre.opB)
+    pre.aSign := pre.opA(31)
+    pre.bSign := pre.opB(31)
+    pre.shiftRight := aluOp === ALU32.Opcode.SRL || aluOp === ALU32.Opcode.SRA
+    pre.shiftArithmetic := aluOp === ALU32.Opcode.SRA
+    pre
+  })
+
+  val add0 = Cat(0.U(1.W), s0.opA(7, 0)) +& Cat(0.U(1.W), s0.bEff(7, 0)) + s0.isSubLike.asUInt
+  val shiftBy1 = shiftStep(s0.opA, s0.opB(0), 1, s0.shiftRight, s0.shiftArithmetic)
+  val shiftBy2 = shiftStep(shiftBy1, s0.opB(1), 2, s0.shiftRight, s0.shiftArithmetic)
+
+  val s1 = RegNext({
+    val stage = Wire(new ZmmulScalarIntStage1)
+    stage.aluOp := s0.aluOp
+    stage.sumLo := add0(7, 0)
+    stage.carry := add0(8)
+    stage.aHi := s0.opA(31, 8)
+    stage.bHi := s0.bEff(31, 8)
+    stage.aSign := s0.aSign
+    stage.bSign := s0.bSign
+    stage.xorResult := s0.opA ^ s0.opB
+    stage.orResult := s0.opA | s0.opB
+    stage.andResult := s0.opA & s0.opB
+    stage.shiftResult := shiftBy2
+    stage.shamtHi := s0.opB(4, 2)
+    stage.shiftRight := s0.shiftRight
+    stage.shiftArithmetic := s0.shiftArithmetic
+    stage
+  })
+
+  val add1 = Cat(0.U(1.W), s1.aHi(7, 0)) +& Cat(0.U(1.W), s1.bHi(7, 0)) + s1.carry.asUInt
+  val shiftBy4 = shiftStep(s1.shiftResult, s1.shamtHi(0), 4, s1.shiftRight, s1.shiftArithmetic)
+  val shiftBy8 = shiftStep(shiftBy4, s1.shamtHi(1), 8, s1.shiftRight, s1.shiftArithmetic)
+
+  val s2 = RegNext({
+    val stage = Wire(new ZmmulScalarIntStage2)
+    stage.aluOp := s1.aluOp
+    stage.sumLo := Cat(add1(7, 0), s1.sumLo)
+    stage.carry := add1(8)
+    stage.aHi := s1.aHi(23, 8)
+    stage.bHi := s1.bHi(23, 8)
+    stage.aSign := s1.aSign
+    stage.bSign := s1.bSign
+    stage.xorResult := s1.xorResult
+    stage.orResult := s1.orResult
+    stage.andResult := s1.andResult
+    stage.shiftResult := shiftBy8
+    stage.shamtHi := s1.shamtHi(2).asUInt
+    stage.shiftRight := s1.shiftRight
+    stage.shiftArithmetic := s1.shiftArithmetic
+    stage
+  })
+
+  val add2 = Cat(0.U(1.W), s2.aHi(7, 0)) +& Cat(0.U(1.W), s2.bHi(7, 0)) + s2.carry.asUInt
+  val shiftBy16 = shiftStep(s2.shiftResult, s2.shamtHi(0), 16, s2.shiftRight, s2.shiftArithmetic)
+
+  val s3 = RegNext({
+    val stage = Wire(new ZmmulScalarIntStage3)
+    stage.aluOp := s2.aluOp
+    stage.sumLo := Cat(add2(7, 0), s2.sumLo)
+    stage.carry := add2(8)
+    stage.aHi := s2.aHi(15, 8)
+    stage.bHi := s2.bHi(15, 8)
+    stage.aSign := s2.aSign
+    stage.bSign := s2.bSign
+    stage.xorResult := s2.xorResult
+    stage.orResult := s2.orResult
+    stage.andResult := s2.andResult
+    stage.shiftResult := shiftBy16
+    stage
+  })
+
+  val add3 = Cat(0.U(1.W), s3.aHi) +& Cat(0.U(1.W), s3.bHi) + s3.carry.asUInt
+  val sum = Cat(add3(7, 0), s3.sumLo)
+  val carryOut = add3(8)
+  val signedLess = Mux(s3.aSign =/= s3.bSign, s3.aSign, sum(31))
+  val unsignedLess = !carryOut
+  val aluResult = RegNext(MuxLookup(s3.aluOp, sum)(Seq(
+    ALU32.Opcode.ADD -> sum,
+    ALU32.Opcode.SUB -> sum,
+    ALU32.Opcode.SLL -> s3.shiftResult,
+    ALU32.Opcode.SLT -> Cat(0.U(31.W), signedLess),
+    ALU32.Opcode.SLTU -> Cat(0.U(31.W), unsignedLess),
+    ALU32.Opcode.XOR -> s3.xorResult,
+    ALU32.Opcode.SRL -> s3.shiftResult,
+    ALU32.Opcode.SRA -> s3.shiftResult,
+    ALU32.Opcode.OR -> s3.orResult,
+    ALU32.Opcode.AND -> s3.andResult
+  )))
+
+  val delayedMeta = ShiftRegister(metaIn, 6)
+  val delayedMulResult = MuxLookup(delayedMeta.mulFunct3, mulUnit.io.lo)(Seq(
+    "b000".U -> mulUnit.io.lo,
+    "b001".U -> mulUnit.io.hi,
+    "b010".U -> mulUnit.io.hi,
+    "b011".U -> mulUnit.io.hi
+  ))
+
+  io.out := delayedMeta
+  io.out.result := Mux(delayedMeta.isMul, delayedMulResult,
+    Mux(delayedMeta.isLoad, delayedMeta.result, aluResult))
+}
 
 // *********************************************************
 // OctoNyte Zmmul Core Definition
@@ -115,11 +372,11 @@ class OctoNyteRV32IZmmulCore(val cosimulate: Boolean = false) extends Module {
   val fetchWidth = 4
   val io = IO(new OctoNyteRV32IZmmulCoreIO(numThreads, fetchWidth, cosimulate))
   io.jtag_tdo := 0.U
-  
+
   private val threadBits = log2Ceil(numThreads)
 
   // ===========================
-  // DEBUG DEFAULTS 
+  // DEBUG DEFAULTS
   // ===========================
   for (i <- 0 until 8) {
     io.debugStageThreads(i) := 0.U
@@ -158,20 +415,20 @@ class OctoNyteRV32IZmmulCore(val cosimulate: Boolean = false) extends Module {
   io.debugExecCtrlTarget   := 0.U
 
   // ================================================
-  
+
   val threadCounter = RegInit(0.U(threadBits.W))
 
   val curThread = threadCounter
   val nextThread = Mux(curThread === (numThreads - 1).U, 0.U, curThread + 1.U)
 
   threadCounter := nextThread
-  
+
   io.memAddr := 0.U
   io.memWrite := 0.U
   io.memMask := 0.U
   io.memValid := false.B
   io.memMisaligned := false.B
- 
+
   val pcRegs = RegInit(VecInit(Seq.fill(numThreads)("h8000_0000".U(32.W))))
   val debugRegs1to4 = RegInit(VecInit(Seq.fill(numThreads)(VecInit(Seq.fill(4)(0.U(32.W))))))
 
@@ -186,30 +443,10 @@ class OctoNyteRV32IZmmulCore(val cosimulate: Boolean = false) extends Module {
 
 
   // Execution Units
-  val alu = Module(new ALU32)
-  alu.io.a := 0.U
-  alu.io.b := 0.U
-  alu.io.opcode := ALU32.Opcode.ADD
-
-  val mulUnit = Module(new Mul32Pipelined(4))
-  mulUnit.io.a := 0.U
-  mulUnit.io.b := 0.U
-  mulUnit.io.signedA := false.B
-  mulUnit.io.signedB := false.B
-
-  val branchUnit = Module(new BranchUnit)
-  branchUnit.io.rs1 := 0.U
-  branchUnit.io.rs2 := 0.U
-  branchUnit.io.pc := 0.U
-  branchUnit.io.imm := 0.S(32.W)
-  branchUnit.io.branchOp := 0.U
-  branchUnit.io.valid := false.B
-  val unusedBranchNextPc = Wire(UInt(32.W))
-  val unusedBranchMisaligned = Wire(Bool())
-  unusedBranchNextPc := branchUnit.io.nextPc
-  unusedBranchMisaligned := branchUnit.io.misaligned
-  dontTouch(unusedBranchNextPc)
-  dontTouch(unusedBranchMisaligned)
+  val resultPipe = Module(new OctoNyteResultPipe(threadBits))
+  resultPipe.io.in := 0.U.asTypeOf(new ZmmulResultPipeIn(threadBits))
+  val delayedWriteback = resultPipe.io.out
+  val finalWBResult = delayedWriteback.result
 
   val loadUnit = Module(new LoadUnit)
   loadUnit.io.addr := 0.U
@@ -224,21 +461,42 @@ class OctoNyteRV32IZmmulCore(val cosimulate: Boolean = false) extends Module {
 // =============================
 // Fetch stage
 // =============================
-  val fetchReg = RegInit(0.U.asTypeOf(new FetchPipelineRegs(threadBits)))
+  val pcSelectReg = RegInit(0.U.asTypeOf(new ZmmulPcSelectPipelineRegs(threadBits)))
+  val selectedPc = pcRegs(curThread)
+  when (io.threadEnable(curThread)) {
+    pcSelectReg.valid    := true.B
+    pcSelectReg.threadId := curThread
+    pcSelectReg.pc       := selectedPc
+  } .otherwise {
+    pcSelectReg.valid := false.B
+  }
+
+  val fetchReg = RegInit(0.U.asTypeOf(new ZmmulFetchPipelineRegs(threadBits)))
   when (io.threadEnable(curThread)) {
     fetchReg.valid    := true.B
     fetchReg.threadId := curThread
-    fetchReg.pc       := pcRegs(curThread)
+    fetchReg.pc       := selectedPc
     fetchReg.instr    := io.instrMem(31, 0)
-    pcRegs(curThread) := pcRegs(curThread) + 4.U
   } .otherwise {
     fetchReg.valid := false.B
+  }
+
+  val pcUpdateReg = RegInit(0.U.asTypeOf(new ZmmulPcUpdatePipelineRegs(threadBits)))
+  when (io.threadEnable(curThread)) {
+    val pcLowSum = Cat(0.U(1.W), selectedPc(15, 0)) + 4.U(17.W)
+    pcUpdateReg.valid := true.B
+    pcUpdateReg.threadId := curThread
+    pcUpdateReg.pcHi := selectedPc(31, 16)
+    pcUpdateReg.pcLow := pcLowSum(15, 0)
+    pcUpdateReg.carry := pcLowSum(16)
+  } .otherwise {
+    pcUpdateReg.valid := false.B
   }
 
 // =============================
 // Decode stage
 // =============================
-val decodeReg = RegInit(0.U.asTypeOf(new DecodePipelineRegs(threadBits)))
+val decodeReg = RegInit(0.U.asTypeOf(new ZmmulDecodePipelineRegs(threadBits)))
 
 when (fetchReg.valid) {
   decodeReg.fetchSignals := fetchReg
@@ -248,29 +506,25 @@ when (fetchReg.valid) {
 }
 
 // =============================
-// Dispatch stage
-// =============================
-val dispatchReg = RegInit(0.U.asTypeOf(new DispatchPipelineRegs(threadBits)))
-
-when (decodeReg.fetchSignals.valid) {
-  dispatchReg.decodePipelineSignals := decodeReg
-} .otherwise {
-  dispatchReg.decodePipelineSignals.fetchSignals.valid := false.B
-}
-
-// =============================
 // Register read stage
 // =============================
-val regReadReg = RegInit(0.U.asTypeOf(new RegisterReadPipelineRegs(threadBits)))
+val regReadReg = RegInit(0.U.asTypeOf(new ZmmulRegisterReadPipelineRegs(threadBits)))
 
-when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
-  regReadReg.dispatchSignals := dispatchReg
-  val tid = dispatchReg.decodePipelineSignals.fetchSignals.threadId
+val regReadInput = Wire(new ZmmulDispatchPipelineRegs(threadBits))
+regReadInput.decodePipelineSignals := decodeReg
+
+when (decodeReg.fetchSignals.valid) {
+  regReadReg.dispatchSignals := regReadInput
+  val tid = decodeReg.fetchSignals.threadId
   regFile.io.readThreadID := tid
-  regFile.io.readAddrs(0) := dispatchReg.decodePipelineSignals.decodeSignals.rs1
-  regFile.io.readAddrs(1) := dispatchReg.decodePipelineSignals.decodeSignals.rs2
-  regReadReg.rs1Data := regFile.io.readData(0)
-  regReadReg.rs2Data := regFile.io.readData(1)
+  regFile.io.readAddrs(0) := decodeReg.decodeSignals.rs1
+  regFile.io.readAddrs(1) := decodeReg.decodeSignals.rs2
+  val bypassValid = delayedWriteback.valid && delayedWriteback.doRegFileWrite &&
+    delayedWriteback.threadId === tid && delayedWriteback.rd =/= 0.U
+  regReadReg.rs1Data := Mux(bypassValid && delayedWriteback.rd === decodeReg.decodeSignals.rs1,
+    finalWBResult, regFile.io.readData(0))
+  regReadReg.rs2Data := Mux(bypassValid && delayedWriteback.rd === decodeReg.decodeSignals.rs2,
+    finalWBResult, regFile.io.readData(1))
 } .otherwise {
   regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
 }
@@ -278,115 +532,80 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
 // =============================
 // Execute 1 stage
 // =============================
-  val exec1Reg = RegInit(0.U.asTypeOf(new Exec1PipelineRegs(threadBits)))
+  val exec1Reg = RegInit(0.U.asTypeOf(new ZmmulExec1PipelineRegs(threadBits)))
 
   when (regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.valid) {
+    val decodeSignals = regReadReg.dispatchSignals.decodePipelineSignals.decodeSignals
+    val fetchSignals = regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals
 
-  val decodeSignals = regReadReg.dispatchSignals.decodePipelineSignals.decodeSignals
-  val fetchSignals = regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals
-
-  exec1Reg.regReadSignals := regReadReg
-  exec1Reg.doRegFileWrite := false.B
-  exec1Reg.ctrlTaken := false.B
-  exec1Reg.ctrlTarget := 0.U
-
-  // -----------------
-  // M-Extension Logic
-  // -----------------
-  val isMExt = fetchSignals.instr(6, 0) === RV32IDecode.OP_R && fetchSignals.instr(31, 25) === "b0000001".U(7.W)
-  val funct3 = fetchSignals.instr(14, 12)
-  val isMulInstr = isMExt && (funct3 <= "b011".U)
-
-  mulUnit.io.a := regReadReg.rs1Data
-  mulUnit.io.b := regReadReg.rs2Data
-  mulUnit.io.signedA := (funct3 =/= "b011".U)
-  mulUnit.io.signedB := (funct3 =/= "b011".U) && (funct3 =/= "b010".U)
-
-
-  // -----------------
-  // ALU / LUI / AUIPC
-  // -----------------
-  when ((decodeSignals.isALU && !isMulInstr) || decodeSignals.isLUI || decodeSignals.isAUIPC) {
-    val opcode = fetchSignals.instr(6, 0)
-    val useImm = (opcode === RV32IDecode.OP_I) || decodeSignals.isLUI || decodeSignals.isAUIPC
-
-    val opA = Mux(decodeSignals.isAUIPC,
-      fetchSignals.pc,
-      Mux(decodeSignals.isLUI, 0.U, regReadReg.rs1Data))
-
-    val opB = Mux(useImm, decodeSignals.imm, regReadReg.rs2Data)
-
-    alu.io.a := opA
-    alu.io.b := opB
-    alu.io.opcode := decodeSignals.aluOp
-
-    val result = Mux(decodeSignals.isAUIPC,
-      fetchSignals.pc + decodeSignals.imm,
-      Mux(decodeSignals.isLUI,
-        decodeSignals.imm,
-        alu.io.result))
-
-    exec1Reg.result := result
-    exec1Reg.doRegFileWrite := true.B
-  }
-  // ---- MULTIPLIER (Zmmul / M-Extension) ----
-  .elsewhen (isMulInstr) {
+    exec1Reg.regReadSignals := regReadReg
     exec1Reg.result := 0.U
-    exec1Reg.doRegFileWrite := true.B
-  }
-  // ---- JAL ----
-  .elsewhen (decodeSignals.isJAL) {
-    exec1Reg.result := fetchSignals.pc + 4.U
-    exec1Reg.doRegFileWrite := true.B
-    exec1Reg.ctrlTaken := true.B
-    exec1Reg.ctrlTarget := (fetchSignals.pc.asSInt + decodeSignals.imm.asSInt).asUInt
-  }
-  // ---- JALR ----
-  .elsewhen (decodeSignals.isJALR) {
-    val target = ((regReadReg.rs1Data.asSInt + decodeSignals.imm.asSInt).asUInt & ~1.U(32.W))
-    exec1Reg.result := fetchSignals.pc + 4.U
-    exec1Reg.doRegFileWrite := true.B
-    exec1Reg.ctrlTaken := true.B
-    exec1Reg.ctrlTarget := target
-  }
-  // ---- BRANCH ----
-  .elsewhen (decodeSignals.isBranch) {
-    branchUnit.io.rs1 := regReadReg.rs1Data
-    branchUnit.io.rs2 := regReadReg.rs2Data
-    branchUnit.io.pc  := fetchSignals.pc
-    branchUnit.io.imm := (decodeSignals.imm << 1).asSInt
-    branchUnit.io.branchOp := fetchSignals.instr(14, 12)
-    branchUnit.io.valid := true.B
+    exec1Reg.doRegFileWrite := false.B
+    exec1Reg.ctrlTaken := false.B
+    exec1Reg.ctrlTarget := 0.U
+    exec1Reg.ctrlIsBranch := false.B
+    exec1Reg.ctrlBaseHi := 0.U
+    exec1Reg.ctrlImmHi := 0.U
+    exec1Reg.ctrlLow := 0.U
+    exec1Reg.ctrlCarry := false.B
+    exec1Reg.ctrlClearBit0 := false.B
+    exec1Reg.ctrlClearBit1 := false.B
 
-    exec1Reg.ctrlTaken := branchUnit.io.taken
-    exec1Reg.ctrlTarget := branchUnit.io.target
-  }
-  // ---- LOAD ----
-  .elsewhen (decodeSignals.isLoad) {
-    val address = regReadReg.rs1Data + decodeSignals.imm
-    val loadActive = io.threadEnable(fetchSignals.threadId)
-    io.memAddr := Cat(address(31, 2), 0.U(2.W))
-    io.memValid := loadActive
-    loadUnit.io.addr := address
-    loadUnit.io.funct3 := fetchSignals.instr(14, 12)
+    resultPipe.io.in.valid := fetchSignals.valid
+    resultPipe.io.in.threadId := fetchSignals.threadId
+    resultPipe.io.in.pc := fetchSignals.pc
+    resultPipe.io.in.instr := fetchSignals.instr
+    resultPipe.io.in.dec := decodeSignals
+    resultPipe.io.in.rs1Data := regReadReg.rs1Data
+    resultPipe.io.in.rs2Data := regReadReg.rs2Data
 
-    exec1Reg.result := loadUnit.io.dataOut
-    exec1Reg.doRegFileWrite := true.B
-  }
-  // ---- STORE ----
-  .elsewhen (decodeSignals.isStore) {
-    val address = regReadReg.rs1Data + decodeSignals.imm
-    val storeActive = io.threadEnable(fetchSignals.threadId) && !storeUnit.io.misaligned
-    io.memAddr := Cat(address(31, 2), 0.U(2.W))
-    storeUnit.io.addr := address
-    storeUnit.io.data := regReadReg.rs2Data
-    storeUnit.io.storeType := fetchSignals.instr(13, 12)
+    val ctrlActive = decodeSignals.isJAL || decodeSignals.isJALR || decodeSignals.isBranch
+    val ctrlBase = Mux(decodeSignals.isJALR, regReadReg.rs1Data, fetchSignals.pc)
+    val branchOffset = (decodeSignals.imm << 1)(31, 0)
+    val ctrlOffset = Mux(decodeSignals.isBranch, branchOffset, decodeSignals.imm)
+    val ctrlLowSum = Cat(0.U(1.W), ctrlBase(15, 0)) +& Cat(0.U(1.W), ctrlOffset(15, 0))
+    val branchOp = fetchSignals.instr(14, 12)
+    val branchTaken = MuxLookup(branchOp, false.B)(Seq(
+      "b000".U -> (regReadReg.rs1Data === regReadReg.rs2Data),
+      "b001".U -> (regReadReg.rs1Data =/= regReadReg.rs2Data),
+      "b100".U -> (regReadReg.rs1Data.asSInt < regReadReg.rs2Data.asSInt),
+      "b101".U -> (regReadReg.rs1Data.asSInt >= regReadReg.rs2Data.asSInt),
+      "b110".U -> (regReadReg.rs1Data < regReadReg.rs2Data),
+      "b111".U -> (regReadReg.rs1Data >= regReadReg.rs2Data)
+    ))
 
-    io.memWrite := Mux(storeActive, storeUnit.io.memWrite, 0.U)
-    io.memMask := Mux(storeActive, storeUnit.io.mask, 0.U)
-    io.memValid := storeActive
-    io.memMisaligned := io.threadEnable(fetchSignals.threadId) && storeUnit.io.misaligned
-  }
+    when (ctrlActive) {
+      exec1Reg.ctrlTaken := (decodeSignals.isJAL || decodeSignals.isJALR) || branchTaken
+      exec1Reg.ctrlIsBranch := decodeSignals.isBranch
+      exec1Reg.ctrlBaseHi := ctrlBase(31, 16)
+      exec1Reg.ctrlImmHi := ctrlOffset(31, 16)
+      exec1Reg.ctrlLow := ctrlLowSum(15, 0)
+      exec1Reg.ctrlCarry := ctrlLowSum(16)
+      exec1Reg.ctrlClearBit0 := decodeSignals.isJALR || decodeSignals.isBranch
+      exec1Reg.ctrlClearBit1 := decodeSignals.isBranch
+    }
+    when (decodeSignals.isLoad) {
+      val address = regReadReg.rs1Data + decodeSignals.imm
+      val loadActive = io.threadEnable(fetchSignals.threadId)
+      io.memAddr := Cat(address(31, 2), 0.U(2.W))
+      io.memValid := loadActive
+      loadUnit.io.addr := address
+      loadUnit.io.funct3 := fetchSignals.instr(14, 12)
+      resultPipe.io.in.loadData := loadUnit.io.dataOut
+    }
+    when (decodeSignals.isStore) {
+      val address = regReadReg.rs1Data + decodeSignals.imm
+      val storeActive = io.threadEnable(fetchSignals.threadId) && !storeUnit.io.misaligned
+      io.memAddr := Cat(address(31, 2), 0.U(2.W))
+      storeUnit.io.addr := address
+      storeUnit.io.data := regReadReg.rs2Data
+      storeUnit.io.storeType := fetchSignals.instr(13, 12)
+
+      io.memWrite := Mux(storeActive, storeUnit.io.memWrite, 0.U)
+      io.memMask := Mux(storeActive, storeUnit.io.mask, 0.U)
+      io.memValid := storeActive
+      io.memMisaligned := io.threadEnable(fetchSignals.threadId) && storeUnit.io.misaligned
+    }
 
   } .otherwise {
     exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
@@ -395,17 +614,28 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   // =============================
   // Execute 2 stage
   // =============================
- val exec2Reg = RegInit(0.U.asTypeOf(new Exec2PipelineRegs(threadBits)))
+ val exec2Reg = RegInit(0.U.asTypeOf(new ZmmulExec2PipelineRegs(threadBits)))
   when (exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid) {
     exec2Reg.exec1Signals := exec1Reg
+    val ctrlHighSum = Cat(0.U(1.W), exec1Reg.ctrlBaseHi) +& Cat(0.U(1.W), exec1Reg.ctrlImmHi) + exec1Reg.ctrlCarry.asUInt
+    val ctrlLowMasked = Cat(
+      exec1Reg.ctrlLow(15, 2),
+      Mux(exec1Reg.ctrlClearBit1, false.B, exec1Reg.ctrlLow(1)),
+      Mux(exec1Reg.ctrlClearBit0, false.B, exec1Reg.ctrlLow(0))
+    )
+    val branchMisaligned = exec1Reg.ctrlIsBranch && (exec1Reg.ctrlLow(1, 0) =/= 0.U)
+    exec2Reg.ctrlTarget := Cat(ctrlHighSum(15, 0), ctrlLowMasked)
+    exec2Reg.ctrlTaken := exec1Reg.ctrlTaken && !branchMisaligned
   } .otherwise {
     exec2Reg.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
+    exec2Reg.ctrlTaken := false.B
+    exec2Reg.ctrlTarget := 0.U
   }
 
   // =============================
   // Execute 3 stage
   // =============================
-  val exec3Reg = RegInit(0.U.asTypeOf(new Exec3PipelineRegs(threadBits)))
+  val exec3Reg = RegInit(0.U.asTypeOf(new ZmmulExec3PipelineRegs(threadBits)))
     when (exec2Reg.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid) {
       exec3Reg.exec2Signals := exec2Reg
     } .otherwise {
@@ -415,57 +645,50 @@ when (dispatchReg.decodePipelineSignals.fetchSignals.valid) {
   // =============================
   // Writeback stage
   // =============================
-val wbReg = RegInit(0.U.asTypeOf(new WritebackPipelineRegs(threadBits)))
+val wbReg = RegInit(0.U.asTypeOf(new ZmmulWritebackPipelineRegs(threadBits)))
 when (exec3Reg.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid) {
   wbReg.exec3Signals := exec3Reg
 } .otherwise {
   wbReg.exec3Signals.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.valid := false.B
 }
 
-val wbFetch = wbReg.exec3Signals.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals
-val wbDecode = wbReg.exec3Signals.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.decodeSignals
-val wbExec = wbReg.exec3Signals.exec2Signals.exec1Signals
+	val wbFetch = wbReg.exec3Signals.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals
+	val wbDecode = wbReg.exec3Signals.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.decodeSignals
+	val wbExec = wbReg.exec3Signals.exec2Signals.exec1Signals
 
-val wbIsMExt = wbFetch.instr(6, 0) === RV32IDecode.OP_R && wbFetch.instr(31, 25) === "b0000001".U(7.W)
-val wbFunct3 = wbFetch.instr(14, 12)
-val wbIsMulInstr = wbIsMExt && (wbFunct3 <= "b011".U)
+	when (delayedWriteback.valid && delayedWriteback.doRegFileWrite && delayedWriteback.rd =/= 0.U) {
+	  regFile.io.wens(0) := true.B
+	  regFile.io.writeThreadID := delayedWriteback.threadId
+	  regFile.io.writeAddrs(0) := delayedWriteback.rd
+	  regFile.io.writeData(0) := finalWBResult
+	}
 
-val mulResult_WB = MuxLookup(wbFunct3, mulUnit.io.lo)(Seq(
-  "b000".U -> mulUnit.io.lo,
-  "b001".U -> mulUnit.io.hi,
-  "b010".U -> mulUnit.io.hi,
-  "b011".U -> mulUnit.io.hi
-))
+	// Control-flow commit
+	val ex2Fetch = exec2Reg.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals
+	val ex2Redirect = ex2Fetch.valid && exec2Reg.ctrlTaken
 
-val finalWBResult = Mux(wbIsMulInstr, mulResult_WB, wbExec.result)
+	when (pcUpdateReg.valid) {
+	  val pcHighSum = pcUpdateReg.pcHi + pcUpdateReg.carry.asUInt
+	  pcRegs(pcUpdateReg.threadId) := Cat(pcHighSum, pcUpdateReg.pcLow)
+	}
 
-when (wbFetch.valid && wbExec.doRegFileWrite && wbDecode.rd =/= 0.U) {
-  regFile.io.wens(0) := true.B
-  regFile.io.writeThreadID := wbFetch.threadId
-  regFile.io.writeAddrs(0) := wbDecode.rd
-  regFile.io.writeData(0) := finalWBResult
-}
+	// Resolve control flow in EX2; the barrel-thread gap keeps the redirect ahead of
+	// that thread's next fetch slot without adding a throughput bubble.
+	when (ex2Redirect) {
+	  pcRegs(ex2Fetch.threadId) := exec2Reg.ctrlTarget
+	}
 
-// Control-flow commit
-val ex1Fetch = exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals
-val ex1Redirect = ex1Fetch.valid && exec1Reg.ctrlTaken
+	when (delayedWriteback.valid && delayedWriteback.doRegFileWrite && delayedWriteback.rd =/= 0.U) {
+	  when (delayedWriteback.rd === 1.U) { debugRegs1to4(delayedWriteback.threadId)(0) := finalWBResult }
+	    .elsewhen (delayedWriteback.rd === 2.U) { debugRegs1to4(delayedWriteback.threadId)(1) := finalWBResult }
+	    .elsewhen (delayedWriteback.rd === 3.U) { debugRegs1to4(delayedWriteback.threadId)(2) := finalWBResult }
+	    .elsewhen (delayedWriteback.rd === 4.U) { debugRegs1to4(delayedWriteback.threadId)(3) := finalWBResult }
+	}
 
-// Resolve control flow in EX1 and squash younger work so taken redirects do not replay.
-when (ex1Redirect) {
-  pcRegs(ex1Fetch.threadId) := exec1Reg.ctrlTarget
-}
-
-when (wbFetch.valid && wbExec.doRegFileWrite && wbDecode.rd =/= 0.U) {
-  when (wbDecode.rd === 1.U) { debugRegs1to4(wbFetch.threadId)(0) := finalWBResult }
-    .elsewhen (wbDecode.rd === 2.U) { debugRegs1to4(wbFetch.threadId)(1) := finalWBResult }
-    .elsewhen (wbDecode.rd === 3.U) { debugRegs1to4(wbFetch.threadId)(2) := finalWBResult }
-    .elsewhen (wbDecode.rd === 4.U) { debugRegs1to4(wbFetch.threadId)(3) := finalWBResult }
-}
-
-// Keep writeback side-effect free for x0
-when (wbFetch.valid && wbExec.doRegFileWrite && wbDecode.rd === 0.U) {
-  regFile.io.wens(0) := false.B
-}
+	// Keep writeback side-effect free for x0
+	when (delayedWriteback.valid && delayedWriteback.doRegFileWrite && delayedWriteback.rd === 0.U) {
+	  regFile.io.wens(0) := false.B
+	}
 
 // =====================================================
 // Debug control
@@ -473,12 +696,12 @@ when (wbFetch.valid && wbExec.doRegFileWrite && wbDecode.rd === 0.U) {
 val dbgFetch = wbReg.exec3Signals.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals
 val dbgDecode = wbReg.exec3Signals.exec2Signals.exec1Signals.regReadSignals.dispatchSignals.decodePipelineSignals.decodeSignals
 
-io.debugStageThreads(0) := fetchReg.threadId
-io.debugStageValids(0) := (fetchReg.valid).asUInt
-io.debugStageThreads(1) := decodeReg.fetchSignals.threadId
-io.debugStageValids(1) := (decodeReg.fetchSignals.valid).asUInt
-io.debugStageThreads(2) := dispatchReg.decodePipelineSignals.fetchSignals.threadId
-io.debugStageValids(2) := (dispatchReg.decodePipelineSignals.fetchSignals.valid).asUInt
+io.debugStageThreads(0) := pcSelectReg.threadId
+io.debugStageValids(0) := (pcSelectReg.valid).asUInt
+io.debugStageThreads(1) := fetchReg.threadId
+io.debugStageValids(1) := (fetchReg.valid).asUInt
+io.debugStageThreads(2) := decodeReg.fetchSignals.threadId
+io.debugStageValids(2) := (decodeReg.fetchSignals.valid).asUInt
 io.debugStageThreads(3) := regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.threadId
 io.debugStageValids(3) := (regReadReg.dispatchSignals.decodePipelineSignals.fetchSignals.valid).asUInt
 io.debugStageThreads(4) := exec1Reg.regReadSignals.dispatchSignals.decodePipelineSignals.fetchSignals.threadId
@@ -492,10 +715,10 @@ io.debugStageValids(7) := (dbgFetch.valid).asUInt
 
 io.debugCtrlValid := dbgFetch.valid
 io.debugCtrlInstr := dbgFetch.instr
-io.debugCtrlTaken := wbReg.exec3Signals.exec2Signals.exec1Signals.ctrlTaken
+io.debugCtrlTaken := wbReg.exec3Signals.exec2Signals.ctrlTaken
 io.debugCtrlThread := dbgFetch.threadId
 io.debugCtrlFromPC := dbgFetch.pc
-io.debugCtrlTarget := wbReg.exec3Signals.exec2Signals.exec1Signals.ctrlTarget
+io.debugCtrlTarget := wbReg.exec3Signals.exec2Signals.ctrlTarget
 io.debugCtrlIsBranch := dbgDecode.isBranch
 io.debugCtrlIsJal := dbgDecode.isJAL
 io.debugCtrlIsJalr := dbgDecode.isJALR

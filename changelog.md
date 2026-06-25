@@ -1,3 +1,22 @@
+# 06/25/2026 13:40 - OctoNyte Zmmul Timing Pipeline and Generated Artifact Cleanup
+
+**Why these changes were made:**
+* **Multiplier Timing Limit:** The OctoNyte Zmmul timing scout showed that the generated 32x32 multiply/result cone, not the scalar frontend, was the dominant path in the RV32I+Zmmul core.
+* **Barrel-Thread Throughput Contract:** The timing work needed to deepen the multiplier and scalar result path while preserving the eight-thread issue model and avoiding ordinary same-thread dependency breakage.
+* **Generated Artifact Noise:** Hierarchical FIRRTL/MLIR generator outputs were appearing as source changes even though they can be regenerated from the Scala/Chisel sources.
+
+**What the changes are:**
+* **Staged Multiplier:** Reworked `Mul32Pipelined` into a six-cycle minimum datapath using 8-bit partial products, diagonal reduction, prefix final merge, and segmented signed-result correction.
+* **Delayed Result Pipe:** Added an OctoNyte Zmmul result pipe carrying ALU, load, and multiply writeback metadata through a common delayed writeback point.
+* **Same-Thread Bypass:** Added delayed-writeback bypassing into register read so dependent instructions for the same hardware thread see the just-produced result without adding a normal barrel-schedule bubble.
+* **Control Retiming:** Split branch/JAL/JALR target formation and ordinary PC increment across narrower pipeline pieces while keeping redirect timing ahead of the next fetch for that thread.
+* **Fetch Alignment Fix:** Corrected an intermediate PC-select/fetch tagging issue so instruction fetch remains aligned with the active barrel-thread slot.
+* **Generated Output Ignore Policy:** Made hierarchical generator output directories explicit in `.gitignore` and removed generated FIRRTL MLIR outputs from version control tracking.
+
+**Validation status:**
+* OctoNyte Zmmul Verilator conformance smoke passed with `add-01.S`.
+* `git diff --check` passed.
+
 # 06/25/2026 11:00 - ZeroNyte and OctoNyte Timing Scope Audit
 
 **Why this audit was made:**

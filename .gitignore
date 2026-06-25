@@ -10,6 +10,12 @@
 **/project/target/
 **/project/project/
 
+# Hierarchical generator outputs. Regenerate from the Scala/Chisel sources.
+rtl/generators/generated/
+rtl/generators/generated_sim/
+rtl/generators/generated_prod/
+rtl/generators/**/*.fir.mlir
+
 # Conformance tests
 **/reference_signatures/
 **/riscof_work/

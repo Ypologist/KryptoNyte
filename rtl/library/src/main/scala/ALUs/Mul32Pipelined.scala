@@ -56,6 +56,67 @@ class Mul32Pipelined(val numCycles: Int = 3) extends Module {
   private def sum64(values: Seq[UInt]): UInt =
     values.reduce((lhs, rhs) => (lhs +& rhs)(63, 0))
 
+  private def prefixAdd64(lhs: UInt, rhs: UInt, carryIn: Bool): UInt = {
+    val width = 64
+    val bitPropagate = Seq.tabulate(width)(idx => lhs(idx) ^ rhs(idx))
+
+    var groupPropagate = bitPropagate
+    var groupGenerate = Seq.tabulate(width)(idx => lhs(idx) && rhs(idx))
+    var distance = 1
+    while (distance < width) {
+      val prevPropagate = groupPropagate
+      val prevGenerate = groupGenerate
+      groupPropagate = Seq.tabulate(width) { idx =>
+        if (idx >= distance) prevPropagate(idx) && prevPropagate(idx - distance) else prevPropagate(idx)
+      }
+      groupGenerate = Seq.tabulate(width) { idx =>
+        if (idx >= distance) prevGenerate(idx) || (prevPropagate(idx) && prevGenerate(idx - distance)) else prevGenerate(idx)
+      }
+      distance *= 2
+    }
+
+    val carries = Seq.tabulate(width + 1) { idx =>
+      if (idx == 0) carryIn else groupGenerate(idx - 1) || (groupPropagate(idx - 1) && carryIn)
+    }
+    Cat((0 until width).reverse.map(idx => bitPropagate(idx) ^ carries(idx)))
+  }
+
+  private def balancedAnd(bits: Seq[Bool]): Bool = {
+    if (bits.isEmpty) {
+      true.B
+    } else if (bits.length == 1) {
+      bits.head
+    } else {
+      val split = bits.length / 2
+      balancedAnd(bits.take(split)) && balancedAnd(bits.drop(split))
+    }
+  }
+
+  private def twosComplement64(value: UInt): UInt = {
+    val segmentWidth = 8
+    val numSegments = 64 / segmentWidth
+    val segmentIsZero = Wire(Vec(numSegments, Bool()))
+    val negatedSegments = Wire(Vec(numSegments, UInt(segmentWidth.W)))
+
+    for (idx <- 0 until numSegments) {
+      val lo = idx * segmentWidth
+      val hi = lo + segmentWidth - 1
+      val segment = value(hi, lo)
+      segmentIsZero(idx) := segment === 0.U
+    }
+
+    for (idx <- 0 until numSegments) {
+      val lo = idx * segmentWidth
+      val hi = lo + segmentWidth - 1
+      val segment = value(hi, lo)
+      val carryIn = if (idx == 0) true.B else balancedAnd((0 until idx).map(segmentIsZero(_)))
+      val segmentSum = Cat(0.U(1.W), (~segment).asUInt) + carryIn.asUInt
+      negatedSegments(idx) := segmentSum(segmentWidth - 1, 0)
+    }
+
+    Cat((0 until numSegments).reverse.map(idx => negatedSegments(idx)))
+  }
+
   val s3Low = RegNext(sum64(Seq(
     shifted64(s2Diagonal(0), 0),
     shifted64(s2Diagonal(1), 8),
@@ -69,10 +130,11 @@ class Mul32Pipelined(val numCycles: Int = 3) extends Module {
   )))
   val s3Negative = RegNext(s2Negative)
 
-  val s4Magnitude = RegNext((s3Low +& s3High)(63, 0))
+  val s4Magnitude = RegNext(prefixAdd64(s3Low, s3High, false.B))
   val s4Negative = RegNext(s3Negative)
 
-  val s5Product = RegNext(Mux(s4Negative, (~s4Magnitude).asUInt + 1.U, s4Magnitude))
+  val s4TwosComplement = twosComplement64(s4Magnitude)
+  val s5Product = RegNext(Mux(s4Negative, s4TwosComplement, s4Magnitude))
   val delayedProd = ShiftRegister(s5Product, numCycles - 6)
 
   io.product := delayedProd
